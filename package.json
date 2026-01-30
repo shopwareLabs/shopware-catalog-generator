@@ -1,32 +1,55 @@
 {
     "name": "shopware-data-generator",
+    "version": "2.0.0",
+    "private": true,
     "description": "A tool to create AI-generated demo data for Shopware",
     "author": "Philipp Schuch",
-    "version": "1.0.0",
-    "private": true,
-    "type": "module",
-    "main": "dist/main.js",
     "files": [
         "dist"
     ],
+    "type": "module",
+    "main": "dist/main.js",
     "scripts": {
-        "build": "npm run format && tsc --build",
-        "format": "prettier --write .",
-        "check-format": "prettier --check .",
-        "generate": "node --env-file=.env dist/main.js",
-        "server": "node --env-file=.env dist/server.js"
+        "build": "bun run lint && bun run format && bun build ./src/main.ts --outdir=dist --target=bun",
+        "dev": "bun run --watch src/main.ts",
+        "typecheck": "tsc --noEmit",
+        "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
+        "typecheck:all": "bun run typecheck && bun run typecheck:tests",
+        "lint": "bun run format:trim && oxlint --fix && bun run typecheck:all && bun run lint:dead",
+        "lint:dead": "knip",
+        "format": "oxfmt --write . && bun run format:trim",
+        "format:trim": "find src tests -type f \\( -name '*.ts' -o -name '*.md' \\) -exec sed -i 's/[[:space:]]*$//' {} + && sed -i 's/[[:space:]]*$//' *.md 2>/dev/null || true",
+        "check-format": "oxfmt --check .",
+        "blueprint": "bun run src/main.ts blueprint",
+        "generate": "bun run src/main.ts generate",
+        "process": "bun run src/main.ts process",
+        "server": "bun run src/server.ts",
+        "cache:list": "bun run src/cache-cli.ts list",
+        "cache:clear": "bun run src/cache-cli.ts clear",
+        "cache:trash": "bun run src/cache-cli.ts trash",
+        "cache:restore": "bun run src/cache-cli.ts restore",
+        "cache:empty-trash": "bun run src/cache-cli.ts empty-trash",
+        "logs:clear": "rm -rf logs/",
+        "cleanup": "bun run src/cleanup-cli.ts",
+        "cleanup:props": "bun run src/cleanup-cli.ts --all-props",
+        "cleanup:media": "bun run src/cleanup-cli.ts --orphaned-media",
+        "test": "bun test",
+        "test:watch": "bun test --watch",
+        "test:coverage": "bun test --coverage",
+        "test:e2e": "./test-e2e.sh",
+        "test:verify": "bun run tests/e2e/verify.ts",
+        "migrate:variants": "bun run src/migrate-variants.ts"
     },
     "dependencies": {
+        "@shopware/api-client": "^1.4.0",
         "openai": "4.92.1",
-        "axios": "1.8.4",
-        "express": "4.21.2",
         "zod": "3.24.2"
     },
     "devDependencies": {
-        "typescript": "^5.8.2",
-        "prettier": "^3.5.3",
-        "@types/express": "^5.0.0",
-        "@types/node": "^22.13.10",
-        "@arethetypeswrong/cli": "^0.17.4"
+        "@types/bun": "latest",
+        "knip": "^5.82.1",
+        "oxfmt": "^0.24.0",
+        "oxlint": "^0.16.0",
+        "typescript": "^5.8.2"
     }
 }

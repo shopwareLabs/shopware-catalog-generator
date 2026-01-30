@@ -16,11 +16,15 @@
         "strict": true,
         "noUncheckedIndexedAccess": true,
         "noImplicitOverride": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
 
         "module": "NodeNext",
         "sourceMap": true,
 
         "declaration": true,
         "declarationMap": true
-    }
+    },
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist", "tests"]
 }

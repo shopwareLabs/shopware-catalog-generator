@@ -1,70 +1,248 @@
-# AI Data Generator
+# Shopware Catalog Generator
 
-The data generator is a tool to create synthetic demo data with the help of AI and hydrate a Shopware environment with it. It uses OpenAI to create product information, product images, reviews, and property groups. You can provide a category name for which type of industry you want to create products. The generator will create a new category within your Shopware instance with the generated products. The products are also assigned to the main category of your instance and assigned to the standard sales channel. If you generate more than once with the same category, the products are automatically added to the existing category.
+Generate synthetic demo data with AI and hydrate your Shopware environment. Creates SalesChannels with category trees, products, descriptions, images, reviews, and properties.
 
-## Setup
+> **Architecture details:** See [CONCEPTS.md](CONCEPTS.md) for diagrams and in-depth explanations.
 
-Create an `.env` file to configure the necessary API keys.
+## Quick Start
 
-```
-OPENAI_API_KEY = <your-api-key-from-open-ai>
-```
-
-Install the dependencies and run the build process.
-
-```
-npm install
+```bash
+bun install
+bun run build
 ```
 
-```
-npm run build
-```
+Create `.env` file:
 
-## Usage via CLI
-
-You can run the generator via the CLI. Make sure to set up your environment information first via `.env` variables.
-
-```
-SW_ENV_URL = <the-url-of-your-shopware-env>
-SW_CLIENT_ID = <the-client-id-from-your-env>
-SW_CLIENT_SECRET = <the-secret-key-from-your-env>
+```env
+AI_PROVIDER=pollinations
+SW_ENV_URL=http://localhost:8000
 ```
 
-If you don't provide these information, the generator will automatically use a fallback to a standard dev environment setting under `http://localhost:8000` and the standard development credentials.
+Generate products:
 
-You can then generate products simply calling the following command, including the type of products you want to generate with the `category` parameter.
-
-```
-npm run generate --category="furniture"
+```bash
+bun run generate --name=furniture --description="Selling wood furniture like beds, tables and chairs."
 ```
 
-## Usage via Server
+## Provider Options
 
-The data generator can be used as a service to hydrate different environments via server request. To run the server you can call the following command:
+| Provider        | API Key  | Images | Parallel        | Best For                 |
+| --------------- | -------- | ------ | --------------- | ------------------------ |
+| `pollinations`  | Optional | Free   | With `sk_*` key | Testing, demos (default) |
+| `github-models` | Required | Free   | Limited (2x)    | GitHub/Copilot users     |
+| `openai`        | Required | Paid   | Yes (5x)        | Production, high volume  |
 
+### Configuration
+
+```env
+# Free tier (Pollinations) - no API key needed, sequential processing
+AI_PROVIDER=pollinations
+
+# Pollinations with secret key - parallel processing, no rate limits
+# Get key at enter.pollinations.ai
+AI_PROVIDER=pollinations
+AI_API_KEY=sk_your_pollinations_secret_key
+
+# GitHub Models + free images (limited parallelism)
+AI_PROVIDER=github-models
+AI_API_KEY=ghp_your_github_token
+
+# OpenAI (full parallel processing)
+AI_PROVIDER=openai
+AI_API_KEY=sk-your-openai-key
 ```
-npm run server
+
+**Optional settings:**
+
+```env
+AI_MODEL=gpt-4o              # Override text model
+IMAGE_PROVIDER=none          # Disable images
+IMAGE_MODEL=turbo            # Pollinations: flux (default), turbo (fast), klein (quality)
 ```
 
-By default, the server will spawn on the port `3000`. You can configure the port with the env variable `SERVER_PORT`.
+## CLI Reference
 
-For generating data via the server you can fire a `post` request to its only route `/generate`. The following request parameters should be sent via `json` body.
+### Generate
 
-```JSON
-{
+```bash
+# Basic usage (90 products across categories)
+bun run generate --name=furniture --description="Wood furniture store"
+
+# Custom product count
+bun run generate --name=electronics --description="Consumer electronics" --products=50
+```
+
+| Flag            | Description                                  |
+| --------------- | -------------------------------------------- |
+| `--name`        | SalesChannel name (required)                 |
+| `--description` | Context for AI generation                    |
+| `--products`    | Number of products to generate (default: 90) |
+| `--only`        | Post-processors to run (comma-separated)     |
+| `--dry-run`     | Preview actions without making changes       |
+
+### Blueprint Workflow
+
+For more control, run the pipeline phases separately:
+
+```bash
+# Phase 1: Create structure (instant, no AI)
+bun run blueprint create --name=furniture --description="Wood furniture store"
+
+# Phase 2: Fill with AI content
+bun run blueprint hydrate --name=furniture
+
+# Phase 3: Upload to Shopware
+bun run generate --name=furniture
+```
+
+### Post-Processors
+
+Run specific post-processors after upload:
+
+```bash
+bun run process --name=furniture --only=images,reviews
+bun run process --name=furniture --dry-run
+```
+
+| Processor       | Description                               |
+| --------------- | ----------------------------------------- |
+| `cms`           | CMS landing pages (Video Elements demo)  |
+| `images`        | Product and category images               |
+| `manufacturers` | Fictional manufacturer creation           |
+| `reviews`       | Product reviews (0-10 per product)        |
+| `variants`      | Variant product creation                  |
+
+### Cleanup
+
+Remove data from Shopware (local cache preserved):
+
+```bash
+# Core cleanup
+bun run cleanup -- --salesChannel="furniture"           # Products + categories
+bun run cleanup -- --salesChannel="furniture" --props   # Also property groups
+bun run cleanup -- --salesChannel="furniture" --delete  # Also SalesChannel
+
+# Processor-specific
+bun run cleanup -- --salesChannel="furniture" --processors=cms
+bun run cleanup -- --salesChannel="furniture" --processors=all
+
+# Full cleanup
+bun run cleanup -- --salesChannel="furniture" --full --delete
+```
+
+### Cache Management
+
+Local files in `generated/`:
+
+```bash
+bun run cache:list                    # Show cached SalesChannels
+bun run cache:clear                   # Move all to trash
+bun run cache:clear -- furniture      # Move specific to trash
+bun run cache:trash                   # List trash
+bun run cache:restore -- <item>       # Restore from trash
+bun run cache:empty-trash             # Permanently delete
+```
+
+## Shopware Connection
+
+```env
+SW_ENV_URL=http://localhost:8000
+SW_CLIENT_ID=your-client-id
+SW_CLIENT_SECRET=your-client-secret
+```
+
+## Server Mode
+
+Run as a service with background processing:
+
+```bash
+bun run server
+```
+
+| Method | Endpoint         | Description                              |
+| ------ | ---------------- | ---------------------------------------- |
+| POST   | `/generate`      | Start generation (returns process ID)    |
+| GET    | `/status/:id`    | Poll process status, progress, and logs  |
+| GET    | `/health`        | Health check and active process count    |
+
+### Background Processing
+
+The server runs generation tasks in the background:
+
+```bash
+# Start generation
+curl -X POST http://localhost:3000/generate \
+  -H "Content-Type: application/json" \
+  -d '{
     "envPath": "http://localhost:8000",
+    "salesChannel": "furniture",
+    "description": "Wood furniture store",
     "shopwareUser": "admin",
-    "shopwarePassword": "shopware",
-    "category": "photography",
-    "productCount": 10,
-    "salesChannel": "Storefront", // optional
-    "additionalInformation": "Optional additional context that is incorporated into the description and image" // optional
-}
+    "shopwarePassword": "shopware"
+  }'
+# Returns: { "processId": "proc_xxx", "statusUrl": "/status/proc_xxx" }
+
+# Poll status
+curl http://localhost:3000/status/proc_xxx
+# Returns: { "status": "running", "progress": {...}, "logs": [...] }
 ```
 
-You can specify the environment that should be hydrated including the authentication credentials. In addition, you can specify the category and the number of products that should be generated. The number of products is optional. It is recommended to not generate more than 10 products per request as the creation of the images can take some time. You can split it into several requests to hydrate the same category multiple times.
+**Generate options:**
 
-Optional fields:
+| Field            | Description                              | Default |
+| ---------------- | ---------------------------------------- | ------- |
+| `envPath`        | Shopware URL (required)                  | -       |
+| `salesChannel`   | SalesChannel name (required)             | -       |
+| `description`    | Context for AI generation                | "{name} webshop" |
+| `productCount`   | Number of products                       | 90      |
+| `shopwareUser`   | Shopware admin username                  | -       |
+| `shopwarePassword` | Shopware admin password                | -       |
+| `skipProcessors` | Skip post-processors after sync          | false   |
 
-- `salesChannel`: Name of the sales channel to assign visibility (default: `Storefront`).
-- `additionalInformation`: Additional free-text context that will be incorporated into both the product description prompt and the image generation prompt.
+## Performance
+
+Expected times for 90 products:
+
+| Provider      | Processing    | Time    |
+| ------------- | ------------- | ------- |
+| OpenAI        | Parallel (5x) | ~5 min  |
+| Pollinations  | Parallel (5x) | ~5 min  |
+| GitHub Models | Limited (2x)  | ~10 min |
+| Pollinations  | Sequential    | ~13 min |
+
+## Testing
+
+```bash
+bun test              # Run all tests
+bun test --watch      # Watch mode
+bun test --coverage   # With coverage
+```
+
+## Development
+
+```bash
+bun run dev           # Watch mode
+bun run lint          # Lint + typecheck
+bun run format        # Format code
+bun run build         # Build
+```
+
+## Extending
+
+See [AGENTS.md](AGENTS.md) for developer documentation:
+
+- Adding post-processors
+- Adding AI providers
+- Adding CMS fixtures
+
+## Catalog Templates
+
+Pre-generated templates available at:
+
+> **[github.com/shopwareLabs/shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**
+
+Ready-to-use SalesChannel configurations without running AI generation.
+
+## License
+
+MIT

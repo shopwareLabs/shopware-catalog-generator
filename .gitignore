@@ -1,5 +1,7 @@
 node_modules/
 generatedImages/
+generated/
+logs/
 dist/
 /.idea/
 /.fleet/

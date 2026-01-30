@@ -1,0 +1,338 @@
+#!/usr/bin/env bun
+/**
+ * E2E Verification Script
+ *
+ * Verifies that generated data exists in Shopware:
+ * - SalesChannel exists
+ * - Categories exist (no placeholders)
+ * - Products exist (no placeholders)
+ * - Manufacturers exist (if generated)
+ */
+
+import type { ShopwareClient } from "../../src/shopware/client.js";
+import { DataHydrator } from "../../src/shopware/index.js";
+import { isPlaceholder } from "../../src/utils/index.js";
+
+interface VerificationResult {
+    salesChannel: { found: boolean; id?: string; navigationCategoryId?: string };
+    categories: { count: number; expected: number; placeholders: string[] };
+    products: { count: number; expected: number; placeholders: string[] };
+    propertyGroups: { count: number; productsWithProperties: number };
+    manufacturers: { count: number };
+    images: { productsWithImages: number; totalProducts: number };
+    passed: boolean;
+    errors: string[];
+}
+
+interface SearchResponse {
+    total: number;
+    data?: Array<{ name?: string; translated?: { name?: string } }>;
+}
+
+async function verifyGeneration(salesChannelName: string): Promise<VerificationResult> {
+    const result: VerificationResult = {
+        salesChannel: { found: false },
+        categories: { count: 0, expected: 3, placeholders: [] },
+        products: { count: 0, expected: 90, placeholders: [] },
+        propertyGroups: { count: 0, productsWithProperties: 0 },
+        manufacturers: { count: 0 },
+        images: { productsWithImages: 0, totalProducts: 0 },
+        passed: false,
+        errors: [],
+    };
+
+    // Connect to Shopware
+    const swEnvUrl = process.env.SW_ENV_URL;
+    if (!swEnvUrl) {
+        result.errors.push("SW_ENV_URL not set");
+        return result;
+    }
+
+    const hydrator = new DataHydrator();
+    try {
+        await hydrator.authenticateWithClientCredentials(
+            swEnvUrl,
+            process.env.SW_CLIENT_ID,
+            process.env.SW_CLIENT_SECRET
+        );
+    } catch (error) {
+        result.errors.push(
+            `Failed to authenticate: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return result;
+    }
+
+    // Verify SalesChannel
+    console.log(`Verifying SalesChannel "${salesChannelName}"...`);
+    const salesChannel = await hydrator.findSalesChannelByName(salesChannelName);
+
+    if (!salesChannel) {
+        result.errors.push(`SalesChannel "${salesChannelName}" not found`);
+        return result;
+    }
+
+    result.salesChannel = {
+        found: true,
+        id: salesChannel.id,
+        navigationCategoryId: salesChannel.navigationCategoryId,
+    };
+    console.log(`  ✓ SalesChannel: ${salesChannel.id}`);
+    console.log(`  ✓ Navigation Category: ${salesChannel.navigationCategoryId}`);
+
+    // Get the API client from the hydrator
+    const client = hydrator as unknown as ShopwareClient;
+
+    // Verify categories - count all categories under the navigation root
+    // Note: Shopware API requires higher limit to get accurate total count
+    console.log(`Verifying categories...`);
+    try {
+        const categoryResponse = await client.apiClient.post<SearchResponse>("search/category", {
+            limit: 500,
+            filter: [
+                {
+                    type: "contains",
+                    field: "path",
+                    value: salesChannel.navigationCategoryId,
+                },
+            ],
+        });
+
+        result.categories.count = categoryResponse.data?.total || 0;
+        console.log(`  Found ${result.categories.count} categories under root`);
+
+        // Check for placeholder names
+        if (categoryResponse.data?.data) {
+            for (const cat of categoryResponse.data.data) {
+                const name = cat.translated?.name || cat.name || "";
+                if (isPlaceholder(name)) {
+                    result.categories.placeholders.push(name);
+                }
+            }
+        }
+
+        if (result.categories.count < result.categories.expected) {
+            result.errors.push(
+                `Expected at least ${result.categories.expected} categories, found ${result.categories.count}`
+            );
+        } else {
+            console.log(`  ✓ Categories: ${result.categories.count}`);
+        }
+
+        if (result.categories.placeholders.length > 0) {
+            console.log(
+                `  ✗ Found ${result.categories.placeholders.length} placeholder categories`
+            );
+            result.errors.push(
+                `Found ${result.categories.placeholders.length} placeholder category names: ${result.categories.placeholders.slice(0, 5).join(", ")}${result.categories.placeholders.length > 5 ? "..." : ""}`
+            );
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Category query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+        result.errors.push(
+            `Category query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify products - count products visible in this SalesChannel
+    console.log(`Verifying products...`);
+    try {
+        const productResponse = await client.apiClient.post<SearchResponse>("search/product", {
+            limit: 500,
+            filter: [
+                {
+                    type: "equals",
+                    field: "visibilities.salesChannelId",
+                    value: salesChannel.id,
+                },
+            ],
+        });
+
+        result.products.count = productResponse.data?.total || 0;
+        console.log(`  Found ${result.products.count} products in SalesChannel`);
+
+        // Check for placeholder names
+        if (productResponse.data?.data) {
+            for (const prod of productResponse.data.data) {
+                const name = prod.translated?.name || prod.name || "";
+                if (isPlaceholder(name)) {
+                    result.products.placeholders.push(name);
+                }
+            }
+        }
+
+        if (result.products.count < result.products.expected) {
+            result.errors.push(
+                `Expected at least ${result.products.expected} products, found ${result.products.count}`
+            );
+        } else {
+            console.log(`  ✓ Products: ${result.products.count}`);
+        }
+
+        if (result.products.placeholders.length > 0) {
+            console.log(`  ✗ Found ${result.products.placeholders.length} placeholder products`);
+            result.errors.push(
+                `Found ${result.products.placeholders.length} placeholder product names: ${result.products.placeholders.slice(0, 5).join(", ")}${result.products.placeholders.length > 5 ? "..." : ""}`
+            );
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Product query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+        result.errors.push(
+            `Product query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify manufacturers (just count total, as they're global)
+    console.log(`Verifying manufacturers...`);
+    try {
+        const manufacturerResponse = await client.apiClient.post<SearchResponse>(
+            "search/product-manufacturer",
+            {
+                limit: 500,
+            }
+        );
+
+        result.manufacturers.count = manufacturerResponse.data?.total || 0;
+        console.log(`  ✓ Manufacturers: ${result.manufacturers.count}`);
+    } catch (error) {
+        console.log(
+            `  ✗ Manufacturer query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify property groups
+    console.log(`Verifying property groups...`);
+    try {
+        const propertyResponse = await client.apiClient.post<SearchResponse>(
+            "search/property-group",
+            {
+                limit: 500,
+            }
+        );
+
+        result.propertyGroups.count = propertyResponse.data?.total || 0;
+        console.log(`  ✓ Property groups: ${result.propertyGroups.count}`);
+
+        // Check how many products have properties assigned
+        interface ProductWithProps {
+            properties?: Array<{ id: string }>;
+        }
+        const productsWithPropsResponse = await client.apiClient.post<{
+            total: number;
+            data: ProductWithProps[];
+        }>("search/product", {
+            limit: 500,
+            filter: [
+                { type: "equals", field: "visibilities.salesChannelId", value: salesChannel.id },
+            ],
+            associations: { properties: {} },
+        });
+
+        const productsWithProps = (productsWithPropsResponse.data?.data || []).filter(
+            (p) => p.properties && p.properties.length > 0
+        ).length;
+        result.propertyGroups.productsWithProperties = productsWithProps;
+        console.log(`  ✓ Products with properties: ${productsWithProps}/${result.products.count}`);
+    } catch (error) {
+        console.log(
+            `  ✗ Property query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify product images
+    console.log(`Verifying images...`);
+    try {
+        interface ProductWithMedia {
+            id: string;
+            coverId?: string | null;
+            media?: Array<{ id: string }>;
+        }
+        const productsWithMediaResponse = await client.apiClient.post<{
+            total: number;
+            data: ProductWithMedia[];
+        }>("search/product", {
+            limit: 500,
+            filter: [
+                { type: "equals", field: "visibilities.salesChannelId", value: salesChannel.id },
+            ],
+            associations: { media: {} },
+        });
+
+        const totalProducts = productsWithMediaResponse.data?.total || 0;
+        const productsWithImages = (productsWithMediaResponse.data?.data || []).filter(
+            (p) => (p.media && p.media.length > 0) || p.coverId
+        ).length;
+
+        result.images.totalProducts = totalProducts;
+        result.images.productsWithImages = productsWithImages;
+        console.log(`  ✓ Products with images: ${productsWithImages}/${totalProducts}`);
+    } catch (error) {
+        console.log(
+            `  ✗ Image query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Overall pass/fail
+    result.passed = result.errors.length === 0;
+
+    return result;
+}
+
+// CLI entry point
+async function main(): Promise<void> {
+    const args = process.argv.slice(2);
+    let salesChannelName: string | undefined;
+
+    for (const arg of args) {
+        if (arg.startsWith("--name=")) {
+            salesChannelName = arg.slice("--name=".length);
+        }
+    }
+
+    if (!salesChannelName) {
+        console.error("Error: --name=<salesChannel> is required");
+        console.error("Usage: bun run tests/e2e/verify.ts --name=<salesChannel>");
+        process.exit(1);
+    }
+
+    console.log("");
+    console.log("=== E2E Verification ===");
+    console.log("");
+
+    const result = await verifyGeneration(salesChannelName);
+
+    console.log("");
+
+    if (result.passed) {
+        console.log("=== All verifications PASSED ===");
+        console.log("");
+        console.log(`Summary:`);
+        console.log(`  SalesChannel: ${result.salesChannel.id}`);
+        console.log(
+            `  Categories: ${result.categories.count} (${result.categories.placeholders.length} placeholders)`
+        );
+        console.log(
+            `  Products: ${result.products.count} (${result.products.placeholders.length} placeholders)`
+        );
+        console.log(
+            `  Property groups: ${result.propertyGroups.count} (${result.propertyGroups.productsWithProperties} products with properties)`
+        );
+        console.log(`  Manufacturers: ${result.manufacturers.count}`);
+        console.log(
+            `  Images: ${result.images.productsWithImages}/${result.images.totalProducts} products with images`
+        );
+        process.exit(0);
+    } else {
+        console.log("=== Verification FAILED ===");
+        console.log("");
+        for (const error of result.errors) {
+            console.error(`  ✗ ${error}`);
+        }
+        process.exit(1);
+    }
+}
+
+main();
