@@ -7,7 +7,15 @@
  * 3. Sets cover image and gallery images
  */
 
-import { buildImagePrompt, ConcurrencyLimiter, executeWithRetry, logger } from "../utils/index.js";
+import {
+    apiPost,
+    apiUpload,
+    buildImagePrompt,
+    ConcurrencyLimiter,
+    executeWithRetry,
+    generateUUID,
+    logger,
+} from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -238,8 +246,8 @@ class ImageProcessorImpl implements PostProcessor {
                     );
                     if (cachedImage) {
                         mediaToUpload.push({
-                            mediaId: this.generateUUID(),
-                            productMediaId: this.generateUUID(),
+                            mediaId: generateUUID(),
+                            productMediaId: generateUUID(),
                             view: desc.view,
                             base64Data: cachedImage,
                         });
@@ -398,7 +406,7 @@ class ImageProcessorImpl implements PostProcessor {
                 ...(mediaFolderId && { mediaFolderId }),
             }));
 
-            const mediaResponse = await this.apiPost(context, "_action/sync", {
+            const mediaResponse = await apiPost(context, "_action/sync", {
                 createMedia: {
                     entity: "media",
                     action: "upsert",
@@ -435,7 +443,7 @@ class ImageProcessorImpl implements PostProcessor {
         };
 
         // Sync product_media relations and cover
-        const syncResponse = await this.apiPost(context, "_action/sync", {
+        const syncResponse = await apiPost(context, "_action/sync", {
             createProductMedia: {
                 entity: "product_media",
                 action: "upsert",
@@ -468,7 +476,7 @@ class ImageProcessorImpl implements PostProcessor {
             // Detect image format from magic bytes
             const format = this.detectImageFormat(imageBuffer);
 
-            const uploadResponse = await this.apiUpload(
+            const uploadResponse = await apiUpload(
                 context,
                 `_action/media/${img.mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`,
                 imageBuffer,
@@ -532,7 +540,7 @@ class ImageProcessorImpl implements PostProcessor {
                     media?: Array<{ id: string }>;
                 }>;
             }
-            const response = await this.apiPost(context, "search/product", {
+            const response = await apiPost(context, "search/product", {
                 ids: [productId],
                 associations: { media: {} },
             });
@@ -572,7 +580,7 @@ class ImageProcessorImpl implements PostProcessor {
             interface MediaSearchResponse {
                 data?: Array<{ id: string }>;
             }
-            const response = await this.apiPost(context, "search/media", {
+            const response = await apiPost(context, "search/media", {
                 filter: [{ type: "equals", field: "fileName", value: fileName }],
                 limit: 1,
             });
@@ -601,7 +609,7 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         try {
-            const response = await this.apiPost(context, "search/media-folder", {
+            const response = await apiPost(context, "search/media-folder", {
                 filter: [{ type: "equals", field: "name", value: "Product Media" }],
                 limit: 1,
             });
@@ -635,7 +643,7 @@ class ImageProcessorImpl implements PostProcessor {
 
         try {
             // First try to find the default folder for categories
-            const defaultFolderResponse = await this.apiPost(
+            const defaultFolderResponse = await apiPost(
                 context,
                 "search/media-default-folder",
                 {
@@ -657,7 +665,7 @@ class ImageProcessorImpl implements PostProcessor {
             }
 
             // Fallback: search for folder by name
-            const response = await this.apiPost(context, "search/media-folder", {
+            const response = await apiPost(context, "search/media-folder", {
                 filter: [{ type: "equals", field: "name", value: "Category Media" }],
                 limit: 1,
             });
@@ -695,7 +703,7 @@ class ImageProcessorImpl implements PostProcessor {
             interface CategoryResponse {
                 data?: Array<{ id: string; mediaId?: string | null }>;
             }
-            const response = await this.apiPost(context, "search/category", {
+            const response = await apiPost(context, "search/category", {
                 ids: [categoryId],
                 includes: { category: ["id", "mediaId"] },
             });
@@ -745,10 +753,10 @@ class ImageProcessorImpl implements PostProcessor {
             isExistingMedia = true;
         } else {
             // Create new media entity
-            mediaId = this.generateUUID();
+            mediaId = generateUUID();
             const mediaFolderId = await this.getCategoryMediaFolderId(context);
 
-            const createMediaResponse = await this.apiPost(context, "_action/sync", {
+            const createMediaResponse = await apiPost(context, "_action/sync", {
                 createMedia: {
                     entity: "media",
                     action: "upsert",
@@ -779,7 +787,7 @@ class ImageProcessorImpl implements PostProcessor {
             const imageBuffer = Buffer.from(base64Data, "base64");
             const format = this.detectImageFormat(imageBuffer);
 
-            const uploadResponse = await this.apiUpload(
+            const uploadResponse = await apiUpload(
                 context,
                 `_action/media/${mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`,
                 imageBuffer,
@@ -801,7 +809,7 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         // Update category with the media ID
-        const updateResponse = await this.apiPost(context, "_action/sync", {
+        const updateResponse = await apiPost(context, "_action/sync", {
             updateCategory: {
                 entity: "category",
                 action: "upsert",
@@ -860,94 +868,11 @@ class ImageProcessorImpl implements PostProcessor {
         return { extension: "jpg", mimeType: "image/jpeg" };
     }
 
-    private generateUUID(): string {
-        const hex = "0123456789abcdef";
-        let uuid = "";
-        for (let i = 0; i < 32; i++) {
-            uuid += hex[Math.floor(Math.random() * 16)];
-        }
-        return uuid;
-    }
-
     /**
      * Truncate name for cleaner log output
      */
     private truncateName(name: string, maxLength = 30): string {
         return name.length > maxLength ? `${name.slice(0, maxLength)}...` : name;
-    }
-
-    /**
-     * Make API POST request
-     * Uses context.api if available, falls back to raw fetch for backwards compatibility
-     */
-    private async apiPost(
-        context: PostProcessorContext,
-        endpoint: string,
-        body: unknown
-    ): Promise<Response> {
-        // Use context.api if available
-        if (context.api) {
-            const result = await context.api.post(endpoint, body);
-            // Create a Response-like object for compatibility
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(body),
-        });
-    }
-
-    /**
-     * Upload file to API
-     * Uses context.api.postRaw if available, falls back to raw fetch for backwards compatibility
-     */
-    private async apiUpload(
-        context: PostProcessorContext,
-        endpoint: string,
-        buffer: Buffer,
-        contentType: string
-    ): Promise<Response> {
-        // Use context.api.postRaw if available
-        if (context.api) {
-            try {
-                await context.api.postRaw(endpoint, buffer, { "Content-Type": contentType });
-                // Create a successful Response for compatibility
-                return new Response(null, {
-                    status: 204,
-                    headers: { "Content-Type": contentType },
-                });
-            } catch (error) {
-                // Create an error Response for compatibility
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                return new Response(errorMessage, {
-                    status: 500,
-                    headers: { "Content-Type": "text/plain" },
-                });
-            }
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": contentType,
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: buffer,
-        });
     }
 
     /**

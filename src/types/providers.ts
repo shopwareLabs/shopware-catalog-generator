@@ -99,7 +99,7 @@ export const PROVIDER_DEFAULTS: Record<
 > = {
     openai: {
         textModel: "gpt-4.1-2025-04-14",
-        imageModel: "gpt-image-1",
+        imageModel: "gpt-image-1.5",
         supportsImages: true,
         isSequential: false,
         requiresApiKey: true,

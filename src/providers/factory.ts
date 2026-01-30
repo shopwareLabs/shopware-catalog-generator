@@ -115,7 +115,7 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
                 );
                 return new PollinationsImageProvider();
             }
-            const model = config.imageModel || "gpt-image-1";
+            const model = config.imageModel || "gpt-image-1.5";
             return new OpenAIImageProvider(apiKey, model);
         }
 

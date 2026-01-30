@@ -458,7 +458,7 @@ The generator supports multiple AI providers with a unified interface.
 ├─────────────────┬─────────────────────┬─────────────────────────────────────┤
 │    PROVIDER     │   TEXT GENERATION   │   IMAGE GENERATION                  │
 ├─────────────────┼─────────────────────┼─────────────────────────────────────┤
-│  OpenAI         │   GPT-4o            │   DALL-E 3                          │
+│  OpenAI         │   GPT-4o            │   GPT Image 1.5                     │
 │                 │   Parallel (5x)     │   Paid                              │
 ├─────────────────┼─────────────────────┼─────────────────────────────────────┤
 │  GitHub Models  │   GPT-4o (Azure)    │   Uses Pollinations                 │

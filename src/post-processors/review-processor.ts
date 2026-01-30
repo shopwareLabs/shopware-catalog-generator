@@ -13,7 +13,7 @@
  */
 
 import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
-import { logger } from "../utils/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -77,7 +77,7 @@ class ReviewProcessorImpl implements PostProcessor {
 
                 // Create reviews in Shopware
                 const reviewPayload = reviews.map((review) => ({
-                    id: context.api?.createUUID() || this.generateUUID(),
+                    id: generateUUID(),
                     productId: product.id,
                     salesChannelId: context.salesChannelId,
                     title: review.title,
@@ -101,7 +101,7 @@ class ReviewProcessorImpl implements PostProcessor {
                             });
                         } else {
                             // Fallback to legacy method
-                            const response = await this.apiPost(context, "_action/sync", {
+                            const response = await apiPost(context, "_action/sync", {
                                 createReviews: {
                                     entity: "product_review",
                                     action: "upsert",
@@ -294,7 +294,7 @@ class ReviewProcessorImpl implements PostProcessor {
                 total?: number;
             }
 
-            const response = await this.apiPost(context, "search/product-review", {
+            const response = await apiPost(context, "search/product-review", {
                 filter: [{ type: "equals", field: "productId", value: productId }],
                 limit: 1,
                 includes: { product_review: ["id"] },
@@ -314,46 +314,6 @@ class ReviewProcessorImpl implements PostProcessor {
         return false;
     }
 
-    private generateUUID(): string {
-        const hex = "0123456789abcdef";
-        let uuid = "";
-        for (let i = 0; i < 32; i++) {
-            uuid += hex[Math.floor(Math.random() * 16)];
-        }
-        return uuid;
-    }
-
-    /**
-     * Make API POST request
-     * Uses context.api if available, falls back to raw fetch for backwards compatibility
-     */
-    private async apiPost(
-        context: PostProcessorContext,
-        endpoint: string,
-        body: unknown
-    ): Promise<Response> {
-        // Use context.api if available
-        if (context.api) {
-            const result = await context.api.post(endpoint, body);
-            // Create a Response-like object for compatibility
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(body),
-        });
-    }
 }
 
 /** Review processor singleton */

@@ -67,6 +67,9 @@ export {
     isRateLimitError,
     sleep,
 } from "./retry.js";
+// Shopware request utilities
+export type { ShopwareRequestContext } from "./shopware-request.js";
+export { apiPost, apiUpload } from "./shopware-request.js";
 // String utilities
 export {
     capitalizeString,
@@ -79,5 +82,7 @@ export {
     stripHtml,
     toKebabCase,
 } from "./strings.js";
+// UUID utilities
+export { generateAccessKey, generateUUID } from "./uuid.js";
 export type { SubdomainValidationResult } from "./validation.js";
 export { generateSubdomainUrl, isValidSubdomain, validateSubdomainName } from "./validation.js";

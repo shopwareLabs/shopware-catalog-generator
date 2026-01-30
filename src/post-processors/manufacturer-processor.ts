@@ -7,7 +7,7 @@
  * 4. Assigns manufacturers to products
  */
 
-import { logger } from "../utils/index.js";
+import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -102,9 +102,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
                 continue;
             }
 
-            const id = this.generateUUID();
+            const id = generateUUID();
             const description = `${name} is a trusted manufacturer of quality products.`;
-            const link = `https://www.${this.slugify(name)}.com`;
+            const link = `https://www.${toKebabCase(name)}.com`;
 
             manufacturersToCreate.push({ id, name, description, link });
             manufacturerIdMap.set(name, id);
@@ -115,7 +115,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
         // Create in Shopware
         if (manufacturersToCreate.length > 0) {
             try {
-                const response = await this.apiPost(context, "_action/sync", {
+                const response = await apiPost(context, "_action/sync", {
                     createManufacturers: {
                         entity: "product_manufacturer",
                         action: "upsert",
@@ -177,7 +177,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
 
             if (productUpdates.length > 0) {
                 try {
-                    const response = await this.apiPost(context, "_action/sync", {
+                    const response = await apiPost(context, "_action/sync", {
                         updateProductManufacturers: {
                             entity: "product",
                             action: "upsert",
@@ -354,7 +354,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
             for (let i = 0; i < productIds.length; i += batchSize) {
                 const batch = productIds.slice(i, i + batchSize);
 
-                const response = await this.apiPost(context, "search/product", {
+                const response = await apiPost(context, "search/product", {
                     ids: batch,
                     includes: { product: ["id", "manufacturerId"] },
                 });
@@ -391,7 +391,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
         const result = new Map<string, string>();
 
         try {
-            const response = await this.apiPost(context, "search/product-manufacturer", {
+            const response = await apiPost(context, "search/product-manufacturer", {
                 limit: 500,
                 filter: [{ type: "equalsAny", field: "name", value: Array.from(names) }],
             });
@@ -431,53 +431,6 @@ class ManufacturerProcessorImpl implements PostProcessor {
         return result;
     }
 
-    /**
-     * Make a POST request to Shopware API
-     * Uses context.api if available, falls back to raw fetch for backwards compatibility
-     */
-    private async apiPost(
-        context: PostProcessorContext,
-        endpoint: string,
-        body: unknown
-    ): Promise<Response> {
-        // Use context.api if available
-        if (context.api) {
-            const result = await context.api.post(endpoint, body);
-            // Create a Response-like object for compatibility
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(body),
-        });
-    }
-
-    private generateUUID(): string {
-        const hex = "0123456789abcdef";
-        let uuid = "";
-        for (let i = 0; i < 32; i++) {
-            uuid += hex[Math.floor(Math.random() * 16)];
-        }
-        return uuid;
-    }
-
-    private slugify(name: string): string {
-        return name
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "");
-    }
 }
 
 /** Manufacturer processor singleton */

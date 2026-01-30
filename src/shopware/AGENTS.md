@@ -58,7 +58,8 @@ await api.syncEntities({ operation: { entity: "product", action: "upsert", paylo
 await api.deleteEntities("product_review", ids);
 
 // Utilities
-const id = api.createUUID();
+import { generateUUID } from "../utils/index.js";
+const id = generateUUID();
 const currencyId = await api.getCurrencyId("EUR");
 ```
 

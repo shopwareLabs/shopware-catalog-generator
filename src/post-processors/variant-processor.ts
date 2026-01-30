@@ -10,7 +10,7 @@
 
 import { PropertyCache } from "../property-cache.js";
 import type { CachedPropertyGroup, VariantConfig } from "../types/index.js";
-import { cartesianProduct, logger } from "../utils/index.js";
+import { apiPost, cartesianProduct, generateUUID, logger } from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -196,7 +196,7 @@ class VariantProcessorImpl implements PostProcessor {
                 data?: Array<{ id: string }>;
             }
 
-            const response = await this.apiPost(context, "search/currency", {
+            const response = await apiPost(context, "search/currency", {
                 filter: [{ type: "equals", field: "isoCode", value: "EUR" }],
                 limit: 1,
             });
@@ -254,14 +254,14 @@ class VariantProcessorImpl implements PostProcessor {
         }
 
         // Create or update the property group with all options from cache
-        const groupId = existingGroup?.id || this.generateUUID();
+        const groupId = existingGroup?.id || generateUUID();
         const existingOptionNames = new Set(existingGroup?.options.map((o) => o.name) || []);
 
         // Create options that don't exist
         const newOptions = cachedGroup.options
             .filter((name) => !existingOptionNames.has(name))
             .map((name) => ({
-                id: this.generateUUID(),
+                id: generateUUID(),
                 name,
             }));
 
@@ -278,7 +278,7 @@ class VariantProcessorImpl implements PostProcessor {
         // Create/update property group with all options
         const allOptions = [...(existingGroup?.options || []), ...newOptions];
 
-        const response = await this.apiPost(context, "_action/sync", {
+        const response = await apiPost(context, "_action/sync", {
             createPropertyGroup: {
                 entity: "property_group",
                 action: "upsert",
@@ -338,7 +338,7 @@ class VariantProcessorImpl implements PostProcessor {
             }
 
             // First try exact match
-            let response = await this.apiPost(context, "search/property-group", {
+            let response = await apiPost(context, "search/property-group", {
                 filter: [{ type: "equals", field: "name", value: groupName }],
                 associations: { options: {} },
                 limit: 1,
@@ -363,7 +363,7 @@ class VariantProcessorImpl implements PostProcessor {
             }
 
             // If no exact match, try fuzzy match (contains)
-            response = await this.apiPost(context, "search/property-group", {
+            response = await apiPost(context, "search/property-group", {
                 filter: [{ type: "contains", field: "name", value: groupName }],
                 associations: { options: {} },
                 limit: 1,
@@ -409,7 +409,7 @@ class VariantProcessorImpl implements PostProcessor {
                 }>;
             }
 
-            const productResponse = await this.apiPost(context, "search/product", {
+            const productResponse = await apiPost(context, "search/product", {
                 ids: [productId],
                 associations: {
                     children: {},
@@ -513,14 +513,14 @@ class VariantProcessorImpl implements PostProcessor {
         for (const { selectedOptions } of resolvedGroups) {
             for (const option of selectedOptions) {
                 allConfiguratorSettings.push({
-                    id: this.generateUUID(),
+                    id: generateUUID(),
                     optionId: option.id,
                 });
             }
         }
 
         // Update parent with all configurator settings
-        const updateParentResponse = await this.apiPost(context, "_action/sync", {
+        const updateParentResponse = await apiPost(context, "_action/sync", {
             updateParent: {
                 entity: "product",
                 action: "upsert",
@@ -568,7 +568,7 @@ class VariantProcessorImpl implements PostProcessor {
             const optionSuffix = combo.map((o) => o.name.toLowerCase().replace(/\s+/g, "-")).join("-");
 
             return {
-                id: this.generateUUID(),
+                id: generateUUID(),
                 parentId: product.id,
                 productNumber: `${product.id.slice(0, 8)}-${optionSuffix}`,
                 stock: Math.floor(Math.random() * 100) + 10,
@@ -584,7 +584,7 @@ class VariantProcessorImpl implements PostProcessor {
             };
         });
 
-        const createVariantsResponse = await this.apiPost(context, "_action/sync", {
+        const createVariantsResponse = await apiPost(context, "_action/sync", {
             createVariants: {
                 entity: "product",
                 action: "upsert",
@@ -603,13 +603,13 @@ class VariantProcessorImpl implements PostProcessor {
 
         // Step 4: Add visibility to variants
         const visibilityPayload = variantPayload.map((variant) => ({
-            id: this.generateUUID(),
+            id: generateUUID(),
             productId: variant.id,
             salesChannelId: context.salesChannelId,
             visibility: 30,
         }));
 
-        const visibilityResponse = await this.apiPost(context, "_action/sync", {
+        const visibilityResponse = await apiPost(context, "_action/sync", {
             addVisibility: {
                 entity: "product_visibility",
                 action: "upsert",
@@ -625,47 +625,6 @@ class VariantProcessorImpl implements PostProcessor {
         }
 
         return variantPayload.length;
-    }
-
-    /**
-     * Generate a UUID for Shopware entities
-     */
-    private generateUUID(): string {
-        return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/x/g, () =>
-            Math.floor(Math.random() * 16).toString(16)
-        );
-    }
-
-    /**
-     * Make API POST request
-     * Uses context.api if available, falls back to raw fetch for backwards compatibility
-     */
-    private async apiPost(
-        context: PostProcessorContext,
-        endpoint: string,
-        body: unknown
-    ): Promise<Response> {
-        // Use context.api if available
-        if (context.api) {
-            const result = await context.api.post(endpoint, body);
-            // Create a Response-like object for compatibility
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(body),
-        });
     }
 
     /**

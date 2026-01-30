@@ -147,7 +147,8 @@ await context.api.syncEntities({
 await context.api.deleteEntities("product_review", reviewIds);
 
 // Generate UUID
-const id = context.api.createUUID();
+import { generateUUID } from "../utils/index.js";
+const id = generateUUID();
 ```
 
 ## Testing

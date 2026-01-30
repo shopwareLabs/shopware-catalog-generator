@@ -8,7 +8,7 @@
 
 import type { CmsPageFixture } from "../fixtures/index.js";
 import { VIDEO_ELEMENTS_PAGE } from "../fixtures/index.js";
-import { logger } from "../utils/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -68,9 +68,9 @@ class CmsProcessorImpl implements PostProcessor {
                 // Create "CMS" top-level category
                 // Note: We don't set afterCategoryId - Shopware will place it based on createdAt
                 // which means it will appear at the end naturally since it's created last
-                cmsCategoryId = this.generateUUID();
+                cmsCategoryId = generateUUID();
 
-                const createCmsCategory = await this.apiPost(context, "_action/sync", {
+                const createCmsCategory = await apiPost(context, "_action/sync", {
                     createCmsCategory: {
                         entity: "category",
                         action: "upsert",
@@ -178,8 +178,8 @@ class CmsProcessorImpl implements PostProcessor {
 
             if (!videoElementsCategoryId) {
                 // Create "Video Elements" sub-category with link to Landing Page
-                videoElementsCategoryId = this.generateUUID();
-                const createVideoCategory = await this.apiPost(context, "_action/sync", {
+                videoElementsCategoryId = generateUUID();
+                const createVideoCategory = await apiPost(context, "_action/sync", {
                     createVideoCategory: {
                         entity: "category",
                         action: "upsert",
@@ -240,17 +240,17 @@ class CmsProcessorImpl implements PostProcessor {
         context: PostProcessorContext,
         pageConfig: CmsPageFixture
     ): Promise<string | null> {
-        const pageId = this.generateUUID();
+        const pageId = generateUUID();
 
         // Build the complete page structure
         const sections = pageConfig.sections.map((sectionConfig, sectionIndex) => {
-            const sectionId = this.generateUUID();
+            const sectionId = generateUUID();
 
             const blocks = sectionConfig.blocks.map((blockConfig) => {
-                const blockId = this.generateUUID();
+                const blockId = generateUUID();
 
                 const slots = blockConfig.slots.map((slotConfig) => ({
-                    id: this.generateUUID(),
+                    id: generateUUID(),
                     blockId,
                     type: slotConfig.type,
                     slot: slotConfig.slot,
@@ -283,7 +283,7 @@ class CmsProcessorImpl implements PostProcessor {
         });
 
         // Create the CMS page with nested structure
-        const response = await this.apiPost(context, "_action/sync", {
+        const response = await apiPost(context, "_action/sync", {
             createCmsPage: {
                 entity: "cms_page",
                 action: "upsert",
@@ -328,7 +328,7 @@ class CmsProcessorImpl implements PostProcessor {
                 }>;
             }
 
-            const response = await this.apiPost(context, "search/sales-channel", {
+            const response = await apiPost(context, "search/sales-channel", {
                 ids: [context.salesChannelId],
             });
 
@@ -373,7 +373,7 @@ class CmsProcessorImpl implements PostProcessor {
                 data?: Array<{ id: string }>;
             }
 
-            const response = await this.apiPost(context, "search/category", {
+            const response = await apiPost(context, "search/category", {
                 filter: [
                     { type: "equals", field: "name", value: name },
                     { type: "equals", field: "parentId", value: parentId },
@@ -404,7 +404,7 @@ class CmsProcessorImpl implements PostProcessor {
                 data?: Array<{ id: string }>;
             }
 
-            const response = await this.apiPost(context, "search/cms-page", {
+            const response = await apiPost(context, "search/cms-page", {
                 filter: [{ type: "equals", field: "name", value: name }],
                 limit: 1,
             });
@@ -432,7 +432,7 @@ class CmsProcessorImpl implements PostProcessor {
                 data?: Array<{ id: string }>;
             }
 
-            const response = await this.apiPost(context, "search/landing-page", {
+            const response = await apiPost(context, "search/landing-page", {
                 filter: [{ type: "equals", field: "name", value: name }],
                 limit: 1,
             });
@@ -474,7 +474,7 @@ class CmsProcessorImpl implements PostProcessor {
                 data?: LandingPageItem | LandingPageItem[];
             }
 
-            const response = await this.apiPost(context, `search/landing-page`, {
+            const response = await apiPost(context, `search/landing-page`, {
                 ids: [landingPageId],
                 associations: {
                     salesChannels: {},
@@ -539,7 +539,7 @@ class CmsProcessorImpl implements PostProcessor {
         salesChannelId: string
     ): Promise<boolean> {
         try {
-            const response = await this.apiPost(context, "_action/sync", {
+            const response = await apiPost(context, "_action/sync", {
                 updateLandingPage: {
                     entity: "landing_page",
                     action: "upsert",
@@ -578,7 +578,7 @@ class CmsProcessorImpl implements PostProcessor {
     ): Promise<boolean> {
         try {
             // Use the pivot table directly to remove the association
-            const response = await this.apiPost(context, "_action/sync", {
+            const response = await apiPost(context, "_action/sync", {
                 removeSalesChannelAssociation: {
                     entity: "landing_page_sales_channel",
                     action: "delete",
@@ -619,9 +619,9 @@ class CmsProcessorImpl implements PostProcessor {
         name: string,
         cmsPageId: string
     ): Promise<string | null> {
-        const landingPageId = this.generateUUID();
+        const landingPageId = generateUUID();
 
-        const response = await this.apiPost(context, "_action/sync", {
+        const response = await apiPost(context, "_action/sync", {
             createLandingPage: {
                 entity: "landing_page",
                 action: "upsert",
@@ -908,46 +908,6 @@ class CmsProcessorImpl implements PostProcessor {
         }
     }
 
-    /**
-     * Make a POST request to Shopware API
-     */
-    private async apiPost(
-        context: PostProcessorContext,
-        endpoint: string,
-        body: unknown
-    ): Promise<Response> {
-        // Use context.api if available
-        if (context.api) {
-            const result = await context.api.post(endpoint, body);
-            // Create a Response-like object for compatibility
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" },
-            });
-        }
-
-        // Fallback to raw fetch
-        const accessToken = await context.getAccessToken();
-        const url = `${context.shopwareUrl}/api/${endpoint}`;
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(body),
-        });
-    }
-
-    private generateUUID(): string {
-        // Use context.api if it has createUUID, otherwise generate locally
-        const hex = "0123456789abcdef";
-        let uuid = "";
-        for (let i = 0; i < 32; i++) {
-            uuid += hex[Math.floor(Math.random() * 16)];
-        }
-        return uuid;
-    }
 }
 
 /** CMS processor singleton */

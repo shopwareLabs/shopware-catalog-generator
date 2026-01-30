@@ -13,6 +13,7 @@ import {
     capitalizeString,
     CATEGORY_PATH_SEPARATOR,
     generateSubdomainUrl,
+    generateUUID,
     logger,
     validateSubdomainName,
 } from "../utils/index.js";
@@ -178,13 +179,13 @@ export class ShopwareHydrator extends ShopwareClient {
 
         const propertyGroupsPayload = propertyGroups.map((group) => {
             return {
-                id: group.id || this.createUUID(),
+                id: group.id || generateUUID(),
                 name: group.name,
                 description: group.description,
                 displayType: group.displayType,
                 options: group.options.map((option: PropertyOption) => {
                     return {
-                        id: option.id || this.createUUID(),
+                        id: option.id || generateUUID(),
                         name: option.name,
                         colorHexCode: option.colorHexCode,
                     };
@@ -344,7 +345,7 @@ export class ShopwareHydrator extends ShopwareClient {
         const mediaPayload: { id: string; private: boolean; mediaFolderId?: string }[] = [];
 
         const productPayload = products.map((p: ProductInput) => {
-            const UUID = this.createUUID();
+            const UUID = generateUUID();
 
             const product: Record<string, unknown> = {
                 id: UUID,
@@ -385,8 +386,8 @@ export class ShopwareHydrator extends ShopwareClient {
             }
 
             if (p.image) {
-                const mediaId = this.createUUID();
-                const productMediaId = this.createUUID();
+                const mediaId = generateUUID();
+                const productMediaId = generateUUID();
 
                 mediaUploads.push({
                     id: mediaId,
@@ -526,8 +527,8 @@ export class ShopwareHydrator extends ShopwareClient {
             );
 
         // Create the SalesChannel
-        const salesChannelId = this.createUUID();
-        const domainId = this.createUUID();
+        const salesChannelId = generateUUID();
+        const domainId = generateUUID();
 
         const payload = {
             id: salesChannelId,
@@ -719,7 +720,7 @@ export class ShopwareHydrator extends ShopwareClient {
 
         // Create categories in batches using sync API
         const categoryPayload = flatCategories.map((item) => ({
-            id: item.category.id || this.createUUID(),
+            id: item.category.id || generateUUID(),
             name: item.category.name,
             description: item.category.description,
             parentId: item.parentId,
@@ -856,7 +857,7 @@ export class ShopwareHydrator extends ShopwareClient {
         for (const category of tree) {
             // Ensure category has an ID
             if (!category.id) {
-                category.id = this.createUUID();
+                category.id = generateUUID();
             }
 
             const path = buildCategoryPath(parentPath, category.name);
@@ -907,7 +908,7 @@ export class ShopwareHydrator extends ShopwareClient {
         for (const category of categoriesWithImages) {
             if (!category.image || !category.id) continue;
 
-            const mediaId = this.createUUID();
+            const mediaId = generateUUID();
 
             // Create media entity
             await this.apiClient.post("_action/sync", {

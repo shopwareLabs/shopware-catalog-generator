@@ -1,4 +1,7 @@
-import crypto from "node:crypto";
+import {
+    capitalizeString as capitalizeStringUtil,
+    generateAccessKey as generateAccessKeyUtil,
+} from "../utils/index.js";
 
 /**
  * Response wrapper to match axios-like interface
@@ -117,14 +120,9 @@ export class ShopwareClient {
         this.apiClient = new FetchClient();
     }
 
-    /** Generate a Shopware-compatible UUID (no dashes) */
-    createUUID(): string {
-        return crypto.randomUUID().replace(/-/g, "");
-    }
-
     /** Capitalize first letter of string */
     capitalizeString(s: string): string {
-        return s.charAt(0).toUpperCase() + s.slice(1);
+        return capitalizeStringUtil(s);
     }
 
     /** Check if client is authenticated */
@@ -412,12 +410,7 @@ export class ShopwareClient {
 
     /** Generate a random access key for a SalesChannel */
     generateAccessKey(): string {
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        let key = "SW";
-        for (let i = 0; i < 30; i++) {
-            key += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return key;
+        return generateAccessKeyUtil();
     }
 
     /** Cached Product Media folder ID */

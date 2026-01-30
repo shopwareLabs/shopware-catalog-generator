@@ -40,6 +40,47 @@ export class DataCache {
         }
     }
 
+    // =========================================================================
+    // Private JSON File Helpers
+    // =========================================================================
+
+    /**
+     * Load and parse a JSON file from cache
+     * @param filePath - Absolute path to the JSON file
+     * @returns Parsed JSON data or null if not found/invalid
+     */
+    private loadJsonFile<T>(filePath: string): T | null {
+        if (!this.shouldUseCache) return null;
+        if (!fs.existsSync(filePath)) return null;
+        try {
+            const data = fs.readFileSync(filePath, "utf-8");
+            return JSON.parse(data) as T;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Save data to a JSON file in cache
+     * @param filePath - Absolute path to the JSON file
+     * @param data - Data to save
+     */
+    private saveJsonFile(filePath: string, data: unknown): void {
+        if (!this.shouldSaveToCache) return;
+        this.ensureDir(path.dirname(filePath));
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    }
+
+    /**
+     * Check if a cached file exists
+     * @param filePath - Absolute path to the file
+     * @returns true if file exists and caching is enabled
+     */
+    private hasCachedFile(filePath: string): boolean {
+        if (!this.shouldUseCache) return false;
+        return fs.existsSync(filePath);
+    }
+
     /**
      * Get the trash directory path
      */
@@ -158,39 +199,22 @@ export class DataCache {
      * Save SalesChannel metadata
      */
     saveSalesChannelMetadata(salesChannel: string, description: string, shopwareId?: string): void {
-        if (!this.shouldSaveToCache) return;
-
-        const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
         const metadata: SalesChannelCacheMetadata = {
             name: salesChannel,
             description,
             createdAt: new Date().toISOString(),
             shopwareId,
         };
-
-        fs.writeFileSync(path.join(scDir, "metadata.json"), JSON.stringify(metadata, null, 2));
+        const metadataFile = path.join(this.getSalesChannelDir(salesChannel), "metadata.json");
+        this.saveJsonFile(metadataFile, metadata);
     }
 
     /**
      * Load SalesChannel metadata
      */
     loadSalesChannelMetadata(salesChannel: string): SalesChannelCacheMetadata | null {
-        if (!this.shouldUseCache) return null;
-
         const metadataFile = path.join(this.getSalesChannelDir(salesChannel), "metadata.json");
-
-        if (!fs.existsSync(metadataFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(metadataFile, "utf-8");
-            return JSON.parse(data) as SalesChannelCacheMetadata;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<SalesChannelCacheMetadata>(metadataFile);
     }
 
     /**
@@ -202,11 +226,6 @@ export class DataCache {
         totalProducts: number,
         textModel?: string
     ): void {
-        if (!this.shouldSaveToCache) return;
-
-        const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
         const cache: CategoryTreeCache = {
             salesChannel,
             generatedAt: new Date().toISOString(),
@@ -214,38 +233,24 @@ export class DataCache {
             totalProducts,
             textModel,
         };
-
-        fs.writeFileSync(path.join(scDir, "categories.json"), JSON.stringify(cache, null, 2));
+        const categoriesFile = path.join(this.getSalesChannelDir(salesChannel), "categories.json");
+        this.saveJsonFile(categoriesFile, cache);
     }
 
     /**
      * Load category tree for a SalesChannel
      */
     loadCategoryTree(salesChannel: string): CategoryTreeCache | null {
-        if (!this.shouldUseCache) return null;
-
         const categoriesFile = path.join(this.getSalesChannelDir(salesChannel), "categories.json");
-
-        if (!fs.existsSync(categoriesFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(categoriesFile, "utf-8");
-            const cache = JSON.parse(data) as CategoryTreeCache;
-            return cache;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<CategoryTreeCache>(categoriesFile);
     }
 
     /**
      * Check if a category tree is cached for a SalesChannel
      */
     hasCategoryTree(salesChannel: string): boolean {
-        if (!this.shouldUseCache) return false;
         const categoriesFile = path.join(this.getSalesChannelDir(salesChannel), "categories.json");
-        return fs.existsSync(categoriesFile);
+        return this.hasCachedFile(categoriesFile);
     }
 
     // =========================================================================
@@ -256,61 +261,43 @@ export class DataCache {
      * Save a blueprint (pre-AI) for a SalesChannel
      */
     saveBlueprint(salesChannel: string, blueprint: Blueprint): void {
-        if (!this.shouldSaveToCache) return;
-
-        const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
-        fs.writeFileSync(path.join(scDir, "blueprint.json"), JSON.stringify(blueprint, null, 2));
+        const blueprintFile = path.join(this.getSalesChannelDir(salesChannel), "blueprint.json");
+        this.saveJsonFile(blueprintFile, blueprint);
     }
 
     /**
      * Load a blueprint (pre-AI) for a SalesChannel
      */
     loadBlueprint(salesChannel: string): Blueprint | null {
-        if (!this.shouldUseCache) return null;
-
         const blueprintFile = path.join(this.getSalesChannelDir(salesChannel), "blueprint.json");
-
-        if (!fs.existsSync(blueprintFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(blueprintFile, "utf-8");
-            return JSON.parse(data) as Blueprint;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<Blueprint>(blueprintFile);
     }
 
     /**
      * Check if a blueprint exists for a SalesChannel
      */
     hasBlueprint(salesChannel: string): boolean {
-        if (!this.shouldUseCache) return false;
         const blueprintFile = path.join(this.getSalesChannelDir(salesChannel), "blueprint.json");
-        return fs.existsSync(blueprintFile);
+        return this.hasCachedFile(blueprintFile);
     }
 
     /**
      * Save a hydrated blueprint (post-AI) for a SalesChannel
      */
     saveHydratedBlueprint(salesChannel: string, blueprint: HydratedBlueprint): void {
-        if (!this.shouldSaveToCache) return;
-
-        const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
-        fs.writeFileSync(
-            path.join(scDir, "hydrated-blueprint.json"),
-            JSON.stringify(blueprint, null, 2)
+        const hydratedFile = path.join(
+            this.getSalesChannelDir(salesChannel),
+            "hydrated-blueprint.json"
         );
+        this.saveJsonFile(hydratedFile, blueprint);
 
         // Also save individual product metadata for easy access by post-processors
-        this.ensureDir(path.join(scDir, "metadata"));
-        for (const product of blueprint.products) {
-            this.saveProductMetadata(salesChannel, product.id, product.metadata);
+        if (this.shouldSaveToCache) {
+            const scDir = this.getSalesChannelDir(salesChannel);
+            this.ensureDir(path.join(scDir, "metadata"));
+            for (const product of blueprint.products) {
+                this.saveProductMetadata(salesChannel, product.id, product.metadata);
+            }
         }
     }
 
@@ -318,72 +305,46 @@ export class DataCache {
      * Load a hydrated blueprint (post-AI) for a SalesChannel
      */
     loadHydratedBlueprint(salesChannel: string): HydratedBlueprint | null {
-        if (!this.shouldUseCache) return null;
-
         const hydratedFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "hydrated-blueprint.json"
         );
-
-        if (!fs.existsSync(hydratedFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(hydratedFile, "utf-8");
-            return JSON.parse(data) as HydratedBlueprint;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<HydratedBlueprint>(hydratedFile);
     }
 
     /**
      * Check if a hydrated blueprint exists for a SalesChannel
      */
     hasHydratedBlueprint(salesChannel: string): boolean {
-        if (!this.shouldUseCache) return false;
         const hydratedFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "hydrated-blueprint.json"
         );
-        return fs.existsSync(hydratedFile);
+        return this.hasCachedFile(hydratedFile);
     }
 
     /**
      * Save product metadata for a specific product (keyed by UUID)
      */
     saveProductMetadata(salesChannel: string, productId: string, metadata: ProductMetadata): void {
-        if (!this.shouldSaveToCache) return;
-
-        const metadataDir = path.join(this.getSalesChannelDir(salesChannel), "metadata");
-        this.ensureDir(metadataDir);
-
-        const metadataFile = path.join(metadataDir, `${productId}.json`);
-        fs.writeFileSync(metadataFile, JSON.stringify(metadata, null, 2));
+        const metadataFile = path.join(
+            this.getSalesChannelDir(salesChannel),
+            "metadata",
+            `${productId}.json`
+        );
+        this.saveJsonFile(metadataFile, metadata);
     }
 
     /**
      * Load product metadata for a specific product (keyed by UUID)
      */
     loadProductMetadata(salesChannel: string, productId: string): ProductMetadata | null {
-        if (!this.shouldUseCache) return null;
-
         const metadataFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "metadata",
             `${productId}.json`
         );
-
-        if (!fs.existsSync(metadataFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(metadataFile, "utf-8");
-            return JSON.parse(data) as ProductMetadata;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<ProductMetadata>(metadataFile);
     }
 
     /**
@@ -418,38 +379,22 @@ export class DataCache {
      * Save manufacturers for a SalesChannel
      */
     saveManufacturers(salesChannel: string, manufacturers: Manufacturer[]): void {
-        if (!this.shouldSaveToCache) return;
-
-        const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
-        fs.writeFileSync(
-            path.join(scDir, "manufacturers.json"),
-            JSON.stringify(manufacturers, null, 2)
+        const manufacturersFile = path.join(
+            this.getSalesChannelDir(salesChannel),
+            "manufacturers.json"
         );
+        this.saveJsonFile(manufacturersFile, manufacturers);
     }
 
     /**
      * Load manufacturers for a SalesChannel
      */
     loadManufacturers(salesChannel: string): Manufacturer[] | null {
-        if (!this.shouldUseCache) return null;
-
         const manufacturersFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "manufacturers.json"
         );
-
-        if (!fs.existsSync(manufacturersFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(manufacturersFile, "utf-8");
-            return JSON.parse(data) as Manufacturer[];
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<Manufacturer[]>(manufacturersFile);
     }
 
     /**
@@ -718,24 +663,13 @@ export class DataCache {
         if (!this.shouldSaveToCache) return;
 
         const scDir = this.getSalesChannelDir(salesChannel);
-        this.ensureDir(scDir);
-
         const propertyGroupsFile = path.join(scDir, "property-groups.json");
 
         // Load existing groups and merge
-        let existingGroups: PropertyGroup[] = [];
-        if (fs.existsSync(propertyGroupsFile)) {
-            try {
-                existingGroups = JSON.parse(
-                    fs.readFileSync(propertyGroupsFile, "utf-8")
-                ) as PropertyGroup[];
-            } catch {
-                // Ignore
-            }
-        }
-
+        const existingGroups = this.loadJsonFile<PropertyGroup[]>(propertyGroupsFile) ?? [];
         const mergedGroups = this.mergePropertyGroups(existingGroups, groups);
-        fs.writeFileSync(propertyGroupsFile, JSON.stringify(mergedGroups, null, 2));
+
+        this.saveJsonFile(propertyGroupsFile, mergedGroups);
 
         // Save metadata
         const metadata = {
@@ -744,46 +678,29 @@ export class DataCache {
             count: mergedGroups.length,
             textModel,
         };
-        fs.writeFileSync(
-            path.join(scDir, "property-groups-metadata.json"),
-            JSON.stringify(metadata, null, 2)
-        );
+        this.saveJsonFile(path.join(scDir, "property-groups-metadata.json"), metadata);
     }
 
     /**
      * Load property groups for a SalesChannel
      */
     loadPropertyGroupsForSalesChannel(salesChannel: string): PropertyGroup[] | null {
-        if (!this.shouldUseCache) return null;
-
         const propertyGroupsFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "property-groups.json"
         );
-
-        if (!fs.existsSync(propertyGroupsFile)) {
-            return null;
-        }
-
-        try {
-            const data = fs.readFileSync(propertyGroupsFile, "utf-8");
-            const groups = JSON.parse(data) as PropertyGroup[];
-            return groups;
-        } catch {
-            return null;
-        }
+        return this.loadJsonFile<PropertyGroup[]>(propertyGroupsFile);
     }
 
     /**
      * Check if property groups are cached for a SalesChannel
      */
     hasPropertyGroupsForSalesChannel(salesChannel: string): boolean {
-        if (!this.shouldUseCache) return false;
         const propertyGroupsFile = path.join(
             this.getSalesChannelDir(salesChannel),
             "property-groups.json"
         );
-        return fs.existsSync(propertyGroupsFile);
+        return this.hasCachedFile(propertyGroupsFile);
     }
 
     /**

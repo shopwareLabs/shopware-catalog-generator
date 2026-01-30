@@ -57,7 +57,7 @@ export class OpenAIImageProvider implements ImageProvider {
     readonly maxConcurrency = 5;
     readonly name = "openai";
 
-    constructor(apiKey: string, model: string = "gpt-image-1") {
+    constructor(apiKey: string, model: string = "gpt-image-1.5") {
         this.client = new OpenAI({
             apiKey,
         });
@@ -66,25 +66,24 @@ export class OpenAIImageProvider implements ImageProvider {
 
     async generateImage(prompt: string): Promise<string | null> {
         try {
-            // gpt-image-1 doesn't support response_format, returns URL by default
-            // Supported sizes: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
             const response = await this.client.images.generate({
                 model: this.model,
                 prompt,
-                size: "1792x1024", // Landscape ratio ~1.75:1
+                size: "1536x1024", // Landscape ratio 1.5:1
                 n: 1,
             });
 
-            // gpt-image-1 returns URL, need to fetch and convert to base64
-            if (response.data[0]?.url) {
-                const imageResponse = await fetch(response.data[0].url);
+            const imageData = response.data?.[0];
+            if (!imageData) return null;
+
+            if (imageData.url) {
+                const imageResponse = await fetch(imageData.url);
                 const buffer = await imageResponse.arrayBuffer();
                 return Buffer.from(buffer).toString("base64");
             }
 
-            // Fallback for models that support b64_json
-            if (response.data[0]?.b64_json) {
-                return response.data[0].b64_json;
+            if (imageData.b64_json) {
+                return imageData.b64_json;
             }
 
             return null;

@@ -183,6 +183,125 @@ function fixDuplicateProductNames(
 }
 
 // =============================================================================
+// Focused Validation Functions
+// =============================================================================
+
+/**
+ * Validate product-related issues
+ */
+function validateProducts(
+    blueprint: HydratedBlueprint,
+    autoFix: boolean,
+    logFixes: boolean
+): { issues: BlueprintValidationIssue[]; fixesApplied: number } {
+    const issues: BlueprintValidationIssue[] = [];
+    let fixesApplied = 0;
+
+    // Check for duplicate product names
+    const duplicateProducts = findDuplicateProductNames(blueprint);
+    if (duplicateProducts.size > 0) {
+        if (autoFix) {
+            fixesApplied = fixDuplicateProductNames(blueprint, duplicateProducts, logFixes);
+            if (logFixes) {
+                console.log(`  ✓ Fixed ${fixesApplied} duplicate product names`);
+            }
+        } else {
+            for (const [name, ids] of duplicateProducts) {
+                issues.push({
+                    type: "error",
+                    code: "DUPLICATE_PRODUCT_NAME",
+                    message: `Duplicate product name: "${name}" (${ids.length} products)`,
+                    field: "products[].name",
+                    affectedIds: ids,
+                });
+            }
+        }
+    }
+
+    // Check for placeholder products
+    const placeholderProducts = findPlaceholderProducts(blueprint);
+    if (placeholderProducts.length > 0) {
+        issues.push({
+            type: "error",
+            code: "PLACEHOLDER_PRODUCT_NAME",
+            message: `Found ${placeholderProducts.length} placeholder product names (not hydrated by AI)`,
+            field: "products[].name",
+            affectedIds: placeholderProducts,
+        });
+    }
+
+    // Check for empty products
+    if (blueprint.products.length === 0) {
+        issues.push({
+            type: "error",
+            code: "NO_PRODUCTS",
+            message: "Blueprint has no products",
+            field: "products",
+        });
+    }
+
+    return { issues, fixesApplied };
+}
+
+/**
+ * Validate category-related issues
+ */
+function validateCategories(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+
+    // Check for duplicate category names
+    const duplicateCategories = findDuplicateCategoryNames(blueprint);
+    for (const [name, ids] of duplicateCategories) {
+        issues.push({
+            type: "warning",
+            code: "DUPLICATE_CATEGORY_NAME",
+            message: `Duplicate category name at same level: "${name}" (${ids.length} categories)`,
+            field: "categories[].name",
+            affectedIds: ids,
+        });
+    }
+
+    // Check for placeholder categories
+    const placeholderCategories = findPlaceholderCategories(blueprint);
+    if (placeholderCategories.length > 0) {
+        issues.push({
+            type: "error",
+            code: "PLACEHOLDER_CATEGORY_NAME",
+            message: `Found ${placeholderCategories.length} placeholder category names (not hydrated by AI)`,
+            field: "categories[].name",
+            affectedIds: placeholderCategories,
+        });
+    }
+
+    // Check for empty categories
+    if (blueprint.categories.length === 0) {
+        issues.push({
+            type: "error",
+            code: "NO_CATEGORIES",
+            message: "Blueprint has no categories",
+            field: "categories",
+        });
+    }
+
+    return issues;
+}
+
+/**
+ * Validate blueprint metadata
+ */
+function validateBlueprintMeta(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    if (!blueprint.salesChannel?.name) {
+        return [{
+            type: "error",
+            code: "MISSING_SALES_CHANNEL_NAME",
+            message: "Blueprint is missing sales channel name",
+            field: "salesChannel.name",
+        }];
+    }
+    return [];
+}
+
+// =============================================================================
 // Main Validation Function
 // =============================================================================
 
@@ -204,114 +323,30 @@ export function validateBlueprint(
     options: BlueprintValidationOptions = {}
 ): BlueprintValidationResult {
     const { autoFix = false, logFixes = true } = options;
-    const issues: BlueprintValidationIssue[] = [];
-    let fixesApplied = 0;
 
     if (logFixes && autoFix) {
         console.log("Validating blueprint...");
     }
 
-    // Check for duplicate product names
-    const duplicateProducts = findDuplicateProductNames(blueprint);
-    if (duplicateProducts.size > 0) {
-        if (autoFix) {
-            const fixes = fixDuplicateProductNames(blueprint, duplicateProducts, logFixes);
-            fixesApplied += fixes;
-            if (logFixes) {
-                console.log(`  ✓ Fixed ${fixes} duplicate product names`);
-            }
-        } else {
-            for (const [name, ids] of duplicateProducts) {
-                issues.push({
-                    type: "error",
-                    code: "DUPLICATE_PRODUCT_NAME",
-                    message: `Duplicate product name: "${name}" (${ids.length} products)`,
-                    field: "products[].name",
-                    affectedIds: ids,
-                });
-            }
-        }
-    }
+    // Run all validations
+    const productValidation = validateProducts(blueprint, autoFix, logFixes);
+    const categoryIssues = validateCategories(blueprint);
+    const metaIssues = validateBlueprintMeta(blueprint);
 
-    // Check for duplicate category names
-    const duplicateCategories = findDuplicateCategoryNames(blueprint);
-    if (duplicateCategories.size > 0) {
-        for (const [name, ids] of duplicateCategories) {
-            issues.push({
-                type: "warning",
-                code: "DUPLICATE_CATEGORY_NAME",
-                message: `Duplicate category name at same level: "${name}" (${ids.length} categories)`,
-                field: "categories[].name",
-                affectedIds: ids,
-            });
-        }
-    }
-
-    // Check for placeholder products
-    const placeholderProducts = findPlaceholderProducts(blueprint);
-    if (placeholderProducts.length > 0) {
-        issues.push({
-            type: "error",
-            code: "PLACEHOLDER_PRODUCT_NAME",
-            message: `Found ${placeholderProducts.length} placeholder product names (not hydrated by AI)`,
-            field: "products[].name",
-            affectedIds: placeholderProducts,
-        });
-    }
-
-    // Check for placeholder categories
-    const placeholderCategories = findPlaceholderCategories(blueprint);
-    if (placeholderCategories.length > 0) {
-        issues.push({
-            type: "error",
-            code: "PLACEHOLDER_CATEGORY_NAME",
-            message: `Found ${placeholderCategories.length} placeholder category names (not hydrated by AI)`,
-            field: "categories[].name",
-            affectedIds: placeholderCategories,
-        });
-    }
-
-    // Check for missing sales channel info
-    if (!blueprint.salesChannel?.name) {
-        issues.push({
-            type: "error",
-            code: "MISSING_SALES_CHANNEL_NAME",
-            message: "Blueprint is missing sales channel name",
-            field: "salesChannel.name",
-        });
-    }
-
-    // Check for empty products
-    if (blueprint.products.length === 0) {
-        issues.push({
-            type: "error",
-            code: "NO_PRODUCTS",
-            message: "Blueprint has no products",
-            field: "products",
-        });
-    }
-
-    // Check for empty categories
-    if (blueprint.categories.length === 0) {
-        issues.push({
-            type: "error",
-            code: "NO_CATEGORIES",
-            message: "Blueprint has no categories",
-            field: "categories",
-        });
-    }
+    // Collect all issues
+    const allIssues = [...productValidation.issues, ...categoryIssues, ...metaIssues];
 
     // Filter out issues that were fixed
     const remainingIssues = autoFix
-        ? issues.filter((i) => i.code !== "DUPLICATE_PRODUCT_NAME")
-        : issues;
+        ? allIssues.filter((i) => i.code !== "DUPLICATE_PRODUCT_NAME")
+        : allIssues;
 
     const hasErrors = remainingIssues.some((i) => i.type === "error");
 
     return {
         valid: !hasErrors,
         issues: remainingIssues,
-        fixesApplied,
+        fixesApplied: productValidation.fixesApplied,
     };
 }
 

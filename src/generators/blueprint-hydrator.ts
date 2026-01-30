@@ -82,7 +82,7 @@ const ProductResponseSchema = z.object({
 const PropertyOptionsResponseSchema = z.object({
     groupName: z.string(),
     options: z.array(z.string()),
-    priceModifiers: z.record(z.number()).optional(),
+    priceModifiers: z.record(z.string(), z.number()).optional(),
 });
 
 type CategoryResponse = z.infer<typeof CategoryResponseSchema>;
@@ -405,116 +405,85 @@ Return JSON in this exact format:
     // Track batch progress for logging
     private batchCounter: Map<string, { current: number; total: number }> = new Map();
 
+    /** Maximum products per API call to avoid timeouts */
+    private static readonly MAX_BATCH_SIZE = 10;
+
     /**
-     * Hydrate products for a single branch
-     * Maximum 10 products per API call to avoid timeouts
+     * Check if a batch needs to be split (too large or exceeds token limit)
      */
-    private async hydrateBranchProducts(
+    private shouldSplitBatch(products: BlueprintProduct[], branchName: string): boolean {
+        if (products.length > BlueprintHydrator.MAX_BATCH_SIZE) return true;
+        const payload = { products: products.map((p) => p.id), branchName };
+        return !fitsInTokenLimit(payload, this.textProvider.tokenLimit);
+    }
+
+    /**
+     * Split batch in half and process recursively (parallel if supported)
+     */
+    private async hydrateSplitBatch(
         products: BlueprintProduct[],
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
-        manufacturerNames?: string[]
+        manufacturerNames: string[]
     ): Promise<BlueprintProduct[]> {
-        const MAX_BATCH_SIZE = 10; // Prevent API timeouts
+        const midpoint = Math.ceil(products.length / 2);
+        const batch1 = products.slice(0, midpoint);
+        const batch2 = products.slice(midpoint);
 
-        // Generate manufacturer names if not provided (first call for this branch)
-        if (!manufacturerNames) {
-            const manufacturerCount = this.calculateManufacturerCount(products.length);
-            manufacturerNames = this.generateManufacturerNames(branchName, manufacturerCount);
-
-            // Calculate total batches for progress display
-            const totalBatches = Math.ceil(products.length / MAX_BATCH_SIZE);
-            this.batchCounter.set(branchName, { current: 0, total: totalBatches });
-        }
-
-        // Check token limit and split if needed, or if batch too large
-        const payload = { products: products.map((p) => p.id), branchName };
-        const needsSplit =
-            products.length > MAX_BATCH_SIZE ||
-            !fitsInTokenLimit(payload, this.textProvider.tokenLimit);
-
-        if (needsSplit) {
-            // Split into batches
-            const midpoint = Math.ceil(products.length / 2);
-            const batch1 = products.slice(0, midpoint);
-            const batch2 = products.slice(midpoint);
-
-            // Use parallel processing for splits when provider supports it
-            if (this.textProvider.maxConcurrency > 1) {
-                const [hydrated1, hydrated2] = await Promise.all([
-                    this.hydrateBranchProducts(
-                        batch1,
-                        branchName,
-                        existingProperties,
-                        categoryNameMap,
-                        manufacturerNames
-                    ),
-                    this.hydrateBranchProducts(
-                        batch2,
-                        branchName,
-                        existingProperties,
-                        categoryNameMap,
-                        manufacturerNames
-                    ),
-                ]);
-                return [...hydrated1, ...hydrated2];
-            }
-
-            // Sequential processing for rate-limited providers
-            const hydrated1 = await this.hydrateBranchProducts(
-                batch1,
-                branchName,
-                existingProperties,
-                categoryNameMap,
-                manufacturerNames
-            );
-            const hydrated2 = await this.hydrateBranchProducts(
-                batch2,
-                branchName,
-                existingProperties,
-                categoryNameMap,
-                manufacturerNames
-            );
-
+        // Parallel processing when provider supports it
+        if (this.textProvider.maxConcurrency > 1) {
+            const [hydrated1, hydrated2] = await Promise.all([
+                this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, manufacturerNames),
+                this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, manufacturerNames),
+            ]);
             return [...hydrated1, ...hydrated2];
         }
 
-        // Update and display batch progress
+        // Sequential processing for rate-limited providers
+        const hydrated1 = await this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, manufacturerNames);
+        const hydrated2 = await this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, manufacturerNames);
+        return [...hydrated1, ...hydrated2];
+    }
+
+    /**
+     * Make single AI API call for a batch of products
+     */
+    private async hydrateSingleBatch(
+        products: BlueprintProduct[],
+        branchName: string,
+        existingProperties: ExistingProperty[],
+        categoryNameMap: Map<string, string>,
+        manufacturerNames: string[]
+    ): Promise<BlueprintProduct[]> {
+        // Update batch progress
         const counter = this.batchCounter.get(branchName);
         if (counter) {
             counter.current++;
-            console.log(
-                `      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`
-            );
+            console.log(`      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`);
         }
 
-        const prompt = this.buildProductPrompt(
-            products,
-            branchName,
-            existingProperties,
-            categoryNameMap,
-            manufacturerNames
-        );
-
+        const prompt = this.buildProductPrompt(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
         logger.debug(`API call: Generating ${products.length} products for "${branchName}"`, {
             productIds: products.map((p) => p.id.slice(0, 8)),
             promptLength: prompt.length,
         });
 
         const startTime = Date.now();
-        let response: string;
+        const response = await this.callProductApi(branchName, prompt, startTime);
+        return this.parseProductResponse(response, products, branchName, categoryNameMap, startTime);
+    }
 
+    /**
+     * Call text provider API with retry logic
+     */
+    private async callProductApi(branchName: string, prompt: string, startTime: number): Promise<string> {
         try {
-            response = await executeWithRetry(async () => {
+            return await executeWithRetry(async () => {
                 logger.debug(`Calling text provider for "${branchName}"...`);
                 return this.textProvider.generateCompletion(
                     [
-                        {
-                            role: "system",
-                            content:
-                                "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns.",
-                        },
+                        { role: "system", content: "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns." },
                         { role: "user", content: prompt },
                     ],
                     ProductResponseSchema,
@@ -528,23 +497,27 @@ Return JSON in this exact format:
             });
             throw error;
         }
+    }
 
+    /**
+     * Parse and validate API response, apply hydration
+     */
+    private async parseProductResponse(
+        response: string,
+        products: BlueprintProduct[],
+        branchName: string,
+        categoryNameMap: Map<string, string>,
+        startTime: number
+    ): Promise<BlueprintProduct[]> {
         const elapsed = Date.now() - startTime;
         const elapsedSec = (elapsed / 1000).toFixed(1);
-        logger.info(`API call completed for "${branchName}" in ${elapsed}ms`, {
-            responseLength: response.length,
-        });
+        logger.info(`API call completed for "${branchName}" in ${elapsed}ms`, { responseLength: response.length });
 
         try {
             const parsed = JSON.parse(response) as ProductResponse;
             const validated = ProductResponseSchema.parse(parsed);
-
-            console.log(
-                `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`
-            );
+            console.log(`        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`);
             logger.debug(`Parsed ${validated.products.length} products for "${branchName}"`);
-
-            // Apply hydration to products (includes variant config resolution)
             return await this.applyProductHydration(products, validated.products, categoryNameMap);
         } catch (error) {
             logger.error(`Failed to parse AI response for "${branchName}"`, {
@@ -553,6 +526,34 @@ Return JSON in this exact format:
             });
             throw new Error(`Failed to parse product AI response for branch ${branchName}`);
         }
+    }
+
+    /**
+     * Hydrate products for a single branch
+     * Splits into smaller batches if needed to avoid API timeouts
+     */
+    private async hydrateBranchProducts(
+        products: BlueprintProduct[],
+        branchName: string,
+        existingProperties: ExistingProperty[],
+        categoryNameMap: Map<string, string>,
+        manufacturerNames?: string[]
+    ): Promise<BlueprintProduct[]> {
+        // Generate manufacturer names if not provided (first call for this branch)
+        if (!manufacturerNames) {
+            const manufacturerCount = this.calculateManufacturerCount(products.length);
+            manufacturerNames = this.generateManufacturerNames(branchName, manufacturerCount);
+            const totalBatches = Math.ceil(products.length / BlueprintHydrator.MAX_BATCH_SIZE);
+            this.batchCounter.set(branchName, { current: 0, total: totalBatches });
+        }
+
+        // Split batch if too large or exceeds token limit
+        if (this.shouldSplitBatch(products, branchName)) {
+            return this.hydrateSplitBatch(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
+        }
+
+        // Process single batch
+        return this.hydrateSingleBatch(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
     }
 
     /**

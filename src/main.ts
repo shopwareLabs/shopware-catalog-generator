@@ -223,23 +223,55 @@ Examples:
 }
 
 // =============================================================================
-// Commands
+// Shared Validation Helpers
 // =============================================================================
 
-async function blueprintCreate(args: CliArgs): Promise<void> {
+/**
+ * Validate and sanitize the SalesChannel name from CLI args.
+ * Exits with error if name is missing or invalid.
+ *
+ * @param args - CLI arguments
+ * @returns Sanitized sales channel name
+ */
+function requireValidName(args: CliArgs): string {
     if (!args.name) {
         console.error("Error: --name is required");
         process.exit(1);
     }
 
-    // Validate name
     const validation = validateSubdomainName(args.name);
     if (!validation.valid) {
         console.error(`Error: Invalid name: ${validation.error}`);
         process.exit(1);
     }
-    const salesChannelName = validation.sanitized;
 
+    return validation.sanitized;
+}
+
+/**
+ * Load a hydrated blueprint from cache.
+ * Exits with error if blueprint is not found.
+ *
+ * @param cache - Data cache instance
+ * @param salesChannelName - Sales channel name
+ * @returns Hydrated blueprint
+ */
+function requireHydratedBlueprint(cache: DataCache, salesChannelName: string): HydratedBlueprint {
+    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
+    if (!blueprint) {
+        console.error(`Error: No hydrated blueprint found for "${salesChannelName}"`);
+        console.error(`Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`);
+        process.exit(1);
+    }
+    return blueprint;
+}
+
+// =============================================================================
+// Commands
+// =============================================================================
+
+async function blueprintCreate(args: CliArgs): Promise<void> {
+    const salesChannelName = requireValidName(args);
     const description = args.description || `${salesChannelName} webshop`;
     const products = args.products || 90;
 
@@ -272,17 +304,7 @@ async function blueprintCreate(args: CliArgs): Promise<void> {
 }
 
 async function blueprintHydrate(args: CliArgs): Promise<void> {
-    if (!args.name) {
-        console.error("Error: --name is required");
-        process.exit(1);
-    }
-
-    const validation = validateSubdomainName(args.name);
-    if (!validation.valid) {
-        console.error(`Error: Invalid name: ${validation.error}`);
-        process.exit(1);
-    }
-    const salesChannelName = validation.sanitized;
+    const salesChannelName = requireValidName(args);
 
     // Enable verbose logging for hydration
     logger.configure({ verboseConsole: true, minLevel: "debug" });
@@ -341,12 +363,7 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
 }
 
 async function blueprintFix(args: CliArgs): Promise<void> {
-    if (!args.name) {
-        console.error("Error: --name is required");
-        process.exit(1);
-    }
-
-    const salesChannelName = args.name;
+    const salesChannelName = requireValidName(args);
 
     console.log(`\n=== Blueprint Fix ===`);
     console.log(`Name: ${salesChannelName}`);
@@ -359,12 +376,7 @@ async function blueprintFix(args: CliArgs): Promise<void> {
     const cache = createCacheFromEnv();
 
     // Load hydrated blueprint
-    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
-    if (!blueprint) {
-        console.error(`Error: No hydrated blueprint found for "${salesChannelName}"`);
-        console.error("Run 'blueprint hydrate' first.");
-        process.exit(1);
-    }
+    const blueprint = requireHydratedBlueprint(cache, salesChannelName);
 
     // Create providers
     const { text: textProvider } = createProvidersFromEnv();
@@ -431,17 +443,7 @@ async function blueprintFix(args: CliArgs): Promise<void> {
 // =============================================================================
 
 async function generate(args: CliArgs): Promise<void> {
-    if (!args.name) {
-        console.error("Error: --name is required");
-        process.exit(1);
-    }
-
-    const validation = validateSubdomainName(args.name);
-    if (!validation.valid) {
-        console.error(`Error: Invalid name: ${validation.error}`);
-        process.exit(1);
-    }
-    const salesChannelName = validation.sanitized;
+    const salesChannelName = requireValidName(args);
     const description = args.description || `${salesChannelName} webshop`;
 
     console.log(`\n=== Shopware Data Generator v2 ===`);
@@ -594,17 +596,7 @@ async function generate(args: CliArgs): Promise<void> {
 }
 
 async function processCommand(args: CliArgs): Promise<void> {
-    if (!args.name) {
-        console.error("Error: --name is required");
-        process.exit(1);
-    }
-
-    const validation = validateSubdomainName(args.name);
-    if (!validation.valid) {
-        console.error(`Error: Invalid name: ${validation.error}`);
-        process.exit(1);
-    }
-    const salesChannelName = validation.sanitized;
+    const salesChannelName = requireValidName(args);
 
     console.log(`\n=== Post-Processors ===`);
     console.log(`Name: ${salesChannelName}`);
@@ -612,13 +604,7 @@ async function processCommand(args: CliArgs): Promise<void> {
 
     // Load hydrated blueprint
     const cache = createCacheFromEnv();
-    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
-
-    if (!blueprint) {
-        console.error(`Error: No hydrated blueprint found for "${salesChannelName}"`);
-        console.error(`Run: bun run src/main.ts generate --name=${salesChannelName}`);
-        process.exit(1);
-    }
+    const blueprint = requireHydratedBlueprint(cache, salesChannelName);
 
     // Get SalesChannel from Shopware
     const swEnvUrl = process.env.SW_ENV_URL;

@@ -6,7 +6,10 @@
  * and deleting entities.
  */
 
-import crypto from "node:crypto";
+import {
+    capitalizeString as capitalizeStringUtil,
+    generateAccessKey as generateAccessKeyUtil,
+} from "../utils/index.js";
 
 import type { AdminApiClient } from "./admin-client.js";
 
@@ -71,17 +74,10 @@ export class ShopwareApiHelpers {
     }
 
     /**
-     * Generate a Shopware-compatible UUID (32 hex chars, no dashes)
-     */
-    createUUID(): string {
-        return crypto.randomUUID().replace(/-/g, "");
-    }
-
-    /**
      * Capitalize first letter of string
      */
     capitalizeString(s: string): string {
-        return s.charAt(0).toUpperCase() + s.slice(1);
+        return capitalizeStringUtil(s);
     }
 
     /**
@@ -378,12 +374,7 @@ export class ShopwareApiHelpers {
      * Generate a random access key for a SalesChannel
      */
     generateAccessKey(): string {
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        let key = "SW";
-        for (let i = 0; i < 30; i++) {
-            key += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return key;
+        return generateAccessKeyUtil();
     }
 
     // =========================================================================
