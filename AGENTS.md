@@ -59,6 +59,10 @@ src/
 │   ├── cms-pages.ts          # CMS page configurations (video-elements, etc.)
 │   └── review-data.ts        # Reviewer names and review templates
 │
+├── templates/                # Pre-generated catalog templates
+│   ├── index.ts              # Exports
+│   └── fetcher.ts            # TemplateFetcher for cloning template repo
+│
 ├── utils/                    # Utility functions
 │   ├── index.ts              # Re-exports all utilities
 │   ├── validation.ts         # Subdomain validation
@@ -121,6 +125,7 @@ Detailed documentation for each module is in their respective folders:
 - **[src/providers/AGENTS.md](src/providers/AGENTS.md)** - AI provider interfaces, concurrency settings, adding new providers
 - **[src/server/AGENTS.md](src/server/AGENTS.md)** - HTTP server, ProcessManager, background tasks, API endpoints
 - **[src/shopware/AGENTS.md](src/shopware/AGENTS.md)** - Shopware API client, hydrator, cleanup, official client wrapper
+- **[src/templates/AGENTS.md](src/templates/AGENTS.md)** - Pre-generated catalog templates, template fetching
 - **[src/utils/AGENTS.md](src/utils/AGENTS.md)** - Shared utilities (retry, strings, logging, etc.)
 
 ## Architecture

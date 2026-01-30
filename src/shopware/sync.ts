@@ -103,29 +103,107 @@ export async function syncCategories(
 // =============================================================================
 
 /**
- * Sync property groups to Shopware (idempotent upsert).
+ * Sync property groups to Shopware (smart idempotent sync).
+ *
+ * This function:
+ * 1. Fetches existing property groups from Shopware
+ * 2. For matching groups (by name): uses existing IDs and adds missing options
+ * 3. For new groups: creates them with blueprint IDs
+ * 4. Updates the blueprint with correct Shopware IDs
  *
  * @param dataHydrator - Authenticated DataHydrator instance
- * @param blueprint - Hydrated blueprint with property groups
+ * @param blueprint - Hydrated blueprint with property groups (modified in place)
  */
 export async function syncPropertyGroups(
     dataHydrator: DataHydrator,
     blueprint: HydratedBlueprint
 ): Promise<void> {
-    const propertyGroupsToCreate = blueprint.propertyGroups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        description: `Properties for ${g.name}`,
-        displayType: g.displayType,
-        options: g.options.map((o) => ({
-            id: o.id,
-            name: o.name,
-            colorHexCode: o.colorHexCode,
-        })),
-    }));
+    // Fetch existing property groups from Shopware
+    const existingGroups = await dataHydrator.getExistingPropertyGroups();
+    const existingByName = new Map(
+        existingGroups.map((g) => [g.name.toLowerCase(), g])
+    );
 
-    const propertyGroups = await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToCreate);
-    console.log(`  Synced ${propertyGroups.length} property groups`);
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    const propertyGroupsToSync: Array<{
+        id: string;
+        name: string;
+        description: string;
+        displayType: string;
+        options: Array<{ id: string; name: string; colorHexCode?: string }>;
+    }> = [];
+
+    for (const blueprintGroup of blueprint.propertyGroups) {
+        const existing = existingByName.get(blueprintGroup.name.toLowerCase());
+
+        if (existing) {
+            // Group exists - use Shopware's ID and check for missing options
+            const existingOptionNames = new Set(
+                existing.options.map((o) => o.name.toLowerCase())
+            );
+
+            // Find options that need to be added
+            const missingOptions = blueprintGroup.options.filter(
+                (o) => !existingOptionNames.has(o.name.toLowerCase())
+            );
+
+            // Update blueprint group ID to match Shopware
+            blueprintGroup.id = existing.id;
+
+            // Update blueprint option IDs to match Shopware for existing options
+            for (const blueprintOption of blueprintGroup.options) {
+                const existingOption = existing.options.find(
+                    (o) => o.name.toLowerCase() === blueprintOption.name.toLowerCase()
+                );
+                if (existingOption) {
+                    blueprintOption.id = existingOption.id;
+                }
+            }
+
+            if (missingOptions.length > 0) {
+                // Need to add missing options to existing group
+                propertyGroupsToSync.push({
+                    id: existing.id,
+                    name: existing.name,
+                    description: `Properties for ${existing.name}`,
+                    displayType: existing.displayType,
+                    options: missingOptions.map((o) => ({
+                        id: o.id,
+                        name: o.name,
+                        colorHexCode: o.colorHexCode,
+                    })),
+                });
+                updated++;
+                console.log(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`);
+            } else {
+                skipped++;
+            }
+        } else {
+            // New group - create with blueprint IDs
+            propertyGroupsToSync.push({
+                id: blueprintGroup.id,
+                name: blueprintGroup.name,
+                description: `Properties for ${blueprintGroup.name}`,
+                displayType: blueprintGroup.displayType,
+                options: blueprintGroup.options.map((o) => ({
+                    id: o.id,
+                    name: o.name,
+                    colorHexCode: o.colorHexCode,
+                })),
+            });
+            created++;
+        }
+    }
+
+    // Sync only the groups that need changes
+    if (propertyGroupsToSync.length > 0) {
+        await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToSync);
+    }
+
+    console.log(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`);
 }
 
 // =============================================================================

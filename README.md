@@ -79,6 +79,7 @@ bun run generate --name=electronics --description="Consumer electronics" --produ
 | `--products`    | Number of products to generate (default: 90) |
 | `--only`        | Post-processors to run (comma-separated)     |
 | `--dry-run`     | Preview actions without making changes       |
+| `--no-template` | Skip checking for pre-generated templates    |
 
 ### Blueprint Workflow
 
@@ -198,6 +199,7 @@ curl http://localhost:3000/status/proc_xxx
 | `shopwareUser`   | Shopware admin username                  | -       |
 | `shopwarePassword` | Shopware admin password                | -       |
 | `skipProcessors` | Skip post-processors after sync          | false   |
+| `skipTemplate`   | Skip checking for pre-generated templates| false   |
 
 ## Performance
 
@@ -242,6 +244,35 @@ Pre-generated templates available at:
 > **[github.com/shopwareLabs/shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**
 
 Ready-to-use SalesChannel configurations without running AI generation.
+
+### How Templates Work
+
+When you run `generate --name=<name>`, the CLI automatically checks if a matching template exists:
+
+1. Clones the template repository (first run) or pulls updates
+2. If a template matches the name, copies data to local cache
+3. Skips blueprint creation and AI hydration phases
+4. Proceeds directly to Shopware upload
+
+```bash
+# Uses template if "beauty" exists in the repository
+bun run generate --name=beauty
+
+# Force AI generation even if template exists
+bun run generate --name=beauty --no-template
+```
+
+### Environment Variables
+
+```env
+# Override template repository URL (default: git@github.com:shopwareLabs/shopware-catalog-templates.git)
+TEMPLATE_REPO_URL=git@github.com:your-org/your-templates.git
+
+# Override local clone directory (default: .template-repo)
+TEMPLATE_CACHE_DIR=.my-templates
+```
+
+Templates require git access via SSH keys or credential helper.
 
 ## License
 

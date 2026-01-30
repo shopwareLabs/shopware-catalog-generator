@@ -11,6 +11,7 @@ import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-proce
 import { createProvidersFromEnv } from "./providers/index.js";
 import type { ProcessContext } from "./server/index.js";
 import { processManager } from "./server/index.js";
+import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import {
     buildPropertyMaps,
     createApiHelpers,
@@ -58,6 +59,7 @@ interface GenerateParams {
     shopwarePassword: string;
     clearFirst: boolean;
     skipProcessors: boolean;
+    skipTemplate: boolean;
 }
 
 /**
@@ -99,10 +101,23 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
     ctx.log("Authentication successful");
     ctx.setProgress("auth", 1, 1);
 
+    // Check for pre-generated template (unless skipTemplate is set or data already cached)
+    let usedTemplate = false;
+    if (!params.skipTemplate && !cache.hasHydratedBlueprint(salesChannel)) {
+        ctx.log("Checking for pre-generated template...");
+        const templateFetcher = createTemplateFetcherFromEnv();
+        usedTemplate = await templateFetcher.tryUseTemplate(salesChannel, cache);
+        if (usedTemplate) {
+            ctx.log(`Using pre-generated template for "${salesChannel}"`);
+        } else {
+            ctx.log("No template found, will generate from scratch");
+        }
+    }
+
     // Phase 1: Blueprint
     ctx.setProgress("blueprint", 0, 2);
 
-    if (!cache.hasBlueprint(salesChannel)) {
+    if (!usedTemplate && !cache.hasBlueprint(salesChannel)) {
         ctx.log("Creating blueprint...");
         const generator = new BlueprintGenerator({
             totalProducts: productCount,
@@ -111,13 +126,15 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         const blueprint = generator.generateBlueprint(salesChannel, description);
         cache.saveBlueprint(salesChannel, blueprint);
         ctx.log(`Blueprint created: ${blueprint.products.length} products`);
+    } else if (usedTemplate) {
+        ctx.log("Using template blueprint");
     } else {
         ctx.log("Using existing blueprint");
     }
     ctx.setProgress("blueprint", 1, 2);
 
     // Phase 2: Hydration
-    if (!cache.hasHydratedBlueprint(salesChannel)) {
+    if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannel)) {
         ctx.log("Hydrating blueprint with AI...");
         const blueprint = cache.loadBlueprint(salesChannel);
         if (!blueprint) {
@@ -136,6 +153,8 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
 
         cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);
         ctx.log("Blueprint hydrated successfully");
+    } else if (usedTemplate) {
+        ctx.log("Using template hydrated blueprint");
     } else {
         ctx.log("Using existing hydrated blueprint");
     }
@@ -277,6 +296,7 @@ async function handleGenerate(request: Request): Promise<Response> {
     const cacheOptions = (body.cache as Record<string, unknown>) || {};
     const clearFirst = cacheOptions.clearFirst === true;
     const skipProcessors = body.skipProcessors === true;
+    const skipTemplate = body.skipTemplate === true;
 
     // Validate required fields
     if (!envPath) {
@@ -306,6 +326,7 @@ async function handleGenerate(request: Request): Promise<Response> {
                 shopwarePassword,
                 clearFirst,
                 skipProcessors,
+                skipTemplate,
             },
             ctx
         );

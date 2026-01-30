@@ -12,6 +12,7 @@ import { createCacheFromEnv } from "./cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
+import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import {
     buildPropertyMaps,
     createApiHelpers,
@@ -30,6 +31,103 @@ import {
     validateBlueprint,
     validateSubdomainName,
 } from "./utils/index.js";
+import type { DataCache } from "./cache.js";
+import type { HydratedBlueprint } from "./types/index.js";
+
+// =============================================================================
+// Shared Helper: Run Post-Processors
+// =============================================================================
+
+interface RunProcessorsParams {
+    salesChannelId: string;
+    salesChannelName: string;
+    blueprint: HydratedBlueprint;
+    cache: DataCache;
+    swEnvUrl: string;
+    getAccessToken: () => Promise<string>;
+    processors?: string[];
+    dryRun?: boolean;
+}
+
+interface ProcessorsSummary {
+    totalProcessed: number;
+    totalErrors: number;
+}
+
+/**
+ * Run post-processors with shared setup logic.
+ * Extracted to avoid duplication between generate and process commands.
+ */
+async function executePostProcessors(params: RunProcessorsParams): Promise<ProcessorsSummary> {
+    const {
+        salesChannelId,
+        salesChannelName,
+        blueprint,
+        cache,
+        swEnvUrl,
+        getAccessToken,
+        processors,
+        dryRun = false,
+    } = params;
+
+    // Create API helpers using official client
+    const adminClient = createShopwareAdminClient({
+        baseURL: swEnvUrl,
+        clientId: process.env.SW_CLIENT_ID,
+        clientSecret: process.env.SW_CLIENT_SECRET,
+    });
+    const apiHelpers = createApiHelpers(adminClient, swEnvUrl, getAccessToken);
+
+    // Create providers
+    const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
+
+    // Determine which processors to run
+    const availableProcessors = registry.getNames();
+    const selectedProcessors = processors || availableProcessors;
+
+    // Validate selected processors
+    for (const name of selectedProcessors) {
+        if (!registry.has(name)) {
+            throw new Error(`Unknown processor "${name}". Available: ${availableProcessors.join(", ")}`);
+        }
+    }
+
+    console.log(`Running processors: ${selectedProcessors.join(", ")}`);
+    if (dryRun) {
+        console.log("(Dry run mode - no changes will be made)");
+    }
+    console.log();
+
+    // Run processors
+    const results = await runProcessors(
+        {
+            salesChannelId,
+            salesChannelName,
+            blueprint,
+            cache,
+            textProvider,
+            imageProvider,
+            shopwareUrl: swEnvUrl,
+            getAccessToken,
+            api: apiHelpers,
+            options: {
+                ...DEFAULT_PROCESSOR_OPTIONS,
+                dryRun,
+            },
+        },
+        selectedProcessors
+    );
+
+    // Calculate summary
+    let totalProcessed = 0;
+    let totalErrors = 0;
+    for (const result of results) {
+        totalProcessed += result.processed;
+        totalErrors += result.errors.length;
+    }
+
+    return { totalProcessed, totalErrors };
+}
 
 // =============================================================================
 // CLI Argument Parsing
@@ -44,6 +142,7 @@ interface CliArgs {
     interactive?: boolean;
     only?: string[];
     dryRun?: boolean;
+    noTemplate?: boolean;
 }
 
 function parseCliArgs(): CliArgs {
@@ -87,6 +186,7 @@ function parseCliArgs(): CliArgs {
         interactive: flags.i === true || flags.interactive === true,
         only: flags.only ? (flags.only as string).split(",") : undefined,
         dryRun: flags["dry-run"] === true,
+        noTemplate: flags["no-template"] === true,
     };
 }
 
@@ -110,6 +210,7 @@ Options:
   --products=<n>        Number of products (default: 90)
   --only=<list>         Post-processors to run (comma-separated)
   --dry-run             Log actions without executing
+  --no-template         Skip checking for pre-generated templates
   -i, --interactive     Run interactive wizard
 
 Examples:
@@ -354,18 +455,36 @@ async function generate(args: CliArgs): Promise<void> {
 
     const cache = createCacheFromEnv();
 
-    // Step 1: Create blueprint if not exists
-    if (!cache.hasBlueprint(salesChannelName)) {
+    // Check for pre-generated template (unless --no-template is set or data already cached)
+    let usedTemplate = false;
+    if (!args.noTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
+        console.log("Checking for pre-generated template...");
+        const templateFetcher = createTemplateFetcherFromEnv();
+        usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
+        if (usedTemplate) {
+            console.log(`Using pre-generated template for "${salesChannelName}"`);
+        } else {
+            console.log("No template found, will generate from scratch");
+        }
+        console.log();
+    }
+
+    // Step 1: Create blueprint if not exists (skip if template was used)
+    if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
         console.log("Step 1: Creating blueprint...");
         await blueprintCreate({ ...args, name: salesChannelName, description });
+    } else if (usedTemplate) {
+        console.log("Step 1: Using template blueprint");
     } else {
         console.log("Step 1: Using existing blueprint");
     }
 
-    // Step 2: Hydrate blueprint if not exists
-    if (!cache.hasHydratedBlueprint(salesChannelName)) {
+    // Step 2: Hydrate blueprint if not exists (skip if template was used)
+    if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
         console.log("\nStep 2: Hydrating blueprint...");
         await blueprintHydrate({ ...args, name: salesChannelName });
+    } else if (usedTemplate) {
+        console.log("Step 2: Using template hydrated blueprint");
     } else {
         console.log("Step 2: Using existing hydrated blueprint");
     }
@@ -452,9 +571,25 @@ async function generate(args: CliArgs): Promise<void> {
         propertyMaps.propertyOptionMap
     );
 
+    console.log(`\n=== Sync Complete ===`);
+
+    // Run post-processors
+    console.log(`\n=== Running Post-Processors ===\n`);
+
+    const { totalProcessed, totalErrors } = await executePostProcessors({
+        salesChannelId: salesChannel.id,
+        salesChannelName,
+        blueprint,
+        cache,
+        swEnvUrl,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        dryRun: args.dryRun,
+    });
+
     console.log(`\n=== Generation Complete ===`);
     console.log(`SalesChannel: ${salesChannelName}`);
     console.log(`Storefront: ${blueprint.salesChannel.baseUrl}`);
+    console.log(`Post-processors: ${totalProcessed} processed, ${totalErrors} errors`);
     console.log();
 }
 
@@ -506,66 +641,26 @@ async function processCommand(args: CliArgs): Promise<void> {
         process.exit(1);
     }
 
-    // Create API helpers using official client
-    const adminClient = createShopwareAdminClient({
-        baseURL: swEnvUrl,
-        clientId: process.env.SW_CLIENT_ID,
-        clientSecret: process.env.SW_CLIENT_SECRET,
-    });
-    const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () => dataHydrator.getAccessToken());
-
-    // Create providers
-    const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-    // Determine which processors to run
-    const availableProcessors = registry.getNames();
-    const selectedProcessors = args.only || availableProcessors;
-
-    // Validate selected processors
-    for (const name of selectedProcessors) {
-        if (!registry.has(name)) {
-            console.error(`Error: Unknown processor "${name}"`);
-            console.error(`Available: ${availableProcessors.join(", ")}`);
-            process.exit(1);
-        }
-    }
-
-    console.log(`Running processors: ${selectedProcessors.join(", ")}`);
-    if (args.dryRun) {
-        console.log("(Dry run mode - no changes will be made)\n");
-    }
-    console.log();
-
-    // Run processors
-    const results = await runProcessors(
-        {
+    try {
+        const { totalProcessed, totalErrors } = await executePostProcessors({
             salesChannelId: salesChannel.id,
             salesChannelName,
             blueprint,
             cache,
-            textProvider,
-            imageProvider,
-            shopwareUrl: swEnvUrl,
+            swEnvUrl,
             getAccessToken: () => dataHydrator.getAccessToken(),
-            api: apiHelpers,
-            options: {
-                ...DEFAULT_PROCESSOR_OPTIONS,
-                dryRun: args.dryRun || false,
-            },
-        },
-        selectedProcessors
-    );
+            processors: args.only,
+            dryRun: args.dryRun,
+        });
 
-    // Summary
-    console.log(`\n=== Post-Processing Complete ===`);
-    let totalProcessed = 0;
-    let totalErrors = 0;
-    for (const result of results) {
-        totalProcessed += result.processed;
-        totalErrors += result.errors.length;
+        console.log(`\n=== Post-Processing Complete ===`);
+        console.log(`Processed: ${totalProcessed}`);
+        console.log(`Errors: ${totalErrors}`);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Error: ${message}`);
+        process.exit(1);
     }
-    console.log(`Processed: ${totalProcessed}`);
-    console.log(`Errors: ${totalErrors}`);
 }
 
 // =============================================================================

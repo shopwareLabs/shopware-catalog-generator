@@ -1,6 +1,8 @@
 node_modules/
 generatedImages/
 generated/
+.template-repo/
+.trash/
 logs/
 dist/
 /.idea/

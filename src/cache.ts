@@ -141,6 +141,13 @@ export class DataCache {
     // =========================================================================
 
     /**
+     * Get the root cache directory (e.g., "generated")
+     */
+    getCacheDir(): string {
+        return this.cacheDir;
+    }
+
+    /**
      * Get the base directory for a SalesChannel
      */
     getSalesChannelDir(salesChannel: string): string {
@@ -812,6 +819,28 @@ export class DataCache {
         } else {
             console.log(`No cache found for SalesChannel "${salesChannel}"`);
         }
+    }
+
+    /**
+     * Copy template data from an external source directory to the local cache
+     * Used by TemplateFetcher to populate cache from pre-generated templates
+     *
+     * @param salesChannel - The sales channel name
+     * @param templateDir - The source directory containing template data
+     */
+    copyFromTemplate(salesChannel: string, templateDir: string): void {
+        const targetDir = this.getSalesChannelDir(salesChannel);
+
+        // If target already exists, move to trash first
+        if (fs.existsSync(targetDir)) {
+            this.moveToTrash(targetDir, `sales-channel-${salesChannel}`);
+        }
+
+        // Ensure parent directory exists
+        this.ensureDir(path.dirname(targetDir));
+
+        // Copy the entire template directory
+        fs.cpSync(templateDir, targetDir, { recursive: true });
     }
 
     /**

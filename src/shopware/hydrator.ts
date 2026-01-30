@@ -268,6 +268,8 @@ export class ShopwareHydrator extends ShopwareClient {
                 ],
                 visibilities: [
                     {
+                        // Use deterministic ID for idempotent upsert
+                        id: this.generateVisibilityId(p.id, salesChannelId),
                         productId: p.id,
                         salesChannelId: salesChannelId,
                         visibility: 30,
@@ -865,6 +867,26 @@ export class ShopwareHydrator extends ShopwareClient {
             }
         }
 
+        return result;
+    }
+
+    /**
+     * Generate a deterministic visibility ID from product and sales channel IDs.
+     * This ensures idempotent upserts - re-running won't create duplicate visibilities.
+     */
+    private generateVisibilityId(productId: string, salesChannelId: string): string {
+        // XOR the two UUIDs to create a deterministic result
+        // Both IDs are 32 hex chars (without dashes), XOR each pair
+        const p = productId.replace(/-/g, "");
+        const s = salesChannelId.replace(/-/g, "");
+        let result = "";
+        for (let i = 0; i < 32; i++) {
+            const pChar = p.charAt(i);
+            const sChar = s.charAt(i);
+            const pVal = parseInt(pChar || "0", 16);
+            const sVal = parseInt(sChar || "0", 16);
+            result += (pVal ^ sVal).toString(16);
+        }
         return result;
     }
 
