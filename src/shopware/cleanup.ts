@@ -221,9 +221,10 @@ export class ShopwareCleanup extends ShopwareClient {
      * Looks for media that:
      * 1. Is in the Product Media folder with no product associations, OR
      * 2. Has no folder (uploaded before folder logic) with no product associations
-     * @returns Number of deleted media files
+     * @param dryRun - If true, only report what would be deleted without actually deleting
+     * @returns Number of deleted (or would-be-deleted) media files
      */
-    async deleteOrphanedProductMedia(): Promise<number> {
+    async deleteOrphanedProductMedia(dryRun = false): Promise<number> {
         if (!this.isAuthenticated()) {
             console.error("Client is not authenticated.");
             return 0;
@@ -248,7 +249,7 @@ export class ShopwareCleanup extends ShopwareClient {
         // Also find media with no folder (null mediaFolderId) - these are old uploads
         filters.push({ type: "equals", field: "mediaFolderId", value: null });
 
-        // Find all matching media with their productMedia associations
+        // Find all matching media with their productMedia associations (paginated)
         interface MediaItem {
             id: string;
             fileName: string;
@@ -256,15 +257,12 @@ export class ShopwareCleanup extends ShopwareClient {
             productMedia?: { id: string }[];
         }
 
-        const mediaResponse = await this.apiClient.post<SearchResponse<MediaItem>>("search/media", {
-            limit: 500,
+        const allMedia = await this.fetchAllPages<MediaItem>("search/media", {
             filter: [{ type: "or", queries: filters }],
             associations: {
                 productMedia: {},
             },
         });
-
-        const allMedia = mediaResponse.data.data;
 
         console.log(`Found ${allMedia.length} media files (in Product Media folder or no folder)`);
 
@@ -280,6 +278,18 @@ export class ShopwareCleanup extends ShopwareClient {
         if (orphanedMedia.length === 0) {
             console.log("No orphaned media to delete.");
             return 0;
+        }
+
+        if (dryRun) {
+            console.log(`[DRY RUN] Would delete ${orphanedMedia.length} orphaned media files:`);
+            for (const media of orphanedMedia.slice(0, 20)) {
+                const folder = media.mediaFolderId ? "Product Media" : "no folder";
+                console.log(`  - ${media.fileName} (${folder})`);
+            }
+            if (orphanedMedia.length > 20) {
+                console.log(`  ... and ${orphanedMedia.length - 20} more`);
+            }
+            return orphanedMedia.length;
         }
 
         console.log(`Deleting ${orphanedMedia.length} orphaned media files...`);
@@ -480,6 +490,309 @@ export class ShopwareCleanup extends ShopwareClient {
             console.error(`Failed to delete root category: ${message}`);
             return false;
         }
+    }
+
+    // =========================================================================
+    // Orphaned Entity Cleanup Methods
+    // =========================================================================
+
+    /**
+     * Fetch all entities with pagination
+     * @param endpoint - Search endpoint (e.g., "search/product-review")
+     * @param options - Search options (filters, associations, includes)
+     * @param pageSize - Number of items per page (default 500)
+     * @returns All entities across all pages
+     */
+    private async fetchAllPages<T>(
+        endpoint: string,
+        options: Record<string, unknown> = {},
+        pageSize = 500
+    ): Promise<T[]> {
+        const allItems: T[] = [];
+        let page = 1;
+        let hasMore = true;
+
+        console.log(`  [Pagination] Starting fetch from ${endpoint}...`);
+
+        while (hasMore) {
+            const requestBody = {
+                ...options,
+                limit: pageSize,
+                page,
+                // CRITICAL: Shopware defaults to NOT returning total count!
+                // Mode 1 = exact total, required for proper pagination
+                "total-count-mode": 1,
+            };
+
+            console.log(`  [Pagination] Requesting page ${page} (limit: ${pageSize})...`);
+
+            const response = await this.apiClient.post<SearchResponse<T>>(endpoint, requestBody);
+
+            const items = response.data.data;
+            const total = response.data.total;
+
+            console.log(
+                `  [Pagination] Page ${page}: received ${items.length} items, total reported: ${total}`
+            );
+
+            allItems.push(...items);
+
+            // Check if there are more pages
+            hasMore = allItems.length < total && items.length > 0;
+
+            if (hasMore) {
+                console.log(`  [Pagination] Fetched ${allItems.length}/${total}, continuing...`);
+            }
+
+            page++;
+
+            // Safety: prevent infinite loops
+            if (page > 100) {
+                console.warn(`  [Pagination] Safety limit reached at page 100, stopping.`);
+                break;
+            }
+        }
+
+        console.log(`  [Pagination] Complete: ${allItems.length} total items fetched.`);
+        return allItems;
+    }
+
+    /**
+     * Collect all used property option IDs from products (with pagination)
+     * Checks both product.properties (filterable attributes) and product.options (variant configurator)
+     */
+    private async collectUsedPropertyOptionIds(): Promise<Set<string>> {
+        interface ProductWithPropertiesAndOptions {
+            id: string;
+            properties?: Array<{ id: string }>;
+            options?: Array<{ id: string }>;
+        }
+
+        console.log("  Collecting used property options from products...");
+        const allProducts = await this.fetchAllPages<ProductWithPropertiesAndOptions>(
+            "search/product",
+            {
+                associations: {
+                    properties: {},
+                    options: {}, // Variant configurator options
+                },
+            }
+        );
+
+        const usedOptionIds = new Set<string>();
+        let propertiesCount = 0;
+        let optionsCount = 0;
+
+        for (const product of allProducts) {
+            // Check product.properties (filterable attributes)
+            if (product.properties) {
+                for (const prop of product.properties) {
+                    if (!usedOptionIds.has(prop.id)) {
+                        propertiesCount++;
+                    }
+                    usedOptionIds.add(prop.id);
+                }
+            }
+            // Check product.options (variant configurator options)
+            if (product.options) {
+                for (const opt of product.options) {
+                    if (!usedOptionIds.has(opt.id)) {
+                        optionsCount++;
+                    }
+                    usedOptionIds.add(opt.id);
+                }
+            }
+        }
+
+        console.log(
+            `  Found ${usedOptionIds.size} property options used by ${allProducts.length} products`
+        );
+        console.log(
+            `    (${propertiesCount} from properties, ${optionsCount} from variant options)`
+        );
+        return usedOptionIds;
+    }
+
+    /**
+     * Delete unused property groups - groups where none of their options are used by any product
+     * @param dryRun - If true, only report what would be deleted without actually deleting
+     * @returns Number of deleted (or would-be-deleted) property groups
+     */
+    async deleteUnusedPropertyGroups(dryRun = false): Promise<number> {
+        if (!this.isAuthenticated()) {
+            console.error("Client is not authenticated.");
+            return 0;
+        }
+
+        console.log("Searching for unused property groups...");
+
+        // Step 1: Get ALL property groups with their options (paginated)
+        interface PropertyGroupItem {
+            id: string;
+            name: string;
+            options?: Array<{ id: string; name: string }>;
+        }
+
+        const allGroups = await this.fetchAllPages<PropertyGroupItem>("search/property-group", {
+            associations: { options: {} },
+        });
+        console.log(`Found ${allGroups.length} property groups`);
+
+        if (allGroups.length === 0) {
+            console.log("No property groups found.");
+            return 0;
+        }
+
+        // Step 2: Get all option IDs that are actually used by products (paginated)
+        const usedOptionIds = await this.collectUsedPropertyOptionIds();
+
+        // Step 3: Find groups where NO options are used
+        const unusedGroups = allGroups.filter((group) => {
+            if (!group.options || group.options.length === 0) {
+                return true; // No options = definitely unused
+            }
+            // Check if any option in this group is used
+            const hasUsedOption = group.options.some((opt) => usedOptionIds.has(opt.id));
+            return !hasUsedOption;
+        });
+
+        console.log(
+            `${unusedGroups.length} property groups are unused (no options linked to products)`
+        );
+
+        if (unusedGroups.length === 0) {
+            console.log("No unused property groups to delete.");
+            return 0;
+        }
+
+        // Log which groups will be deleted
+        for (const group of unusedGroups) {
+            const optCount = group.options?.length ?? 0;
+            console.log(`  - ${group.name} (${optCount} options)`);
+        }
+
+        if (dryRun) {
+            console.log(`[DRY RUN] Would delete ${unusedGroups.length} unused property groups`);
+            return unusedGroups.length;
+        }
+
+        console.log(`Deleting ${unusedGroups.length} unused property groups...`);
+
+        // Delete in batches
+        const deleteBatchSize = 50;
+        let deleted = 0;
+
+        for (let i = 0; i < unusedGroups.length; i += deleteBatchSize) {
+            const batch = unusedGroups.slice(i, i + deleteBatchSize);
+            const deletePayload = batch.map((g) => ({ id: g.id }));
+
+            await this.apiClient.post("_action/sync", {
+                deletePropertyGroups: {
+                    entity: "property_group",
+                    action: "delete",
+                    payload: deletePayload,
+                },
+            });
+
+            deleted += batch.length;
+            if (unusedGroups.length > deleteBatchSize) {
+                console.log(`  Deleted ${deleted}/${unusedGroups.length}...`);
+            }
+        }
+
+        console.log(`Deleted ${unusedGroups.length} unused property groups.`);
+        return unusedGroups.length;
+    }
+
+    /**
+     * Delete unused property options - options not used by any product
+     * Keeps the property group if it still has used options
+     * @param dryRun - If true, only report what would be deleted without actually deleting
+     * @returns Number of deleted (or would-be-deleted) property options
+     */
+    async deleteUnusedPropertyOptions(dryRun = false): Promise<number> {
+        if (!this.isAuthenticated()) {
+            console.error("Client is not authenticated.");
+            return 0;
+        }
+
+        console.log("Searching for unused property options...");
+
+        // Step 1: Get ALL property options (paginated)
+        interface PropertyOptionItem {
+            id: string;
+            name: string;
+            group?: { name: string };
+        }
+
+        const allOptions = await this.fetchAllPages<PropertyOptionItem>(
+            "search/property-group-option",
+            { associations: { group: {} } }
+        );
+        console.log(`Found ${allOptions.length} total property options`);
+
+        if (allOptions.length === 0) {
+            console.log("No property options found.");
+            return 0;
+        }
+
+        // Step 2: Get all option IDs that are actually used by products (paginated)
+        const usedOptionIds = await this.collectUsedPropertyOptionIds();
+
+        // Step 3: Find unused options
+        const unusedOptions = allOptions.filter((opt) => !usedOptionIds.has(opt.id));
+
+        console.log(`${unusedOptions.length} property options are unused`);
+
+        if (unusedOptions.length === 0) {
+            console.log("No unused property options to delete.");
+            return 0;
+        }
+
+        // Group by property group for logging
+        const byGroup = new Map<string, string[]>();
+        for (const opt of unusedOptions) {
+            const groupName = opt.group?.name ?? "Unknown";
+            const existing = byGroup.get(groupName) ?? [];
+            existing.push(opt.name);
+            byGroup.set(groupName, existing);
+        }
+
+        for (const [groupName, options] of byGroup) {
+            console.log(`  - ${groupName}: ${options.length} unused options`);
+        }
+
+        if (dryRun) {
+            console.log(`[DRY RUN] Would delete ${unusedOptions.length} unused property options`);
+            return unusedOptions.length;
+        }
+
+        console.log(`Deleting ${unusedOptions.length} unused property options...`);
+
+        // Delete in batches
+        const deleteBatchSize = 100;
+        let deleted = 0;
+
+        for (let i = 0; i < unusedOptions.length; i += deleteBatchSize) {
+            const batch = unusedOptions.slice(i, i + deleteBatchSize);
+            const deletePayload = batch.map((o) => ({ id: o.id }));
+
+            await this.apiClient.post("_action/sync", {
+                deletePropertyOptions: {
+                    entity: "property_group_option",
+                    action: "delete",
+                    payload: deletePayload,
+                },
+            });
+
+            deleted += batch.length;
+            if (unusedOptions.length > deleteBatchSize) {
+                console.log(`  Deleted ${deleted}/${unusedOptions.length}...`);
+            }
+        }
+
+        console.log(`Deleted ${unusedOptions.length} unused property options.`);
+        return unusedOptions.length;
     }
 
     /**

@@ -1,9 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { VIDEO_ELEMENTS_PAGE } from "../../../src/fixtures/index.js";
-import { CmsProcessor } from "../../../src/post-processors/cms-processor.js";
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 import type { HydratedBlueprint } from "../../../src/types/index.js";
+
+import { VIDEO_ELEMENTS_PAGE } from "../../../src/fixtures/index.js";
+import { CmsProcessor } from "../../../src/post-processors/cms-processor.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint

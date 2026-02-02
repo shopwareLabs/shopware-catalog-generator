@@ -8,16 +8,16 @@
  * - Applies price modifiers per variant
  */
 
-import { PropertyCache } from "../property-cache.js";
 import type { CachedPropertyGroup, VariantConfig } from "../types/index.js";
-import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
-
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { PropertyCache } from "../property-cache.js";
+import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 interface PropertyOption {
     id: string;
@@ -120,7 +120,9 @@ class VariantProcessorImpl implements PostProcessor {
 
                 if (variantCount > 0) {
                     const groupNames = resolvedGroups.map((g) => g.group.name).join(" + ");
-                    console.log(`      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`);
+                    console.log(
+                        `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`
+                    );
                     processed++;
                 } else {
                     // Already configured (0 variants created means duplicate was detected)
@@ -450,8 +452,18 @@ class VariantProcessorImpl implements PostProcessor {
     private async resolvePropertyGroups(
         context: PostProcessorContext,
         configs: VariantConfig[]
-    ): Promise<Array<{ group: PropertyGroup; selectedOptions: PropertyOption[]; priceModifiers: Record<string, number> }>> {
-        const resolved: Array<{ group: PropertyGroup; selectedOptions: PropertyOption[]; priceModifiers: Record<string, number> }> = [];
+    ): Promise<
+        Array<{
+            group: PropertyGroup;
+            selectedOptions: PropertyOption[];
+            priceModifiers: Record<string, number>;
+        }>
+    > {
+        const resolved: Array<{
+            group: PropertyGroup;
+            selectedOptions: PropertyOption[];
+            priceModifiers: Record<string, number>;
+        }> = [];
 
         for (const config of configs) {
             // Try to find property group in blueprint first
@@ -482,9 +494,10 @@ class VariantProcessorImpl implements PostProcessor {
             );
 
             // If no matching options found, use first few options from the group
-            const finalOptions = selectedOptions.length >= 2
-                ? selectedOptions
-                : propertyGroup.options.slice(0, Math.min(3, propertyGroup.options.length));
+            const finalOptions =
+                selectedOptions.length >= 2
+                    ? selectedOptions
+                    : propertyGroup.options.slice(0, Math.min(3, propertyGroup.options.length));
 
             if (finalOptions.length >= 2) {
                 resolved.push({
@@ -504,7 +517,11 @@ class VariantProcessorImpl implements PostProcessor {
     private async createMultiPropertyVariants(
         context: PostProcessorContext,
         product: { id: string; name: string; price: number },
-        resolvedGroups: Array<{ group: PropertyGroup; selectedOptions: PropertyOption[]; priceModifiers: Record<string, number> }>
+        resolvedGroups: Array<{
+            group: PropertyGroup;
+            selectedOptions: PropertyOption[];
+            priceModifiers: Record<string, number>;
+        }>
     ): Promise<number> {
         // Get currency ID for pricing
         const currencyId = await this.getCurrencyId(context);
@@ -566,7 +583,9 @@ class VariantProcessorImpl implements PostProcessor {
             }
 
             const variantPrice = Math.round(product.price * totalModifier * 100) / 100;
-            const optionSuffix = combo.map((o) => o.name.toLowerCase().replace(/\s+/g, "-")).join("-");
+            const optionSuffix = combo
+                .map((o) => o.name.toLowerCase().replace(/\s+/g, "-"))
+                .join("-");
 
             // Shopware productNumber has max 64 chars. Use 8-char UUID prefix + truncated suffix
             const prefix = product.id.slice(0, 8);

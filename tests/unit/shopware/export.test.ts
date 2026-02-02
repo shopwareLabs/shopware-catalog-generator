@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { ShopwareExporter } from "../../../src/shopware/export.js";
 import type { ExportValidation, SalesChannelFull } from "../../../src/types/index.js";
+
+import { ShopwareExporter } from "../../../src/shopware/export.js";
 
 // Mock API responses
 interface MockApiResponse<T> {

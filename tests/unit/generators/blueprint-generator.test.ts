@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { BlueprintGenerator } from "../../../src/generators/blueprint-generator.js";
 import type { BlueprintConfig } from "../../../src/types/index.js";
+
+import { BlueprintGenerator } from "../../../src/generators/blueprint-generator.js";
 
 describe("BlueprintGenerator", () => {
     describe("generateBlueprint", () => {

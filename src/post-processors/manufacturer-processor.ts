@@ -7,14 +7,14 @@
  * 4. Assigns manufacturers to products
  */
 
-import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
-
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 /**
  * Manufacturer Processor implementation
@@ -430,7 +430,6 @@ class ManufacturerProcessorImpl implements PostProcessor {
 
         return result;
     }
-
 }
 
 /** Manufacturer processor singleton */

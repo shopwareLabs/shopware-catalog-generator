@@ -4,8 +4,9 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { buildPropertyMaps, syncPropertyIdsToBlueprint } from "../../../src/shopware/sync.js";
 import type { BlueprintPropertyGroup, HydratedBlueprint } from "../../../src/types/index.js";
+
+import { buildPropertyMaps, syncPropertyIdsToBlueprint } from "../../../src/shopware/sync.js";
 
 // =============================================================================
 // Test Fixtures

@@ -207,7 +207,9 @@ class Logger {
         this.writeToFile(entry);
 
         // Brief console message with hint to check log file
-        console.error(`[Shopware] API Error: ${endpoint} returned ${status} (see log file for details)`);
+        console.error(
+            `[Shopware] API Error: ${endpoint} returned ${status} (see log file for details)`
+        );
     }
 
     /**

@@ -10,8 +10,9 @@ import type {
     PropertyGroup,
     SalesChannelFull,
 } from "../types/index.js";
-import { createEmptyValidation, getValidationWarnings } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+
+import { createEmptyValidation, getValidationWarnings } from "../types/index.js";
 import {
     countCategories,
     generateCategoryPlaceholder,

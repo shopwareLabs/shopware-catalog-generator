@@ -42,13 +42,14 @@ interface ImageProvider {
 
 ### Image Providers
 
-| Provider     | Name           | Model        | Notes                           |
-| ------------ | -------------- | ------------ | ------------------------------- |
+| Provider     | Name           | Model         | Notes                          |
+| ------------ | -------------- | ------------- | ------------------------------ |
 | OpenAI       | `openai`       | gpt-image-1.5 | Returns URL, fetched to base64 |
-| Pollinations | `pollinations` | flux/turbo   | Direct base64 response          |
-| Noop         | `none`         | -            | Disabled (no images)            |
+| Pollinations | `pollinations` | flux/turbo    | Direct base64 response         |
+| Noop         | `none`         | -             | Disabled (no images)           |
 
 **OpenAI Image Notes:**
+
 - Uses `gpt-image-1.5` model (latest, Dec 2025)
 - Supported sizes: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait), `auto`
 - Returns URL by default - provider fetches and converts to base64

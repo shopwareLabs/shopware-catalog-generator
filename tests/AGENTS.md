@@ -15,6 +15,7 @@ src/cache.ts                  →  tests/unit/cache.test.ts (root-level files st
 ```
 
 This convention:
+
 - Makes it easy to find tests for any source file
 - Keeps related tests organized together
 - Prevents flat directory with dozens of unrelated files
@@ -130,6 +131,7 @@ Each test should be independent and not rely on state from other tests.
 ### 6. Test Edge Cases
 
 Always test:
+
 - Empty arrays
 - null/undefined
 - Boundary values

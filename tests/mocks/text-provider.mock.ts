@@ -1,6 +1,5 @@
-import type { z } from "zod";
-
 import type { ChatMessage, TextProvider } from "../../src/types/providers.js";
+import type { z } from "zod";
 
 type DynamicResponseFn = (messages: ChatMessage[]) => unknown;
 

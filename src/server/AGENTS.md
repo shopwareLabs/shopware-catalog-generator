@@ -35,10 +35,10 @@ The server module provides:
 
 ## Files
 
-| File                 | Description                              |
-| -------------------- | ---------------------------------------- |
-| `index.ts`           | Exports types and singleton instance     |
-| `process-manager.ts` | ProcessManager class and types           |
+| File                 | Description                          |
+| -------------------- | ------------------------------------ |
+| `index.ts`           | Exports types and singleton instance |
+| `process-manager.ts` | ProcessManager class and types       |
 
 ## Usage
 
@@ -102,9 +102,9 @@ type ProcessStatus = "pending" | "running" | "completed" | "failed";
 
 ```typescript
 interface ProcessProgress {
-    phase: string;    // e.g., "blueprint", "hydration", "upload", "processors"
-    current: number;  // Current step
-    total: number;    // Total steps
+    phase: string; // e.g., "blueprint", "hydration", "upload", "processors"
+    current: number; // Current step
+    total: number; // Total steps
 }
 ```
 
@@ -138,10 +138,10 @@ interface ProcessContext {
 
 ## Configuration
 
-| Constant        | Value    | Description                           |
-| --------------- | -------- | ------------------------------------- |
-| `MAX_LOGS`      | 1000     | Max log entries per process           |
-| `RETENTION_MS`  | 30 min   | Time to keep completed processes      |
+| Constant       | Value  | Description                      |
+| -------------- | ------ | -------------------------------- |
+| `MAX_LOGS`     | 1000   | Max log entries per process      |
+| `RETENTION_MS` | 30 min | Time to keep completed processes |
 
 ## API Endpoints
 
@@ -150,6 +150,7 @@ interface ProcessContext {
 Start background generation.
 
 **Request:**
+
 ```json
 {
     "envPath": "http://localhost:8000",
@@ -163,6 +164,7 @@ Start background generation.
 ```
 
 **Response:**
+
 ```json
 {
     "processId": "proc_1234567890_abc123",
@@ -177,9 +179,11 @@ Start background generation.
 Get process status and logs.
 
 **Query params:**
+
 - `from` (optional): Log offset for pagination
 
 **Response:**
+
 ```json
 {
     "id": "proc_xxx",
@@ -193,6 +197,7 @@ Get process status and logs.
 ```
 
 On completion, includes `result`:
+
 ```json
 {
     "status": "completed",
@@ -215,6 +220,7 @@ On completion, includes `result`:
 Health check.
 
 **Response:**
+
 ```json
 {
     "status": "ok",

@@ -13,11 +13,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type {
-    BlueprintPropertyGroup,
-    HydratedBlueprint,
-    VariantConfig,
-} from "./types/index.js";
+import type { BlueprintPropertyGroup, HydratedBlueprint, VariantConfig } from "./types/index.js";
+
 import { randomSamplePercent, weightedRandomPick } from "./utils/index.js";
 
 // Default price modifiers for options (used when no legacy modifiers exist)
@@ -204,7 +201,9 @@ function migrateBlueprint(
             fs.writeFileSync(filePath, JSON.stringify(blueprint, null, 2));
         }
     } catch (error) {
-        result.errors.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+        result.errors.push(
+            `${filePath}: ${error instanceof Error ? error.message : String(error)}`
+        );
     }
 
     return result;

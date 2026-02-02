@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { BlueprintCategory, CategoryNode } from "../../../src/types/index.js";
+
 import {
     buildBlueprintCategoryPathMap,
     buildCategoryPath,

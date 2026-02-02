@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
-import { ReviewProcessor } from "../../../src/post-processors/review-processor.js";
 import type { HydratedBlueprint, ProductMetadata } from "../../../src/types/index.js";
+
+import { ReviewProcessor } from "../../../src/post-processors/review-processor.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint

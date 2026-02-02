@@ -16,6 +16,7 @@ import type {
     PropertyOption,
     SalesChannelCacheMetadata,
 } from "./types/index.js";
+
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
 
 // Re-export types for convenience

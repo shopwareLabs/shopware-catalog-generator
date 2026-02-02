@@ -8,6 +8,7 @@ import type {
     SalesChannelFull,
     SalesChannelInput,
 } from "../types/index.js";
+
 import {
     buildCategoryPath,
     capitalizeString,

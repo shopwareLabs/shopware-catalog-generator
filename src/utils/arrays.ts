@@ -13,10 +13,9 @@ export function cartesianProduct<T>(arrays: T[][]): T[][] {
     if (arrays.length === 0) return [];
     if (arrays.some((arr) => arr.length === 0)) return [];
 
-    return arrays.reduce<T[][]>(
-        (acc, arr) => acc.flatMap((x) => arr.map((y) => [...x, y])),
-        [[]] as T[][]
-    );
+    return arrays.reduce<T[][]>((acc, arr) => acc.flatMap((x) => arr.map((y) => [...x, y])), [
+        [],
+    ] as T[][]);
 }
 
 /**
@@ -27,11 +26,7 @@ export function cartesianProduct<T>(arrays: T[][]): T[][] {
  * @param maxPercent - Maximum percentage to select (0-1)
  * @returns New array with randomly selected items (at least 1 item)
  */
-export function randomSamplePercent<T>(
-    array: T[],
-    minPercent: number,
-    maxPercent: number
-): T[] {
+export function randomSamplePercent<T>(array: T[], minPercent: number, maxPercent: number): T[] {
     if (array.length === 0) return [];
 
     const percent = minPercent + Math.random() * (maxPercent - minPercent);

@@ -16,8 +16,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { UNIVERSAL_PROPERTY_GROUPS } from "./fixtures/property-groups.js";
 import type { CachedPropertyGroup, PropertyCacheIndex } from "./types/index.js";
+
+import { UNIVERSAL_PROPERTY_GROUPS } from "./fixtures/property-groups.js";
 import { toKebabCase } from "./utils/index.js";
 
 /**

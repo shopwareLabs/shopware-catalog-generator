@@ -6,13 +6,13 @@
  */
 
 import type { HydratedBlueprint, SalesChannelFull } from "../types/index.js";
+import type { DataHydrator } from "./index.js";
+
 import {
     buildCategoryPath,
     convertBlueprintCategories,
     findCategoryPathById,
 } from "../utils/index.js";
-
-import type { DataHydrator } from "./index.js";
 
 // =============================================================================
 // Types
@@ -95,8 +95,8 @@ export async function syncCategories(
     // Update product categoryIds to use the new Shopware IDs
     if (oldToNewIdMap.size > 0) {
         for (const product of blueprint.products) {
-            product.categoryIds = product.categoryIds.map((catId) =>
-                oldToNewIdMap.get(catId) ?? catId
+            product.categoryIds = product.categoryIds.map(
+                (catId) => oldToNewIdMap.get(catId) ?? catId
             );
             if (product.primaryCategoryId && oldToNewIdMap.has(product.primaryCategoryId)) {
                 product.primaryCategoryId = oldToNewIdMap.get(product.primaryCategoryId)!;
@@ -136,9 +136,7 @@ export async function syncPropertyGroups(
 ): Promise<void> {
     // Fetch existing property groups from Shopware
     const existingGroups = await dataHydrator.getExistingPropertyGroups();
-    const existingByName = new Map(
-        existingGroups.map((g) => [g.name.toLowerCase(), g])
-    );
+    const existingByName = new Map(existingGroups.map((g) => [g.name.toLowerCase(), g]));
 
     let created = 0;
     let updated = 0;
@@ -187,9 +185,7 @@ export async function syncPropertyGroups(
         });
 
         // Find options that need to be added
-        const existingOptionNames = new Set(
-            existing.options.map((o) => o.name.toLowerCase())
-        );
+        const existingOptionNames = new Set(existing.options.map((o) => o.name.toLowerCase()));
         const missingOptions = blueprintGroup.options.filter(
             (o) => !existingOptionNames.has(o.name.toLowerCase())
         );
@@ -236,9 +232,7 @@ export async function syncPropertyGroups(
  * @returns PropertyMaps with group and option lookups
  */
 export function buildPropertyMaps(blueprint: HydratedBlueprint): PropertyMaps {
-    const groupIdMap = new Map(
-        blueprint.propertyGroups.map((g) => [g.name.toLowerCase(), g.id])
-    );
+    const groupIdMap = new Map(blueprint.propertyGroups.map((g) => [g.name.toLowerCase(), g.id]));
 
     // Build option maps from flattened group.options
     const optionEntries = blueprint.propertyGroups.flatMap((group) =>
@@ -249,7 +243,9 @@ export function buildPropertyMaps(blueprint: HydratedBlueprint): PropertyMaps {
     );
 
     const optionIdMap = new Map(optionEntries.map((e) => [e.key, e.id]));
-    const propertyOptionMap = new Map(optionEntries.map((e) => [e.key, { id: e.id, name: e.name }]));
+    const propertyOptionMap = new Map(
+        optionEntries.map((e) => [e.key, { id: e.id, name: e.name }])
+    );
 
     return { groupIdMap, optionIdMap, propertyOptionMap };
 }
@@ -287,7 +283,9 @@ export async function syncProducts(
     const productsToCreate: ProductToCreate[] = blueprint.products.map((p) => {
         // Map product properties to option IDs
         const options = p.metadata.properties
-            .map((prop) => propertyOptionMap.get(`${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`))
+            .map((prop) =>
+                propertyOptionMap.get(`${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`)
+            )
             .filter((opt): opt is { id: string; name: string } => opt !== undefined);
 
         // Map blueprint category IDs to Shopware category IDs via paths

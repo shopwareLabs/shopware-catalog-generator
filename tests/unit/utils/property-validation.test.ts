@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { HydratedBlueprint } from "../../../src/types/index.js";
+
 import { validateBlueprint } from "../../../src/utils/blueprint-validation.js";
 
 /**
@@ -290,7 +291,9 @@ describe("Property Validation", () => {
             expect(result.valid).toBe(false);
 
             // Should have both errors
-            expect(result.issues.filter((i) => i.type === "error").length).toBeGreaterThanOrEqual(2);
+            expect(result.issues.filter((i) => i.type === "error").length).toBeGreaterThanOrEqual(
+                2
+            );
         });
     });
 });

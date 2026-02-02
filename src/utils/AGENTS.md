@@ -118,6 +118,7 @@ if (hasValidationIssues(blueprint)) {
 ```
 
 Checks for:
+
 - **Duplicate product names** (auto-fixable: appends "(2)", "(3)" suffix)
 - **Duplicate category names** at same level (warning)
 - **Placeholder names** (e.g., "Product 1", "Top Category 1")

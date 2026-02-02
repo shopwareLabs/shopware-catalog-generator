@@ -7,15 +7,15 @@
  */
 
 import type { CmsPageFixture } from "../fixtures/index.js";
-import { VIDEO_ELEMENTS_PAGE } from "../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
-
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { VIDEO_ELEMENTS_PAGE } from "../fixtures/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /** Internal result type for cleanup sub-operations */
 interface CleanupSubResult {
@@ -555,9 +555,13 @@ class CmsProcessorImpl implements PostProcessor {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                logger.apiError("_action/sync (add SalesChannel to Landing Page)", response.status, {
-                    error: errorText,
-                });
+                logger.apiError(
+                    "_action/sync (add SalesChannel to Landing Page)",
+                    response.status,
+                    {
+                        error: errorText,
+                    }
+                );
                 return false;
             }
 
@@ -823,9 +827,7 @@ class CmsProcessorImpl implements PostProcessor {
             return this.createCleanupResult(0, ["Failed to remove SalesChannel from landing page"]);
         }
 
-        console.log(
-            `    ✓ Removed SalesChannel from "${VIDEO_ELEMENTS_PAGE.name}" landing page`
-        );
+        console.log(`    ✓ Removed SalesChannel from "${VIDEO_ELEMENTS_PAGE.name}" landing page`);
 
         const isLastSalesChannel = landingPageData.salesChannelIds.length === 1;
         if (!isLastSalesChannel) {
@@ -907,7 +909,6 @@ class CmsProcessorImpl implements PostProcessor {
             return false;
         }
     }
-
 }
 
 /** CMS processor singleton */

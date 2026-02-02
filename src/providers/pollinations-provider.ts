@@ -1,8 +1,7 @@
+import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
-
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 
 /** Pollinations.ai text generation provider (see README for details) */
 export class PollinationsTextProvider implements TextProvider {
@@ -66,15 +65,25 @@ export class PollinationsTextProvider implements TextProvider {
         console.error(`\n❌ Pollinations AI text generation failed`);
         console.error(`   Error: ${errorMessage}`);
 
-        if (status === 401 || errorMessage.includes("401") || errorMessage.includes("Invalid API key")) {
+        if (
+            status === 401 ||
+            errorMessage.includes("401") ||
+            errorMessage.includes("Invalid API key")
+        ) {
             console.info(`\n💡 TIP: Authentication failed with Pollinations.`);
             console.info(`   Possible fixes:`);
             console.info(`   1. Check your AI_API_KEY in .env is correct`);
             console.info(`   2. Remove AI_API_KEY to use the free tier (no key needed)`);
             console.info(`   3. Get a new key from enter.pollinations.ai`);
-        } else if (status === 429 || errorMessage.includes("429") || errorMessage.includes("rate")) {
+        } else if (
+            status === 429 ||
+            errorMessage.includes("429") ||
+            errorMessage.includes("rate")
+        ) {
             console.info(`\n💡 TIP: Rate limited by Pollinations.`);
-            console.info(`   Wait a moment and try again, or get an API key from enter.pollinations.ai`);
+            console.info(
+                `   Wait a moment and try again, or get an API key from enter.pollinations.ai`
+            );
         }
 
         console.log(""); // Empty line for readability

@@ -184,4 +184,3 @@ export function getColorHexCode(colorName: string): string | undefined {
 export function getUniversalPropertyGroups(): CachedPropertyGroup[] {
     return UNIVERSAL_PROPERTY_GROUPS;
 }
-

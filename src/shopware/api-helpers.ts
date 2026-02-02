@@ -6,12 +6,12 @@
  * and deleting entities.
  */
 
+import type { AdminApiClient } from "./admin-client.js";
+
 import {
     capitalizeString as capitalizeStringUtil,
     generateAccessKey as generateAccessKeyUtil,
 } from "../utils/index.js";
-
-import type { AdminApiClient } from "./admin-client.js";
 
 /** Shopware filter structure */
 export interface ShopwareFilter {

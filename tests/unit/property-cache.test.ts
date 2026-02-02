@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type { CachedPropertyGroup } from "../../src/types/index.js";
+
 import {
     getUniversalPropertyGroups,
     UNIVERSAL_PROPERTY_GROUPS,
@@ -10,7 +12,6 @@ import {
     COLOR_HEX_MAP,
 } from "../../src/fixtures/property-groups.js";
 import { PropertyCache } from "../../src/property-cache.js";
-import type { CachedPropertyGroup } from "../../src/types/index.js";
 
 describe("PropertyCache", () => {
     let tempDir: string;
@@ -345,7 +346,13 @@ describe("Store-scoped PropertyCache", () => {
             source: "ai-generated",
         });
 
-        const expectedPath = path.join(tempDir, "sales-channels", "my-store", "properties", "volume.json");
+        const expectedPath = path.join(
+            tempDir,
+            "sales-channels",
+            "my-store",
+            "properties",
+            "volume.json"
+        );
         expect(fs.existsSync(expectedPath)).toBe(true);
     });
 
@@ -364,7 +371,13 @@ describe("Store-scoped PropertyCache", () => {
 
         // Should be in global cache, not store-specific
         const globalPath = path.join(tempDir, "properties", "color.json");
-        const storePath = path.join(tempDir, "sales-channels", "my-store", "properties", "color.json");
+        const storePath = path.join(
+            tempDir,
+            "sales-channels",
+            "my-store",
+            "properties",
+            "color.json"
+        );
 
         expect(fs.existsSync(globalPath)).toBe(true);
         expect(fs.existsSync(storePath)).toBe(false);

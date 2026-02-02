@@ -8,11 +8,14 @@
  * - process           - Run post-processors on existing SalesChannel
  */
 
+import type { DataCache } from "./cache.js";
+import type { HydratedBlueprint } from "./types/index.js";
+import type { ExistingProperty } from "./utils/index.js";
+
 import { createCacheFromEnv } from "./cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
-import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import {
     buildPropertyMaps,
     createApiHelpers,
@@ -23,7 +26,7 @@ import {
     syncPropertyGroups,
     syncPropertyIdsToBlueprint,
 } from "./shopware/index.js";
-import type { ExistingProperty } from "./utils/index.js";
+import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import {
     countCategories,
     logger,
@@ -31,8 +34,6 @@ import {
     validateBlueprint,
     validateSubdomainName,
 } from "./utils/index.js";
-import type { DataCache } from "./cache.js";
-import type { HydratedBlueprint } from "./types/index.js";
 
 // =============================================================================
 // Shared Helper: Run Post-Processors
@@ -88,7 +89,9 @@ async function executePostProcessors(params: RunProcessorsParams): Promise<Proce
     // Validate selected processors
     for (const name of selectedProcessors) {
         if (!registry.has(name)) {
-            throw new Error(`Unknown processor "${name}". Available: ${availableProcessors.join(", ")}`);
+            throw new Error(
+                `Unknown processor "${name}". Available: ${availableProcessors.join(", ")}`
+            );
         }
     }
 

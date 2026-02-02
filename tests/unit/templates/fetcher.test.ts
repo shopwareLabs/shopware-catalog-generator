@@ -220,12 +220,7 @@ describe("TemplateFetcher", () => {
         });
 
         test("preserves file content after copy", () => {
-            const templateDir = path.join(
-                TEST_TEMPLATE_DIR,
-                "generated",
-                "sales-channels",
-                "test"
-            );
+            const templateDir = path.join(TEST_TEMPLATE_DIR, "generated", "sales-channels", "test");
             fs.mkdirSync(templateDir, { recursive: true });
 
             const blueprintContent = {

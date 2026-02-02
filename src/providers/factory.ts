@@ -5,6 +5,7 @@ import type {
     ProviderConfig,
     TextProvider,
 } from "../types/index.js";
+
 import { PROVIDER_DEFAULTS } from "../types/index.js";
 
 import { GitHubModelsTextProvider } from "./github-models-provider.js";

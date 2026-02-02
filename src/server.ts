@@ -5,13 +5,13 @@
  * Each generation runs in the background and can be monitored via status endpoint.
  */
 
+import type { ProcessContext } from "./server/index.js";
+
 import { DataCache } from "./cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
-import type { ProcessContext } from "./server/index.js";
 import { processManager } from "./server/index.js";
-import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import {
     buildPropertyMaps,
     createApiHelpers,
@@ -22,6 +22,7 @@ import {
     syncPropertyGroups,
     syncPropertyIdsToBlueprint,
 } from "./shopware/index.js";
+import { createTemplateFetcherFromEnv } from "./templates/index.js";
 import { PropertyCollector, validateSubdomainName } from "./utils/index.js";
 
 const port = Number(process.env.SERVER_PORT) || 3000;
@@ -148,7 +149,10 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
 
         const collector = new PropertyCollector();
-        const propertyGroups = collector.collectFromBlueprint(hydratedBlueprint, existingProperties);
+        const propertyGroups = collector.collectFromBlueprint(
+            hydratedBlueprint,
+            existingProperties
+        );
         hydratedBlueprint.propertyGroups = propertyGroups;
 
         cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);
@@ -234,10 +238,8 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
             username: shopwareUser,
             password: shopwarePassword,
         });
-        const apiHelpers = createApiHelpers(
-            adminClient,
-            envPath,
-            () => dataHydrator.getAccessToken()
+        const apiHelpers = createApiHelpers(adminClient, envPath, () =>
+            dataHydrator.getAccessToken()
         );
 
         // Run all registered processors

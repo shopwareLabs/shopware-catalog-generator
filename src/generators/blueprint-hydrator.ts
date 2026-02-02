@@ -13,9 +13,6 @@
  * 2. One call per top-level category branch for products
  */
 
-import { z } from "zod";
-
-import { PropertyCache } from "../property-cache.js";
 import type {
     Blueprint,
     BlueprintCategory,
@@ -28,6 +25,9 @@ import type {
     VariantConfig,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import { z } from "zod";
+
+import { PropertyCache } from "../property-cache.js";
 import {
     ConcurrencyLimiter,
     executeWithRetry,
@@ -83,12 +83,14 @@ const ProductResponseSchema = z.object({
 const PropertyOptionsResponseSchema = z.object({
     groupName: z.string(),
     options: z.array(z.string()),
-    priceModifiers: z.array(
-        z.object({
-            option: z.string(),
-            modifier: z.number(),
-        })
-    ).nullable(),
+    priceModifiers: z
+        .array(
+            z.object({
+                option: z.string(),
+                modifier: z.number(),
+            })
+        )
+        .nullable(),
 });
 
 type CategoryResponse = z.infer<typeof CategoryResponseSchema>;
@@ -261,9 +263,12 @@ export class BlueprintHydrator {
         }
 
         const elapsed = Date.now() - startTime;
-        logger.info(`[AI Provider: ${this.textProvider.name}] Categories generated in ${elapsed}ms`, {
-            responseLength: response.length,
-        });
+        logger.info(
+            `[AI Provider: ${this.textProvider.name}] Categories generated in ${elapsed}ms`,
+            {
+                responseLength: response.length,
+            }
+        );
 
         try {
             const parsed = JSON.parse(response) as CategoryResponse;
@@ -386,7 +391,9 @@ Return JSON in this exact format:
 
             return limiter.schedule(async () => {
                 const branchNum = index + 1;
-                const subCatText = subCatPreview ? ` → ${subCatPreview}${subCategories.size > 3 ? "..." : ""}` : "";
+                const subCatText = subCatPreview
+                    ? ` → ${subCatPreview}${subCategories.size > 3 ? "..." : ""}`
+                    : "";
                 console.log(
                     `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`
                 );
@@ -481,15 +488,43 @@ Return JSON in this exact format:
         // Parallel processing when provider supports it
         if (this.textProvider.maxConcurrency > 1) {
             const [hydrated1, hydrated2] = await Promise.all([
-                this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames),
-                this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames),
+                this.hydrateBranchProducts(
+                    batch1,
+                    branchName,
+                    existingProperties,
+                    categoryNameMap,
+                    storeContext,
+                    manufacturerNames
+                ),
+                this.hydrateBranchProducts(
+                    batch2,
+                    branchName,
+                    existingProperties,
+                    categoryNameMap,
+                    storeContext,
+                    manufacturerNames
+                ),
             ]);
             return [...hydrated1, ...hydrated2];
         }
 
         // Sequential processing for rate-limited providers
-        const hydrated1 = await this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
-        const hydrated2 = await this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
+        const hydrated1 = await this.hydrateBranchProducts(
+            batch1,
+            branchName,
+            existingProperties,
+            categoryNameMap,
+            storeContext,
+            manufacturerNames
+        );
+        const hydrated2 = await this.hydrateBranchProducts(
+            batch2,
+            branchName,
+            existingProperties,
+            categoryNameMap,
+            storeContext,
+            manufacturerNames
+        );
         return [...hydrated1, ...hydrated2];
     }
 
@@ -521,31 +556,60 @@ Return JSON in this exact format:
         const counter = this.batchCounter.get(branchName);
         if (counter) {
             counter.current++;
-            console.log(`      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`);
+            console.log(
+                `      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`
+            );
         }
 
-        const prompt = this.buildProductPrompt(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
-        logger.debug(`[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`, {
-            productIds: products.map((p) => p.id.slice(0, 8)),
-            promptLength: prompt.length,
-            subCategories: Array.from(subCategories),
-        });
+        const prompt = this.buildProductPrompt(
+            products,
+            branchName,
+            existingProperties,
+            categoryNameMap,
+            storeContext,
+            manufacturerNames
+        );
+        logger.debug(
+            `[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`,
+            {
+                productIds: products.map((p) => p.id.slice(0, 8)),
+                promptLength: prompt.length,
+                subCategories: Array.from(subCategories),
+            }
+        );
 
         const startTime = Date.now();
         const response = await this.callProductApi(branchName, prompt, startTime);
-        return this.parseProductResponse(response, products, branchName, categoryNameMap, startTime);
+        return this.parseProductResponse(
+            response,
+            products,
+            branchName,
+            categoryNameMap,
+            startTime
+        );
     }
 
     /**
      * Call text provider API with retry logic
      */
-    private async callProductApi(branchName: string, prompt: string, startTime: number): Promise<string> {
+    private async callProductApi(
+        branchName: string,
+        prompt: string,
+        startTime: number
+    ): Promise<string> {
         try {
             return await executeWithRetry(async () => {
-                logger.debug(`[AI Provider: ${this.textProvider.name}] Generating products for "${branchName}"...`, { promptLength: prompt.length });
+                logger.debug(
+                    `[AI Provider: ${this.textProvider.name}] Generating products for "${branchName}"...`,
+                    { promptLength: prompt.length }
+                );
                 return this.textProvider.generateCompletion(
                     [
-                        { role: "system", content: "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns." },
+                        {
+                            role: "system",
+                            content:
+                                "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns.",
+                        },
                         { role: "user", content: prompt },
                     ],
                     ProductResponseSchema,
@@ -554,10 +618,13 @@ Return JSON in this exact format:
             });
         } catch (error) {
             const elapsed = Date.now() - startTime;
-            logger.error(`[AI Provider] Product generation failed for "${branchName}" after ${elapsed}ms`, {
-                provider: this.textProvider.name,
-                error: error instanceof Error ? error.message : String(error),
-            });
+            logger.error(
+                `[AI Provider] Product generation failed for "${branchName}" after ${elapsed}ms`,
+                {
+                    provider: this.textProvider.name,
+                    error: error instanceof Error ? error.message : String(error),
+                }
+            );
             throw error;
         }
     }
@@ -574,12 +641,17 @@ Return JSON in this exact format:
     ): Promise<BlueprintProduct[]> {
         const elapsed = Date.now() - startTime;
         const elapsedSec = (elapsed / 1000).toFixed(1);
-        logger.info(`[AI Provider: ${this.textProvider.name}] Products generated for "${branchName}" in ${elapsed}ms`, { responseLength: response.length });
+        logger.info(
+            `[AI Provider: ${this.textProvider.name}] Products generated for "${branchName}" in ${elapsed}ms`,
+            { responseLength: response.length }
+        );
 
         try {
             const parsed = JSON.parse(response) as ProductResponse;
             const validated = ProductResponseSchema.parse(parsed);
-            console.log(`        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`);
+            console.log(
+                `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`
+            );
             logger.debug(`Parsed ${validated.products.length} products for "${branchName}"`);
             return await this.applyProductHydration(products, validated.products, categoryNameMap);
         } catch (error) {
@@ -613,11 +685,25 @@ Return JSON in this exact format:
 
         // Split batch if too large or exceeds token limit
         if (this.shouldSplitBatch(products, branchName)) {
-            return this.hydrateSplitBatch(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
+            return this.hydrateSplitBatch(
+                products,
+                branchName,
+                existingProperties,
+                categoryNameMap,
+                storeContext,
+                manufacturerNames
+            );
         }
 
         // Process single batch
-        return this.hydrateSingleBatch(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
+        return this.hydrateSingleBatch(
+            products,
+            branchName,
+            existingProperties,
+            categoryNameMap,
+            storeContext,
+            manufacturerNames
+        );
     }
 
     /**
@@ -653,9 +739,10 @@ ${JSON.stringify(existingProperties, null, 2)}
 
         // List cached property groups for AI context (includes Color and any previously generated groups)
         const cachedGroups = this.propertyCache.listNames();
-        const cachedGroupsText = cachedGroups.length > 0
-            ? `\nALREADY KNOWN property groups for this store (prefer these): ${cachedGroups.join(", ")}`
-            : "";
+        const cachedGroupsText =
+            cachedGroups.length > 0
+                ? `\nALREADY KNOWN property groups for this store (prefer these): ${cachedGroups.join(", ")}`
+                : "";
 
         return `Generate product content for the "${branchName}" category.
 
@@ -805,13 +892,17 @@ Return JSON in this exact format:
 
             // For variant products: resolve variant configs from AI suggestions
             let variantConfigs: VariantConfig[] | undefined;
-            if (product.metadata.isVariant && h.suggestedVariantGroups && h.suggestedVariantGroups.length > 0) {
+            if (
+                product.metadata.isVariant &&
+                h.suggestedVariantGroups &&
+                h.suggestedVariantGroups.length > 0
+            ) {
                 // Get category name for context
                 const categoryName = categoryNameMap.get(product.primaryCategoryId) || "Unknown";
-                variantConfigs = await this.resolveVariantConfigs(
-                    h.suggestedVariantGroups,
-                    { name: h.name, category: categoryName }
-                );
+                variantConfigs = await this.resolveVariantConfigs(h.suggestedVariantGroups, {
+                    name: h.name,
+                    category: categoryName,
+                });
             }
 
             results.push({
@@ -824,7 +915,8 @@ Return JSON in this exact format:
                     manufacturerName: h.manufacturerName,
                     imageDescriptions: h.imageDescriptions as ImageDescription[],
                     baseImagePrompt,
-                    variantConfigs: variantConfigs && variantConfigs.length > 0 ? variantConfigs : undefined,
+                    variantConfigs:
+                        variantConfigs && variantConfigs.length > 0 ? variantConfigs : undefined,
                 },
             });
         }
@@ -857,9 +949,10 @@ Return JSON in this exact format:
                     // Select 40-60% of options for this product
                     const selectedOptions = randomSamplePercent(cached.options, 0.4, 0.6);
                     // Ensure at least 2 options for meaningful variants
-                    const finalOptions = selectedOptions.length >= 2
-                        ? selectedOptions
-                        : cached.options.slice(0, Math.min(2, cached.options.length));
+                    const finalOptions =
+                        selectedOptions.length >= 2
+                            ? selectedOptions
+                            : cached.options.slice(0, Math.min(2, cached.options.length));
 
                     // Build price modifiers for selected options
                     const priceModifiers: Record<string, number> = {};
@@ -879,15 +972,28 @@ Return JSON in this exact format:
                 }
             } else {
                 // Never generate Color via AI - it should always come from universal cache
-                if (normalizedName.toLowerCase() === "color" || groupName.toLowerCase() === "color") {
-                    logger.warn(`AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`);
+                if (
+                    normalizedName.toLowerCase() === "color" ||
+                    groupName.toLowerCase() === "color"
+                ) {
+                    logger.warn(
+                        `AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`
+                    );
                     // Try to get Color from cache one more time with exact name
                     const colorFromCache = this.propertyCache.get("Color");
                     if (colorFromCache) {
-                        const selectedOptions = randomSamplePercent(colorFromCache.options, 0.4, 0.6);
-                        const finalOptions = selectedOptions.length >= 2
-                            ? selectedOptions
-                            : colorFromCache.options.slice(0, Math.min(2, colorFromCache.options.length));
+                        const selectedOptions = randomSamplePercent(
+                            colorFromCache.options,
+                            0.4,
+                            0.6
+                        );
+                        const finalOptions =
+                            selectedOptions.length >= 2
+                                ? selectedOptions
+                                : colorFromCache.options.slice(
+                                      0,
+                                      Math.min(2, colorFromCache.options.length)
+                                  );
                         configs.push({
                             group: colorFromCache.name,
                             selectedOptions: finalOptions,
@@ -1015,7 +1121,8 @@ Return JSON:
             slug: toKebabCase(validated.groupName),
             displayType,
             options: validated.options,
-            priceModifiers: Object.keys(priceModifiersRecord).length > 0 ? priceModifiersRecord : undefined,
+            priceModifiers:
+                Object.keys(priceModifiersRecord).length > 0 ? priceModifiersRecord : undefined,
             createdAt: new Date().toISOString(),
             source: "ai-generated",
         };
@@ -1027,9 +1134,8 @@ Return JSON:
 
         // Select 40-60% of options for this product
         const selectedOptions = randomSamplePercent(validated.options, 0.4, 0.6);
-        const finalOptions = selectedOptions.length >= 2
-            ? selectedOptions
-            : validated.options.slice(0, 2);
+        const finalOptions =
+            selectedOptions.length >= 2 ? selectedOptions : validated.options.slice(0, 2);
 
         // Build price modifiers for selected options
         const priceModifiers: Record<string, number> = {};

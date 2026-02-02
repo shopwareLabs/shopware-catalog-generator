@@ -17,6 +17,7 @@ import type {
     ProductMetadata,
     ReviewCount,
 } from "../types/index.js";
+
 import { DEFAULT_BLUEPRINT_CONFIG } from "../types/index.js";
 
 /**

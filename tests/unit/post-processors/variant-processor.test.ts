@@ -1,13 +1,14 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
-import { VariantProcessor } from "../../../src/post-processors/variant-processor.js";
 import type {
     BlueprintPropertyGroup,
     HydratedBlueprint,
     ProductMetadata,
     VariantConfig,
 } from "../../../src/types/index.js";
+
+import { VariantProcessor } from "../../../src/post-processors/variant-processor.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { HydratedBlueprint } from "../../../src/types/index.js";
+
 import { PropertyCollector } from "../../../src/utils/property-collector.js";
 
 function createMockBlueprint(

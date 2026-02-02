@@ -60,9 +60,7 @@ export function isPlaceholder(name: string): boolean {
 /**
  * Find duplicate product names in the blueprint
  */
-function findDuplicateProductNames(
-    blueprint: HydratedBlueprint
-): Map<string, string[]> {
+function findDuplicateProductNames(blueprint: HydratedBlueprint): Map<string, string[]> {
     const nameToIds = new Map<string, string[]>();
 
     for (const product of blueprint.products) {
@@ -85,15 +83,10 @@ function findDuplicateProductNames(
 /**
  * Find duplicate category names at the same level
  */
-function findDuplicateCategoryNames(
-    blueprint: HydratedBlueprint
-): Map<string, string[]> {
+function findDuplicateCategoryNames(blueprint: HydratedBlueprint): Map<string, string[]> {
     const nameToIds = new Map<string, string[]>();
 
-    function collectCategories(
-        categories: HydratedBlueprint["categories"],
-        parentPath = ""
-    ): void {
+    function collectCategories(categories: HydratedBlueprint["categories"], parentPath = ""): void {
         for (const cat of categories) {
             const key = `${parentPath}/${cat.name}`;
             const existing = nameToIds.get(key) || [];
@@ -124,9 +117,7 @@ function findDuplicateCategoryNames(
  * Find placeholder product names
  */
 function findPlaceholderProducts(blueprint: HydratedBlueprint): string[] {
-    return blueprint.products
-        .filter((p) => isPlaceholder(p.name))
-        .map((p) => p.id);
+    return blueprint.products.filter((p) => isPlaceholder(p.name)).map((p) => p.id);
 }
 
 /**
@@ -291,12 +282,14 @@ function validateCategories(blueprint: HydratedBlueprint): BlueprintValidationIs
  */
 function validateBlueprintMeta(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
     if (!blueprint.salesChannel?.name) {
-        return [{
-            type: "error",
-            code: "MISSING_SALES_CHANNEL_NAME",
-            message: "Blueprint is missing sales channel name",
-            field: "salesChannel.name",
-        }];
+        return [
+            {
+                type: "error",
+                code: "MISSING_SALES_CHANNEL_NAME",
+                message: "Blueprint is missing sales channel name",
+                field: "salesChannel.name",
+            },
+        ];
     }
     return [];
 }
@@ -345,8 +338,8 @@ function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidati
     }
 
     // 2. Check Color properties have hex codes
-    const colorGroups = blueprint.propertyGroups.filter(
-        (g) => g.name.toLowerCase().includes("color")
+    const colorGroups = blueprint.propertyGroups.filter((g) =>
+        g.name.toLowerCase().includes("color")
     );
     for (const colorGroup of colorGroups) {
         const missingHex = colorGroup.options.filter((o) => !o.colorHexCode);
@@ -361,9 +354,7 @@ function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidati
     }
 
     // 3. Check product properties reference valid groups
-    const validGroupNames = new Set(
-        blueprint.propertyGroups.map((g) => g.name.toLowerCase())
-    );
+    const validGroupNames = new Set(blueprint.propertyGroups.map((g) => g.name.toLowerCase()));
 
     for (const product of blueprint.products) {
         if (!product.metadata.properties) continue;

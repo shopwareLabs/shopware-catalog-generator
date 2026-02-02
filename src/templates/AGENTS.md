@@ -32,6 +32,7 @@ shopware-catalog-templates/
 ```
 
 Each template contains:
+
 - `blueprint.json` - Original blueprint structure
 - `hydrated-blueprint.json` - AI-hydrated blueprint with all data
 - `images/` - Product and category images (webp + json metadata)
@@ -43,22 +44,22 @@ Each template contains:
 ```typescript
 class TemplateFetcher {
     // Fetch a specific template (sparse checkout)
-    async ensureTemplate(name: string): Promise<boolean>
+    async ensureTemplate(name: string): Promise<boolean>;
 
     // List locally available templates (already fetched)
-    listTemplates(): string[]
+    listTemplates(): string[];
 
     // Check if a template is locally available
-    hasTemplate(name: string): boolean
+    hasTemplate(name: string): boolean;
 
     // Copy template to local cache
-    copyToCache(name: string, cache: DataCache): boolean
+    copyToCache(name: string, cache: DataCache): boolean;
 
     // Copy properties folder to cache
-    copyPropertiesToCache(cache: DataCache): boolean
+    copyPropertiesToCache(cache: DataCache): boolean;
 
     // Convenience: fetch + copy template and properties
-    async tryUseTemplate(name: string, cache: DataCache): Promise<boolean>
+    async tryUseTemplate(name: string, cache: DataCache): Promise<boolean>;
 }
 ```
 
@@ -91,8 +92,8 @@ bun run generate --name=beauty --no-template
 
 ```json
 {
-  "salesChannel": "beauty",
-  "skipTemplate": true
+    "salesChannel": "beauty",
+    "skipTemplate": true
 }
 ```
 
@@ -122,16 +123,16 @@ console.log("Available templates:", templates);
 The fetcher uses Git's sparse checkout feature to minimize download size:
 
 1. **Repository init:** `git clone --filter=blob:none --sparse --depth 1`
-   - Downloads only git metadata, no actual files
-   - Very fast (~2 minutes)
+    - Downloads only git metadata, no actual files
+    - Very fast (~2 minutes)
 
 2. **Fetch specific template:** `git sparse-checkout add sales-channels/<name> properties`
-   - Downloads only the requested sales channel folder
-   - Downloads the shared properties folder
-   - Much faster than cloning everything
+    - Downloads only the requested sales channel folder
+    - Downloads the shared properties folder
+    - Much faster than cloning everything
 
 3. **Updates:** `git pull --ff-only`
-   - Only updates files in sparse checkout
+    - Only updates files in sparse checkout
 
 Authentication uses existing git credentials (SSH keys or credential helper).
 

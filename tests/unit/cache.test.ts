@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 
-import { DataCache } from "../../src/cache.js";
 import type { ProductInput, PropertyGroup } from "../../src/types/index.js";
+
+import { DataCache } from "../../src/cache.js";
 
 const TEST_BASE_DIR = "./test-cache-temp";
 const TEST_CACHE_DIR = `${TEST_BASE_DIR}/generated`;

@@ -145,8 +145,16 @@ export class DataHydrator extends ShopwareHydrator {
         return this.cleanup.cleanupCategory(categoryName, options);
     }
 
-    async deleteOrphanedProductMedia(): Promise<number> {
-        return this.cleanup.deleteOrphanedProductMedia();
+    async deleteOrphanedProductMedia(dryRun = false): Promise<number> {
+        return this.cleanup.deleteOrphanedProductMedia(dryRun);
+    }
+
+    async deleteUnusedPropertyGroups(dryRun = false): Promise<number> {
+        return this.cleanup.deleteUnusedPropertyGroups(dryRun);
+    }
+
+    async deleteUnusedPropertyOptions(dryRun = false): Promise<number> {
+        return this.cleanup.deleteUnusedPropertyOptions(dryRun);
     }
 
     // SalesChannel-centric cleanup methods

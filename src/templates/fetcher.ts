@@ -40,7 +40,8 @@ export class TemplateFetcher {
     private repoInitialized = false;
 
     constructor(options: TemplateFetcherOptions = {}) {
-        this.repoUrl = options.repoUrl || process.env.TEMPLATE_REPO_URL || DEFAULT_TEMPLATE_REPO_URL;
+        this.repoUrl =
+            options.repoUrl || process.env.TEMPLATE_REPO_URL || DEFAULT_TEMPLATE_REPO_URL;
         this.cacheDir = path.resolve(
             options.cacheDir || process.env.TEMPLATE_CACHE_DIR || DEFAULT_TEMPLATE_CACHE_DIR
         );
@@ -119,11 +120,14 @@ export class TemplateFetcher {
 
             // Add the specific sales channel and properties folder to sparse checkout
             // Repository structure: generated/sales-channels/<name> and generated/properties
-            execSync(`git sparse-checkout add generated/sales-channels/${name} generated/properties`, {
-                cwd: this.cacheDir,
-                stdio: "inherit",
-                timeout: 300000, // 5 minutes for the actual files
-            });
+            execSync(
+                `git sparse-checkout add generated/sales-channels/${name} generated/properties`,
+                {
+                    cwd: this.cacheDir,
+                    stdio: "inherit",
+                    timeout: 300000, // 5 minutes for the actual files
+                }
+            );
 
             // Verify the template actually exists (sparse-checkout add doesn't fail for missing paths)
             const templatePath = this.getTemplatePath(name);

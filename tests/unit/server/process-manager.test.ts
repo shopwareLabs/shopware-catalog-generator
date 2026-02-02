@@ -156,7 +156,9 @@ describe("ProcessManager", () => {
             await sleep(50);
             const state = manager.get(processId);
             expect(state?.completedAt).toBeDefined();
-            expect(state?.completedAt?.getTime()).toBeGreaterThanOrEqual(state?.startedAt.getTime() ?? 0);
+            expect(state?.completedAt?.getTime()).toBeGreaterThanOrEqual(
+                state?.startedAt.getTime() ?? 0
+            );
         });
 
         test("failed task has status failed", async () => {

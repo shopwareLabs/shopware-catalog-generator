@@ -3,14 +3,18 @@
  */
 
 import { describe, expect, test } from "bun:test";
+
 import type { HydratedBlueprint } from "../../../src/types/index.js";
+
 import { hasValidationIssues, validateBlueprint } from "../../../src/utils/blueprint-validation.js";
 
 // =============================================================================
 // Test Fixtures
 // =============================================================================
 
-function createMockCategory(overrides: Partial<HydratedBlueprint["categories"][0]> = {}): HydratedBlueprint["categories"][0] {
+function createMockCategory(
+    overrides: Partial<HydratedBlueprint["categories"][0]> = {}
+): HydratedBlueprint["categories"][0] {
     return {
         id: "cat-1",
         name: "Category One",
@@ -22,7 +26,9 @@ function createMockCategory(overrides: Partial<HydratedBlueprint["categories"][0
     };
 }
 
-function createMockProduct(overrides: Partial<HydratedBlueprint["products"][0]> = {}): HydratedBlueprint["products"][0] {
+function createMockProduct(
+    overrides: Partial<HydratedBlueprint["products"][0]> = {}
+): HydratedBlueprint["products"][0] {
     return {
         id: "prod-1",
         name: "Product One",
@@ -173,9 +179,7 @@ describe("validateBlueprint", () => {
 
         test("detects placeholder category names", () => {
             const blueprint = createMockBlueprint({
-                categories: [
-                    createMockCategory({ id: "c1", name: "Top Category 1" }),
-                ],
+                categories: [createMockCategory({ id: "c1", name: "Top Category 1" })],
             });
             const result = validateBlueprint(blueprint);
 
@@ -256,9 +260,7 @@ describe("hasValidationIssues", () => {
 
     test("returns true for blueprint with issues", () => {
         const blueprint = createMockBlueprint({
-            products: [
-                createMockProduct({ id: "p1", name: "Product 1" }),
-            ],
+            products: [createMockProduct({ id: "p1", name: "Product 1" })],
         });
         expect(hasValidationIssues(blueprint)).toBe(true);
     });

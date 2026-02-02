@@ -23,8 +23,11 @@ interface CleanupArgs {
     deleteProps: boolean;
     deleteManufacturers: boolean;
     orphanedMedia: boolean;
+    unusedProps: boolean;
+    unusedOptions: boolean;
     processors: string[];
     full: boolean;
+    dryRun: boolean;
     help: boolean;
 }
 
@@ -35,12 +38,17 @@ function parseArgs(): CleanupArgs {
     let deleteProps = false;
     let deleteManufacturers = false;
     let orphanedMedia = false;
+    let unusedProps = false;
+    let unusedOptions = false;
     let processors: string[] = [];
     let full = false;
+    let dryRun = false;
     let help = false;
 
     for (const arg of args) {
-        if (arg.startsWith("--salesChannel=")) {
+        if (arg === "--dry-run") {
+            dryRun = true;
+        } else if (arg.startsWith("--salesChannel=")) {
             const value = arg.substring("--salesChannel=".length);
             salesChannel = value.replace(/^["']|["']$/g, "");
         } else if (arg === "--delete" || arg === "--delete-salesChannel") {
@@ -51,6 +59,10 @@ function parseArgs(): CleanupArgs {
             deleteManufacturers = true;
         } else if (arg === "--orphaned-media" || arg === "--media") {
             orphanedMedia = true;
+        } else if (arg === "--unused-props" || arg === "--unused-properties") {
+            unusedProps = true;
+        } else if (arg === "--unused-options") {
+            unusedOptions = true;
         } else if (arg.startsWith("--processors=") || arg.startsWith("--only=")) {
             const value = arg.includes("--processors=")
                 ? arg.substring("--processors=".length)
@@ -72,8 +84,11 @@ function parseArgs(): CleanupArgs {
         deleteProps,
         deleteManufacturers,
         orphanedMedia,
+        unusedProps,
+        unusedOptions,
         processors,
         full,
+        dryRun,
         help,
     };
 }
@@ -98,15 +113,26 @@ Usage:
   bun run cleanup -- --salesChannel="name" --full            Complete cleanup (processors + core + SC)
   bun run cleanup:media                                      Delete orphaned product media
 
+Global Cleanup (no SalesChannel required):
+  bun run cleanup -- --unused-props                          Delete property groups with no used options
+  bun run cleanup -- --unused-options                        Delete individual unused property options
+  bun run cleanup -- --orphaned-media                        Delete media not linked to any product
+
 Options:
-  --salesChannel=<name>   SalesChannel to clean up (required)
+  --salesChannel=<name>   SalesChannel to clean up (required for most operations)
   --delete                Also delete the SalesChannel itself
   --props                 Also delete all property groups (use with caution)
   --processors=<list>     Cleanup entities from specific processors (comma-separated)
   --processors=all        Cleanup entities from ALL processors
   --full                  Full cleanup: run all processor cleanups, then core cleanup
   --orphaned-media        Delete media where the linked product no longer exists
+  --unused-props          Delete property groups where no options are used by products
+  --unused-options        Delete individual property options not used by any product
+  --dry-run               Preview what would be deleted without making changes
   --help, -h              Show this help message
+
+Note: Reviews are cascade-deleted by Shopware when products are deleted.
+      Use --processors=reviews with --salesChannel to delete reviews for a specific store.
 
 Available Processors: ${availableProcessors}
 
@@ -115,9 +141,15 @@ Examples:
   bun run cleanup -- --salesChannel="electronics" --delete
   bun run cleanup -- --salesChannel="soft-drinks" --delete --props
   bun run cleanup -- --salesChannel="music" --processors=cms
+  bun run cleanup -- --salesChannel="music" --processors=reviews  # Delete reviews for this store
   bun run cleanup -- --salesChannel="music" --processors=all
   bun run cleanup -- --salesChannel="music" --full --delete
   bun run cleanup:media
+
+  # Global cleanup (removes unused entities across ALL SalesChannels)
+  bun run cleanup -- --unused-props                    # Clean up unused property groups
+  bun run cleanup -- --unused-options                  # Clean up unused property options only
+  bun run cleanup -- --unused-props --dry-run          # Preview without deleting
 `);
 }
 
@@ -128,8 +160,11 @@ async function main(): Promise<void> {
         deleteProps,
         deleteManufacturers,
         orphanedMedia,
+        unusedProps,
+        unusedOptions,
         processors,
         full,
+        dryRun,
         help,
     } = parseArgs();
 
@@ -139,8 +174,11 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
+    // Check if any global cleanup operation is requested
+    const hasGlobalCleanup = orphanedMedia || unusedProps || unusedOptions;
+
     // Validate arguments
-    if (!salesChannel && !orphanedMedia) {
+    if (!salesChannel && !hasGlobalCleanup) {
         printUsage();
         process.exit(1);
     }
@@ -167,11 +205,38 @@ async function main(): Promise<void> {
     console.log(`\n=== Shopware Cleanup ===\n`);
     console.log(`Environment: ${swEnvUrl}`);
 
-    if (orphanedMedia) {
-        // Delete orphaned product media
-        console.log(`\nSearching for orphaned product media...`);
-        const count = await hydrator.deleteOrphanedProductMedia();
-        console.log(`\nCleanup complete: ${count} orphaned media files deleted.`);
+    // Handle global cleanup operations (no SalesChannel required)
+    if (hasGlobalCleanup) {
+        if (dryRun) {
+            console.log(`\n[DRY RUN] Preview mode - no changes will be made\n`);
+        }
+
+        let totalDeleted = 0;
+
+        if (unusedProps) {
+            console.log(`\n--- Unused Property Groups ---`);
+            const count = await hydrator.deleteUnusedPropertyGroups(dryRun);
+            totalDeleted += count;
+        }
+
+        if (unusedOptions) {
+            console.log(`\n--- Unused Property Options ---`);
+            const count = await hydrator.deleteUnusedPropertyOptions(dryRun);
+            totalDeleted += count;
+        }
+
+        if (orphanedMedia) {
+            console.log(`\n--- Orphaned Product Media ---`);
+            const count = await hydrator.deleteOrphanedProductMedia(dryRun);
+            totalDeleted += count;
+        }
+
+        console.log(`\n=== Global Cleanup Complete ===`);
+        if (dryRun) {
+            console.log(`Total entities that would be deleted: ${totalDeleted}`);
+        } else {
+            console.log(`Total entities deleted: ${totalDeleted}`);
+        }
     } else if (salesChannel && (processors.length > 0 || full)) {
         // Expand "all" to all processor names
         let processorList = processors;

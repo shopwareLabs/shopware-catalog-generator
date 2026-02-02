@@ -229,11 +229,11 @@ Client                       Server                      ProcessManager
 
 ### Endpoints
 
-| Method | Endpoint       | Description                              |
-|--------|----------------|------------------------------------------|
-| POST   | `/generate`    | Start background generation              |
-| GET    | `/status/:id`  | Poll process status, progress, and logs  |
-| GET    | `/health`      | Health check with active process count   |
+| Method | Endpoint      | Description                             |
+| ------ | ------------- | --------------------------------------- |
+| POST   | `/generate`   | Start background generation             |
+| GET    | `/status/:id` | Poll process status, progress, and logs |
+| GET    | `/health`     | Health check with active process count  |
 
 ### Process States
 
@@ -266,12 +266,12 @@ Client                       Server                      ProcessManager
 
 The generate task reports progress through these phases:
 
-| Phase       | Steps | Description                           |
-|-------------|-------|---------------------------------------|
-| auth        | 0-1   | Shopware authentication               |
-| blueprint   | 0-2   | Create/load/hydrate blueprint         |
-| upload      | 0-4   | Sync to Shopware                      |
-| processors  | 0-N   | Run post-processors                   |
+| Phase      | Steps | Description                   |
+| ---------- | ----- | ----------------------------- |
+| auth       | 0-1   | Shopware authentication       |
+| blueprint  | 0-2   | Create/load/hydrate blueprint |
+| upload     | 0-4   | Sync to Shopware              |
+| processors | 0-N   | Run post-processors           |
 
 ---
 
@@ -373,13 +373,13 @@ generated/
 ### How It Works
 
 1. **AI suggests group names** based on product and store context
-   - Beauty store, Shampoo → `["Volume", "Scent", "Hair Type"]`
-   - Fashion store, T-Shirt → `["Size", "Color", "Fit"]`
-   - Furniture store, Chair → `["Material", "Color", "Style"]`
+    - Beauty store, Shampoo → `["Volume", "Scent", "Hair Type"]`
+    - Fashion store, T-Shirt → `["Size", "Color", "Fit"]`
+    - Furniture store, Chair → `["Material", "Color", "Style"]`
 
 2. **Cache lookup** for each suggested group (store-scoped first, then universal)
-   - Hit: Reuse cached options (consistency within store)
-   - Miss: AI generates options, saved to store's property cache
+    - Hit: Reuse cached options (consistency within store)
+    - Miss: AI generates options, saved to store's property cache
 
 3. **Option selection**: 40-60% of available options per group
 
@@ -387,12 +387,13 @@ generated/
 
 ### Universal vs Store-Specific Properties
 
-| Type | Location | Examples |
-|------|----------|----------|
-| Universal | `generated/properties/` | Color (with hex codes) |
+| Type           | Location                                       | Examples                            |
+| -------------- | ---------------------------------------------- | ----------------------------------- |
+| Universal      | `generated/properties/`                        | Color (with hex codes)              |
 | Store-specific | `generated/sales-channels/{store}/properties/` | Volume, Scent, Size, Material, etc. |
 
 The AI prompt includes store name, description, and product categories to generate contextually appropriate properties. This ensures:
+
 - Beauty stores get `Volume` (ml, oz), `Scent`, `Skin Type`
 - Fashion stores get `Size` (S, M, L), `Fabric`, `Fit`
 - Furniture stores get `Material`, `Dimensions`, `Style`
@@ -427,13 +428,13 @@ Processors can declare dependencies to control execution order:
 
 ### Available Processors
 
-| Processor | Description | Dependencies |
-|-----------|-------------|--------------|
-| `cms` | CMS landing pages and category links | None |
-| `images` | Product and category images | None |
-| `manufacturers` | Fictional manufacturer creation | None |
-| `reviews` | Product reviews (0-10 per product) | None |
-| `variants` | Variant product creation | manufacturers |
+| Processor       | Description                          | Dependencies  |
+| --------------- | ------------------------------------ | ------------- |
+| `cms`           | CMS landing pages and category links | None          |
+| `images`        | Product and category images          | None          |
+| `manufacturers` | Fictional manufacturer creation      | None          |
+| `reviews`       | Product reviews (0-10 per product)   | None          |
+| `variants`      | Variant product creation             | manufacturers |
 
 ### Processor Interface
 
@@ -489,12 +490,12 @@ The generator supports multiple AI providers with a unified interface.
 
 ### Provider Selection
 
-| Use Case | Recommended | Why |
-|----------|-------------|-----|
-| Testing/Demos | Pollinations | Free, no API key |
-| GitHub users | GitHub Models | Uses existing token |
-| Production | OpenAI | Best quality, parallel |
-| High volume | OpenAI + sk_* | Maximum throughput |
+| Use Case      | Recommended     | Why                    |
+| ------------- | --------------- | ---------------------- |
+| Testing/Demos | Pollinations    | Free, no API key       |
+| GitHub users  | GitHub Models   | Uses existing token    |
+| Production    | OpenAI          | Best quality, parallel |
+| High volume   | OpenAI + sk\_\* | Maximum throughput     |
 
 ### Interface
 
@@ -506,10 +507,7 @@ interface TextProvider {
     readonly maxConcurrency: number;
     readonly tokenLimit: number;
 
-    generateCompletion(
-        messages: ChatMessage[],
-        schema?: z.ZodTypeAny
-    ): Promise<string>;
+    generateCompletion(messages: ChatMessage[], schema?: z.ZodTypeAny): Promise<string>;
 }
 ```
 

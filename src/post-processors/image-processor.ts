@@ -7,6 +7,13 @@
  * 3. Sets cover image and gallery images
  */
 
+import type {
+    PostProcessor,
+    PostProcessorCleanupResult,
+    PostProcessorContext,
+    PostProcessorResult,
+} from "./index.js";
+
 import {
     apiPost,
     apiUpload,
@@ -16,13 +23,6 @@ import {
     generateUUID,
     logger,
 } from "../utils/index.js";
-
-import type {
-    PostProcessor,
-    PostProcessorCleanupResult,
-    PostProcessorContext,
-    PostProcessorResult,
-} from "./index.js";
 
 /**
  * Image Processor implementation
@@ -643,15 +643,11 @@ class ImageProcessorImpl implements PostProcessor {
 
         try {
             // First try to find the default folder for categories
-            const defaultFolderResponse = await apiPost(
-                context,
-                "search/media-default-folder",
-                {
-                    limit: 1,
-                    filter: [{ type: "equals", field: "entity", value: "category" }],
-                    associations: { folder: {} },
-                }
-            );
+            const defaultFolderResponse = await apiPost(context, "search/media-default-folder", {
+                limit: 1,
+                filter: [{ type: "equals", field: "entity", value: "category" }],
+                associations: { folder: {} },
+            });
 
             if (defaultFolderResponse.ok) {
                 const data = (await defaultFolderResponse.json()) as {

@@ -361,6 +361,7 @@ logs/
 ```
 
 **Property system:**
+
 - **Universal properties** (only `Color`): Stored in `generated/properties/` with hex codes
 - **Store-specific properties**: AI-generated based on store context, stored in each SalesChannel's `properties/` folder
 
@@ -383,11 +384,12 @@ Description: ${storeContext.description}`;
 
 // Good: Generic pattern matching
 if (normalizedName.endsWith(cachedName)) {
-    return cachedName;  // "Pot Size" matches cached "Size"
+    return cachedName; // "Pot Size" matches cached "Size"
 }
 ```
 
 Key principles:
+
 - AI prompts should derive context from `storeContext.name` and `storeContext.description`
 - Property/category normalization should use generic pattern matching, not hardcoded synonyms
 - Examples in prompts should be abstract or derived from the actual store type
@@ -447,6 +449,7 @@ Benefits:
 **All new code MUST have unit tests.**
 
 See **[tests/AGENTS.md](tests/AGENTS.md)** for detailed testing documentation including:
+
 - Directory structure (must mirror `src/`)
 - Test patterns and best practices
 - Mock providers usage
@@ -558,9 +561,7 @@ for (const sc of relData) {
 }
 
 // Good: Functional approach
-const salesChannelIds = relData
-    .filter(sc => sc.id)
-    .map(sc => sc.id);
+const salesChannelIds = relData.filter((sc) => sc.id).map((sc) => sc.id);
 ```
 
 #### 5. Descriptive Function Names - What, Not How
@@ -669,21 +670,17 @@ If you write the same code in two places, extract it:
 ```typescript
 // Bad: Same pattern in multiple files
 // file1.ts
-const salesChannelIds = data.relationships?.salesChannels?.data
-    ?.filter(sc => sc.id)
-    .map(sc => sc.id) ?? [];
+const salesChannelIds =
+    data.relationships?.salesChannels?.data?.filter((sc) => sc.id).map((sc) => sc.id) ?? [];
 
 // file2.ts
-const salesChannelIds = data.relationships?.salesChannels?.data
-    ?.filter(sc => sc.id)
-    .map(sc => sc.id) ?? [];
+const salesChannelIds =
+    data.relationships?.salesChannels?.data?.filter((sc) => sc.id).map((sc) => sc.id) ?? [];
 
 // Good: Extract to utility
 // utils/shopware.ts
 export function extractSalesChannelIds(data: ShopwareEntity): string[] {
-    return data.relationships?.salesChannels?.data
-        ?.filter(sc => sc.id)
-        .map(sc => sc.id) ?? [];
+    return data.relationships?.salesChannels?.data?.filter((sc) => sc.id).map((sc) => sc.id) ?? [];
 }
 ```
 

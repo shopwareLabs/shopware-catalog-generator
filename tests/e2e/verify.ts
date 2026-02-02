@@ -10,6 +10,7 @@
  */
 
 import type { ShopwareClient } from "../../src/shopware/client.js";
+
 import { DataHydrator } from "../../src/shopware/index.js";
 import { isPlaceholder } from "../../src/utils/index.js";
 

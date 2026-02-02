@@ -1,10 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
+import type { HydratedBlueprint } from "../../../src/types/index.js";
+
 // Mock the ManufacturerProcessor by importing the module
 // We need to test the exported singleton
 import { ManufacturerProcessor } from "../../../src/post-processors/manufacturer-processor.js";
-import type { HydratedBlueprint } from "../../../src/types/index.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint

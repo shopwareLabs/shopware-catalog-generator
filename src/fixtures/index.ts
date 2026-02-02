@@ -12,10 +12,7 @@
 // CMS Pages
 export { VIDEO_ELEMENTS_PAGE } from "./cms-pages.js";
 // Property Groups (universal groups for seeding generated/properties/)
-export {
-    getUniversalPropertyGroups,
-    UNIVERSAL_PROPERTY_GROUPS,
-} from "./property-groups.js";
+export { getUniversalPropertyGroups, UNIVERSAL_PROPERTY_GROUPS } from "./property-groups.js";
 // Review Data
 export {
     getReviewContent,
