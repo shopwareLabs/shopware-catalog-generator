@@ -194,20 +194,37 @@ class Logger {
     }
 
     /**
-     * Log API error with brief console message, full details in log file
+     * Log Shopware API error with brief console message, full details in log file
      */
     apiError(endpoint: string, status: number, response: unknown): void {
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
             level: "error",
-            message: `API Error: ${endpoint} returned ${status}`,
+            message: `[Shopware] API Error: ${endpoint} returned ${status}`,
             data: response,
         };
 
         this.writeToFile(entry);
 
         // Brief console message with hint to check log file
-        console.error(`API Error: ${endpoint} returned ${status} (see log file for details)`);
+        console.error(`[Shopware] API Error: ${endpoint} returned ${status} (see log file for details)`);
+    }
+
+    /**
+     * Log AI provider error with brief console message, full details in log file
+     */
+    aiError(provider: string, operation: string, error: unknown): void {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const entry: LogEntry = {
+            timestamp: new Date().toISOString(),
+            level: "error",
+            message: `[AI Provider: ${provider}] ${operation} failed: ${errorMessage}`,
+            data: error,
+        };
+
+        this.writeToFile(entry);
+
+        // Console message is handled by the provider for helpful tips
     }
 }
 

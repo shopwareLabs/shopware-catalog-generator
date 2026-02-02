@@ -237,7 +237,7 @@ export class BlueprintHydrator {
 
         try {
             response = await executeWithRetry(async () => {
-                logger.debug("Calling text provider for categories...");
+                logger.debug(`[AI Provider: ${this.textProvider.name}] Generating categories...`);
                 return this.textProvider.generateCompletion(
                     [
                         {
@@ -253,14 +253,15 @@ export class BlueprintHydrator {
             });
         } catch (error) {
             const elapsed = Date.now() - startTime;
-            logger.error(`Category API call failed after ${elapsed}ms`, {
+            logger.error(`[AI Provider] Category generation failed after ${elapsed}ms`, {
+                provider: this.textProvider.name,
                 error: error instanceof Error ? error.message : String(error),
             });
             throw error;
         }
 
         const elapsed = Date.now() - startTime;
-        logger.info(`Category API call completed in ${elapsed}ms`, {
+        logger.info(`[AI Provider: ${this.textProvider.name}] Categories generated in ${elapsed}ms`, {
             responseLength: response.length,
         });
 
@@ -524,7 +525,7 @@ Return JSON in this exact format:
         }
 
         const prompt = this.buildProductPrompt(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
-        logger.debug(`API call: ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`, {
+        logger.debug(`[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`, {
             productIds: products.map((p) => p.id.slice(0, 8)),
             promptLength: prompt.length,
             subCategories: Array.from(subCategories),
@@ -541,7 +542,7 @@ Return JSON in this exact format:
     private async callProductApi(branchName: string, prompt: string, startTime: number): Promise<string> {
         try {
             return await executeWithRetry(async () => {
-                logger.debug(`Calling text provider for "${branchName}"...`, { promptLength: prompt.length });
+                logger.debug(`[AI Provider: ${this.textProvider.name}] Generating products for "${branchName}"...`, { promptLength: prompt.length });
                 return this.textProvider.generateCompletion(
                     [
                         { role: "system", content: "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns." },
@@ -553,7 +554,8 @@ Return JSON in this exact format:
             });
         } catch (error) {
             const elapsed = Date.now() - startTime;
-            logger.error(`API call failed for "${branchName}" after ${elapsed}ms`, {
+            logger.error(`[AI Provider] Product generation failed for "${branchName}" after ${elapsed}ms`, {
+                provider: this.textProvider.name,
                 error: error instanceof Error ? error.message : String(error),
             });
             throw error;
@@ -572,7 +574,7 @@ Return JSON in this exact format:
     ): Promise<BlueprintProduct[]> {
         const elapsed = Date.now() - startTime;
         const elapsedSec = (elapsed / 1000).toFixed(1);
-        logger.info(`API call completed for "${branchName}" in ${elapsed}ms`, { responseLength: response.length });
+        logger.info(`[AI Provider: ${this.textProvider.name}] Products generated for "${branchName}" in ${elapsed}ms`, { responseLength: response.length });
 
         try {
             const parsed = JSON.parse(response) as ProductResponse;

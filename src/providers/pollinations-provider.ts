@@ -46,9 +46,58 @@ export class PollinationsTextProvider implements TextProvider {
             requestOptions.response_format = zodResponseFormat(schema, schemaName);
         }
 
-        const completion = await this.client.chat.completions.create(requestOptions);
+        try {
+            const completion = await this.client.chat.completions.create(requestOptions);
+            return completion.choices[0]?.message.content || "";
+        } catch (error) {
+            // Enhance error message with provider context and helpful tips
+            this.handleApiError(error);
+            throw error;
+        }
+    }
 
-        return completion.choices[0]?.message.content || "";
+    /**
+     * Parse API errors and provide helpful messages
+     */
+    private handleApiError(error: unknown): void {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const status = this.extractStatusCode(error);
+
+        console.error(`\n❌ Pollinations AI text generation failed`);
+        console.error(`   Error: ${errorMessage}`);
+
+        if (status === 401 || errorMessage.includes("401") || errorMessage.includes("Invalid API key")) {
+            console.info(`\n💡 TIP: Authentication failed with Pollinations.`);
+            console.info(`   Possible fixes:`);
+            console.info(`   1. Check your AI_API_KEY in .env is correct`);
+            console.info(`   2. Remove AI_API_KEY to use the free tier (no key needed)`);
+            console.info(`   3. Get a new key from enter.pollinations.ai`);
+        } else if (status === 429 || errorMessage.includes("429") || errorMessage.includes("rate")) {
+            console.info(`\n💡 TIP: Rate limited by Pollinations.`);
+            console.info(`   Wait a moment and try again, or get an API key from enter.pollinations.ai`);
+        }
+
+        console.log(""); // Empty line for readability
+    }
+
+    /**
+     * Try to extract HTTP status code from error
+     */
+    private extractStatusCode(error: unknown): number | null {
+        if (error && typeof error === "object") {
+            // OpenAI SDK error format
+            if ("status" in error && typeof error.status === "number") {
+                return error.status;
+            }
+            // Nested error format
+            if ("error" in error && error.error && typeof error.error === "object") {
+                const innerError = error.error as Record<string, unknown>;
+                if ("status" in innerError && typeof innerError.status === "number") {
+                    return innerError.status;
+                }
+            }
+        }
+        return null;
     }
 }
 
