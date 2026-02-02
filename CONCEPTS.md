@@ -277,21 +277,34 @@ The generate task reports progress through these phases:
 
 ## Property System
 
-The property system handles variant options with a smart caching approach.
+The property system handles variant options with a store-scoped caching approach.
 
 ### Property Cache
 
-Located at `generated/properties/`, stores property group definitions:
+Properties are stored at two levels:
 
 ```
 generated/
-  properties/
-    size.json          # Common: Size options
-    color.json         # Common: Color options
-    guitar-finish.json # Domain-specific: Guitar finishes
-    pickup-type.json   # AI-generated: New groups
-    ...
+  properties/                              # Universal properties (shared across all stores)
+    color.json                             # Color with hex codes
+    index.json
+  sales-channels/
+    beauty/
+      properties/                          # Store-specific properties
+        volume.json                        # AI-generated for beauty
+        scent.json
+        skin-type.json
+        index.json
+    furniture/
+      properties/
+        material.json                      # AI-generated for furniture
+        dimensions.json
+        style.json
+        index.json
 ```
+
+- **Universal properties** (only `Color`): Stored globally with comprehensive hex codes
+- **Store-specific properties**: AI-generated based on store context and product categories
 
 ### Variant Generation Flow
 
@@ -299,15 +312,17 @@ generated/
                          DURING AI HYDRATION
 ┌──────────────────────────────────────────────────────────────────┐
 │                                                                  │
-│  Variant Product                                                 │
+│  Variant Product + Store Context                                 │
 │       │                                                          │
 │       ⯆                                                          │
-│  AI suggests group names                                         │
-│  (e.g., ["Finish", "Body Wood"])                                 │
+│  AI suggests group names based on store + product                │
+│  (e.g., beauty store → ["Volume", "Scent", "Hair Type"])         │
 │       │                                                          │
 │       ⯆                                                          │
 │  ┌────────────────────────────┐                                  │
 │  │   Group in cache?          │                                  │
+│  │   (store-scoped first,     │                                  │
+│  │    then universal)         │                                  │
 │  └────────────┬───────────────┘                                  │
 │               │                                                  │
 │       ┌───────┴───────┐                                          │
@@ -319,8 +334,8 @@ generated/
 │  options         new options                                     │
 │       │               │                                          │
 │       │               ⯆                                          │
-│       │          Save to cache ──────> generated/properties/     │
-│       │               │                                          │
+│       │          Save to store cache ─> sales-channels/{store}/  │
+│       │               │                      properties/         │
 │       └───────┬───────┘                                          │
 │               │                                                  │
 │               ⯆                                                  │
@@ -357,27 +372,30 @@ generated/
 
 ### How It Works
 
-1. **AI suggests group names** based on product context
-   - Guitar → `["Finish", "Body Wood"]`
-   - T-Shirt → `["Size", "Color"]`
+1. **AI suggests group names** based on product and store context
+   - Beauty store, Shampoo → `["Volume", "Scent", "Hair Type"]`
+   - Fashion store, T-Shirt → `["Size", "Color", "Fit"]`
+   - Furniture store, Chair → `["Material", "Color", "Style"]`
 
-2. **Cache lookup** for each suggested group
-   - Hit: Reuse cached options (consistency)
-   - Miss: AI generates options, saved to cache
+2. **Cache lookup** for each suggested group (store-scoped first, then universal)
+   - Hit: Reuse cached options (consistency within store)
+   - Miss: AI generates options, saved to store's property cache
 
 3. **Option selection**: 40-60% of available options per group
 
 4. **Variant creation**: Cartesian product of all selected options
 
-### Default Property Groups
+### Universal vs Store-Specific Properties
 
-Seeded from `src/fixtures/property-groups.ts` on first use:
+| Type | Location | Examples |
+|------|----------|----------|
+| Universal | `generated/properties/` | Color (with hex codes) |
+| Store-specific | `generated/sales-channels/{store}/properties/` | Volume, Scent, Size, Material, etc. |
 
-| Category | Groups |
-|----------|--------|
-| Common | Size, Color, Material, Finish, Style, Pattern |
-| Music | Body Wood, Pickup Configuration, Neck Wood, Guitar Finish, Drum Size |
-| Fashion | Shoe Size, Waist Size, Length |
+The AI prompt includes store name, description, and product categories to generate contextually appropriate properties. This ensures:
+- Beauty stores get `Volume` (ml, oz), `Scent`, `Skin Type`
+- Fashion stores get `Size` (S, M, L), `Fabric`, `Fit`
+- Furniture stores get `Material`, `Dimensions`, `Style`
 
 ---
 
@@ -505,10 +523,9 @@ The generator caches all data locally for fast re-runs.
 
 ```
 generated/
-├── properties/                    # Global property cache
-│   ├── size.json
-│   ├── color.json
-│   └── ...
+├── properties/                    # Universal property cache (Color only)
+│   ├── color.json                 # Color with hex codes
+│   └── index.json
 └── sales-channels/
     └── furniture/                 # Per-SalesChannel data
         ├── metadata.json          # SalesChannel info
@@ -517,6 +534,10 @@ generated/
         ├── categories.json        # Category tree
         ├── property-groups.json   # Synced from Shopware
         ├── manufacturers.json     # Created manufacturers
+        ├── properties/            # Store-specific properties
+        │   ├── material.json      # AI-generated for this store
+        │   ├── style.json
+        │   └── index.json
         ├── metadata/
         │   └── {productId}.json   # Per-product metadata
         └── images/
@@ -631,30 +652,33 @@ User                CLI              Blueprint        Hydrator          AI      
 ### Property Resolution Flow
 
 ```
-Hydrator          AI           Property         Variant         Shopware
-    │              │            Cache           Processor           │
+Hydrator          AI           Property Cache      Variant         Shopware
+    │              │         (store-scoped)       Processor           │
     │              │              │                │                │
     │  Suggest     │              │                │                │
     │  groups for  │              │                │                │
-    │  "guitar"    │              │                │                │
+    │  beauty +    │              │                │                │
+    │  "shampoo"   │              │                │                │
     │─────────────>│              │                │                │
     │              │              │                │                │
-    │  ["Finish",  │              │                │                │
-    │   "Body      │              │                │                │
-    │    Wood"]    │              │                │                │
+    │  ["Volume",  │              │                │                │
+    │   "Scent",   │              │                │                │
+    │   "Hair      │              │                │                │
+    │    Type"]    │              │                │                │
     │<─────────────│              │                │                │
     │              │              │                │                │
-    │  Has "Finish"?              │                │                │
+    │  Has "Volume"?              │                │                │
+    │  (check beauty/properties/) │                │                │
     │────────────────────────────>│                │                │
     │              │              │                │                │
-    │  Yes (cached)               │                │                │
+    │  Yes (cached for beauty)    │                │                │
     │<────────────────────────────│                │                │
     │              │              │                │                │
     │  Get options                │                │                │
     │────────────────────────────>│                │                │
     │              │              │                │                │
-    │  [Sunburst,                 │                │                │
-    │   Natural, ...]             │                │                │
+    │  [30ml, 50ml,               │                │                │
+    │   100ml, 200ml, ...]        │                │                │
     │<────────────────────────────│                │                │
     │              │              │                │                │
     │  Select 40-60%              │                │                │

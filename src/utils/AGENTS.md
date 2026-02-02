@@ -122,6 +122,8 @@ Checks for:
 - **Duplicate category names** at same level (warning)
 - **Placeholder names** (e.g., "Product 1", "Top Category 1")
 - **Missing required fields** (salesChannel.name, products, categories)
+- **Property group validation**: missing names, empty options, missing color hex codes
+- **Orphan property references**: products referencing non-existent property groups
 
 Used automatically in the sync flow before uploading to Shopware.
 

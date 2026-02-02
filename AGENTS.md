@@ -57,6 +57,7 @@ src/
 │   ├── index.ts              # Re-exports all fixtures
 │   ├── types.ts              # Fixture type definitions
 │   ├── cms-pages.ts          # CMS page configurations (video-elements, etc.)
+│   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
 │
 ├── templates/                # Pre-generated catalog templates
@@ -80,10 +81,14 @@ src/
 │   └── process-manager.ts    # Background task management
 │
 ├── cache.ts                  # DataCache class (+ blueprint storage)
+├── property-cache.ts         # PropertyCache (store-scoped property caching)
 ├── main.ts                   # CLI entry point (v2 subcommand-based)
 ├── server.ts                 # HTTP server entry (Bun.serve)
 ├── cache-cli.ts              # Cache management CLI
 └── cleanup-cli.ts            # Cleanup CLI (+ manufacturer cleanup)
+
+scripts/
+└── migrate-properties.ts     # One-time migration for store-scoped properties
 
 tests/
 ├── unit/                     # Unit tests
@@ -101,6 +106,8 @@ tests/
 │   ├── color-palette.test.ts        # Color matching tests
 │   ├── entities.test.ts
 │   ├── validation.test.ts
+│   ├── property-validation.test.ts  # Property group validation tests
+│   ├── property-cache.test.ts       # Store-scoped property cache tests
 │   ├── saleschannel-cache.test.ts
 │   ├── shopware-export.test.ts
 │   ├── retry.test.ts
@@ -311,19 +318,26 @@ const results = await limiter.all(tasks.map((t) => () => processTask(t)));
 
 ### Caching (SalesChannel-scoped)
 
-All cache is organized by SalesChannel:
+Cache is organized with universal properties at the root and store-specific data per SalesChannel:
 
 ```
 generated/
+├── properties/                     # Universal properties (Color only)
+│   ├── color.json                  # Color with hex codes
+│   └── index.json
 └── sales-channels/
     └── {salesChannel}/
         ├── metadata.json           # SalesChannel info
+        ├── blueprint.json          # Phase 1 output
+        ├── hydrated-blueprint.json # Phase 2 output
         ├── categories.json         # Category tree
-        ├── property-groups.json    # Property groups with option IDs
-        ├── products/
-        │   └── {category}/
-        │       ├── products.json         # Products per category
-        │       └── property-options.json # Option ID->name mapping (for future remapping)
+        ├── property-groups.json    # Property groups synced from Shopware
+        ├── properties/             # Store-specific AI-generated properties
+        │   ├── volume.json         # e.g., for beauty store
+        │   ├── scent.json
+        │   └── index.json
+        ├── metadata/
+        │   └── {productId}.json    # Per-product metadata
         └── images/
             └── {productId}.webp    # Product images
 
@@ -331,11 +345,38 @@ logs/
 └── generator-{timestamp}.log       # Detailed API logs (not in generated/)
 ```
 
-The `property-options.json` file stores the id-to-name mapping for property options
-used in that category's products. This enables future remapping if property groups
-are recreated with new IDs.
+**Property system:**
+- **Universal properties** (only `Color`): Stored in `generated/properties/` with hex codes
+- **Store-specific properties**: AI-generated based on store context, stored in each SalesChannel's `properties/` folder
 
 ## Code Conventions
+
+### No Domain-Specific Hardcoding
+
+**NEVER hardcode store-type-specific values (e.g., "furniture", "beauty", "garden").** This generator supports ANY store type that users might create.
+
+```typescript
+// Bad: Hardcoded domain examples
+const prompt = `Generate category names for a furniture webshop.`;
+const synonyms = { "pot size": "size", "blade material": "material" };
+const prefixes = ["guitar", "piano", "plant", "flower"];
+
+// Good: Use dynamic store context
+const prompt = `Generate category names for this webshop.
+Store: "${storeContext.name}"
+Description: ${storeContext.description}`;
+
+// Good: Generic pattern matching
+if (normalizedName.endsWith(cachedName)) {
+    return cachedName;  // "Pot Size" matches cached "Size"
+}
+```
+
+Key principles:
+- AI prompts should derive context from `storeContext.name` and `storeContext.description`
+- Property/category normalization should use generic pattern matching, not hardcoded synonyms
+- Examples in prompts should be abstract or derived from the actual store type
+- The only hardcoded property is `Color` (universal across all domains)
 
 ### Idempotency
 

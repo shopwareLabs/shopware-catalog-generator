@@ -4,9 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-    DEFAULT_PROPERTY_GROUPS,
-    getAllPropertyGroups,
-    getCommonPropertyGroups,
+    getUniversalPropertyGroups,
+    UNIVERSAL_PROPERTY_GROUPS,
+    getColorHexCode,
+    COLOR_HEX_MAP,
 } from "../../src/fixtures/property-groups.js";
 import { PropertyCache } from "../../src/property-cache.js";
 import type { CachedPropertyGroup } from "../../src/types/index.js";
@@ -305,67 +306,213 @@ describe("PropertyCache", () => {
     });
 });
 
-describe("Property Group Fixtures", () => {
-    test("DEFAULT_PROPERTY_GROUPS contains all default groups", () => {
-        expect(DEFAULT_PROPERTY_GROUPS.length).toBeGreaterThan(0);
+describe("Store-scoped PropertyCache", () => {
+    let tempDir: string;
 
-        const names = DEFAULT_PROPERTY_GROUPS.map((g) => g.name);
-        expect(names).toContain("Size");
-        expect(names).toContain("Color");
-        expect(names).toContain("Material");
-        expect(names).toContain("Body Wood");
-        expect(names).toContain("Shoe Size");
+    beforeEach(() => {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "store-cache-test-"));
     });
 
-    test("getCommonPropertyGroups() returns common groups only", () => {
-        const commonGroups = getCommonPropertyGroups();
+    afterEach(() => {
+        if (fs.existsSync(tempDir)) {
+            fs.rmSync(tempDir, { recursive: true });
+        }
+    });
 
-        const names = commonGroups.map((g) => g.name);
-        expect(names).toContain("Size");
+    test("forStore() creates store-scoped cache", () => {
+        const storeCache = PropertyCache.forStore(tempDir, "beauty-store");
+
+        expect(storeCache.isStoreScoped()).toBe(true);
+        expect(storeCache.getStoreSlug()).toBe("beauty-store");
+    });
+
+    test("global() creates global cache", () => {
+        const globalCache = PropertyCache.global(tempDir);
+
+        expect(globalCache.isStoreScoped()).toBe(false);
+        expect(globalCache.getStoreSlug()).toBeNull();
+    });
+
+    test("store-scoped cache uses store-specific directory", () => {
+        const storeCache = PropertyCache.forStore(tempDir, "my-store");
+
+        storeCache.save({
+            name: "Volume",
+            slug: "volume",
+            displayType: "text",
+            options: ["50ml", "100ml", "200ml"],
+            createdAt: new Date().toISOString(),
+            source: "ai-generated",
+        });
+
+        const expectedPath = path.join(tempDir, "sales-channels", "my-store", "properties", "volume.json");
+        expect(fs.existsSync(expectedPath)).toBe(true);
+    });
+
+    test("universal properties (Color) are saved to global cache", () => {
+        const storeCache = PropertyCache.forStore(tempDir, "my-store");
+
+        // Color is a universal property and should go to global cache
+        storeCache.save({
+            name: "Color",
+            slug: "color",
+            displayType: "color",
+            options: ["Red", "Blue"],
+            createdAt: new Date().toISOString(),
+            source: "fixture",
+        });
+
+        // Should be in global cache, not store-specific
+        const globalPath = path.join(tempDir, "properties", "color.json");
+        const storePath = path.join(tempDir, "sales-channels", "my-store", "properties", "color.json");
+
+        expect(fs.existsSync(globalPath)).toBe(true);
+        expect(fs.existsSync(storePath)).toBe(false);
+    });
+
+    test("store-scoped cache loads global properties", () => {
+        // First, save a global property
+        const globalCache = PropertyCache.global(tempDir);
+        globalCache.save({
+            name: "Color",
+            slug: "color",
+            displayType: "color",
+            options: ["Red", "Blue", "Green"],
+            createdAt: new Date().toISOString(),
+            source: "fixture",
+        });
+
+        // Then create a store-scoped cache
+        const storeCache = PropertyCache.forStore(tempDir, "my-store");
+
+        // Should be able to access the global Color property
+        expect(storeCache.has("Color")).toBe(true);
+        const colorGroup = storeCache.get("Color");
+        expect(colorGroup?.options).toContain("Red");
+    });
+
+    test("store-scoped cache combines global and store properties", () => {
+        // Save global property
+        const globalCache = PropertyCache.global(tempDir);
+        globalCache.save({
+            name: "Color",
+            slug: "color",
+            displayType: "color",
+            options: ["Red", "Blue"],
+            createdAt: new Date().toISOString(),
+            source: "fixture",
+        });
+
+        // Save store-specific property
+        const storeCache = PropertyCache.forStore(tempDir, "beauty-store");
+        storeCache.save({
+            name: "Volume",
+            slug: "volume",
+            displayType: "text",
+            options: ["50ml", "100ml"],
+            createdAt: new Date().toISOString(),
+            source: "ai-generated",
+        });
+
+        // Store cache should see both
+        expect(storeCache.has("Color")).toBe(true);
+        expect(storeCache.has("Volume")).toBe(true);
+
+        const allGroups = storeCache.list();
+        expect(allGroups.map((g) => g.name)).toContain("Color");
+        expect(allGroups.map((g) => g.name)).toContain("Volume");
+    });
+
+    test("different stores have isolated properties", () => {
+        // Create two store caches
+        const beautyCache = PropertyCache.forStore(tempDir, "beauty");
+        const fashionCache = PropertyCache.forStore(tempDir, "fashion");
+
+        // Save store-specific properties
+        beautyCache.save({
+            name: "Volume",
+            slug: "volume",
+            displayType: "text",
+            options: ["50ml", "100ml"],
+            createdAt: new Date().toISOString(),
+            source: "ai-generated",
+        });
+
+        fashionCache.save({
+            name: "Size",
+            slug: "size",
+            displayType: "text",
+            options: ["S", "M", "L"],
+            createdAt: new Date().toISOString(),
+            source: "ai-generated",
+        });
+
+        // Each store should only see its own properties
+        expect(beautyCache.has("Volume")).toBe(true);
+        expect(beautyCache.has("Size")).toBe(false);
+
+        expect(fashionCache.has("Size")).toBe(true);
+        expect(fashionCache.has("Volume")).toBe(false);
+    });
+});
+
+describe("Universal Property Group Fixtures", () => {
+    test("UNIVERSAL_PROPERTY_GROUPS contains only Color", () => {
+        expect(UNIVERSAL_PROPERTY_GROUPS.length).toBe(1);
+
+        const names = UNIVERSAL_PROPERTY_GROUPS.map((g) => g.name);
         expect(names).toContain("Color");
-        expect(names).toContain("Material");
-        // Should not include domain-specific groups
+        // Should NOT contain domain-specific groups
+        expect(names).not.toContain("Size");
+        expect(names).not.toContain("Material");
         expect(names).not.toContain("Body Wood");
         expect(names).not.toContain("Shoe Size");
     });
 
-    test("getAllPropertyGroups() returns all fixture groups", () => {
-        const allGroups = getAllPropertyGroups();
-        const commonGroups = getCommonPropertyGroups();
+    test("getUniversalPropertyGroups() returns universal groups only", () => {
+        const universalGroups = getUniversalPropertyGroups();
 
-        // Should have common + music + fashion groups
-        expect(allGroups.length).toBeGreaterThan(commonGroups.length);
+        expect(universalGroups.length).toBe(1);
+        expect(universalGroups[0]?.name).toBe("Color");
+    });
 
-        const names = allGroups.map((g) => g.name);
-        expect(names).toContain("Size");
-        expect(names).toContain("Body Wood");
-        expect(names).toContain("Shoe Size");
+    test("Color fixture has color displayType", () => {
+        const colorGroup = UNIVERSAL_PROPERTY_GROUPS.find((g) => g.name === "Color");
+        expect(colorGroup?.displayType).toBe("color");
+    });
+
+    test("Color fixture has comprehensive color options", () => {
+        const colorGroup = UNIVERSAL_PROPERTY_GROUPS.find((g) => g.name === "Color");
+        expect(colorGroup?.options.length).toBeGreaterThanOrEqual(50);
+
+        // Check for common colors
+        expect(colorGroup?.options).toContain("Black");
+        expect(colorGroup?.options).toContain("White");
+        expect(colorGroup?.options).toContain("Red");
+        expect(colorGroup?.options).toContain("Blue");
+        expect(colorGroup?.options).toContain("Green");
+    });
+
+    test("COLOR_HEX_MAP provides hex codes for colors", () => {
+        expect(COLOR_HEX_MAP["black"]).toBe("#1a1a1a");
+        expect(COLOR_HEX_MAP["white"]).toBe("#ffffff");
+        expect(COLOR_HEX_MAP["red"]).toBe("#dc2626");
+    });
+
+    test("getColorHexCode() returns hex code for color name", () => {
+        expect(getColorHexCode("Black")).toBe("#1a1a1a");
+        expect(getColorHexCode("RED")).toBe("#dc2626"); // Case insensitive
+        expect(getColorHexCode("UnknownColor")).toBeUndefined();
     });
 
     test("fixture groups have required fields", () => {
-        const allGroups = getAllPropertyGroups();
-
-        for (const group of allGroups) {
+        for (const group of UNIVERSAL_PROPERTY_GROUPS) {
             expect(group.name).toBeDefined();
             expect(group.slug).toBeDefined();
             expect(group.displayType).toMatch(/^(text|color)$/);
             expect(group.options.length).toBeGreaterThanOrEqual(2);
             expect(group.source).toBe("fixture");
         }
-    });
-
-    test("Color fixture has color displayType", () => {
-        const allGroups = getAllPropertyGroups();
-        const colorGroup = allGroups.find((g) => g.name === "Color");
-        expect(colorGroup?.displayType).toBe("color");
-    });
-
-    test("Size fixture has price modifiers", () => {
-        const allGroups = getAllPropertyGroups();
-        const sizeGroup = allGroups.find((g) => g.name === "Size");
-        expect(sizeGroup?.priceModifiers).toBeDefined();
-        expect(sizeGroup?.priceModifiers?.XS).toBeLessThan(1);
-        expect(sizeGroup?.priceModifiers?.XL).toBeGreaterThan(1);
     });
 });
 
@@ -382,18 +529,28 @@ describe("PropertyCache seeding", () => {
         }
     });
 
-    test("seedDefaults() creates JSON files in cache directory", () => {
+    test("seedDefaults() creates Color in cache", () => {
         const cache = new PropertyCache(tempDir);
         cache.seedDefaults();
 
-        expect(cache.has("Size")).toBe(true);
         expect(cache.has("Color")).toBe(true);
-        expect(cache.has("Guitar Finish")).toBe(true);
 
-        // Check that JSON files were created
+        // Check that JSON file was created
         const cacheDir = cache.getCacheDir();
-        expect(fs.existsSync(path.join(cacheDir, "size.json"))).toBe(true);
         expect(fs.existsSync(path.join(cacheDir, "color.json"))).toBe(true);
+    });
+
+    test("seedDefaults() only seeds universal properties", () => {
+        const cache = new PropertyCache(tempDir);
+        cache.seedDefaults();
+
+        // Should have Color
+        expect(cache.has("Color")).toBe(true);
+
+        // Should NOT have domain-specific properties
+        expect(cache.has("Size")).toBe(false);
+        expect(cache.has("Material")).toBe(false);
+        expect(cache.has("Body Wood")).toBe(false);
     });
 
     test("ensureDefaults() seeds only if cache is empty", () => {
@@ -401,7 +558,7 @@ describe("PropertyCache seeding", () => {
 
         // First call should seed
         cache.ensureDefaults();
-        expect(cache.has("Size")).toBe(true);
+        expect(cache.has("Color")).toBe(true);
 
         // Clear and add a custom group
         cache.clear();
@@ -417,7 +574,7 @@ describe("PropertyCache seeding", () => {
         // Second call should NOT seed (cache not empty)
         cache.ensureDefaults();
         expect(cache.has("Custom")).toBe(true);
-        expect(cache.has("Size")).toBe(false); // Not seeded because cache wasn't empty
+        expect(cache.has("Color")).toBe(false); // Not seeded because cache wasn't empty
     });
 
     test("seedGroups() allows seeding custom groups", () => {

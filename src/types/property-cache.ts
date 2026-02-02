@@ -19,6 +19,8 @@ export interface CachedPropertyGroup {
     options: string[];
     /** Optional price modifiers per option (multiplier, e.g., 1.1 = +10%) */
     priceModifiers?: Record<string, number>;
+    /** Optional hex codes for color options (for displayType: "color") */
+    colorHexCodes?: Record<string, string>;
     /** ISO timestamp when this group was created */
     createdAt: string;
     /** Source of this property group */

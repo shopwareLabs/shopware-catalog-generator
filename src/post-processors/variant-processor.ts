@@ -10,7 +10,7 @@
 
 import { PropertyCache } from "../property-cache.js";
 import type { CachedPropertyGroup, VariantConfig } from "../types/index.js";
-import { apiPost, cartesianProduct, generateUUID, logger } from "../utils/index.js";
+import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 import type {
     PostProcessor,
@@ -55,9 +55,10 @@ class VariantProcessorImpl implements PostProcessor {
         const errors: string[] = [];
         const startTime = Date.now();
 
-        // Initialize property cache from the same directory as the main cache
+        // Initialize store-scoped property cache for this sales channel
         const cacheDir = process.env.CACHE_DIR || "./generated";
-        this.propertyCache = new PropertyCache(cacheDir);
+        const storeSlug = toKebabCase(context.salesChannelName);
+        this.propertyCache = PropertyCache.forStore(cacheDir, storeSlug);
 
         // Find products with isVariant: true
         const variantProducts = blueprint.products.filter((p) => p.metadata.isVariant);

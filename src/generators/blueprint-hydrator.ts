@@ -48,7 +48,7 @@ const CategoryResponseSchema = z.object({
             id: z.string(),
             name: z.string(),
             description: z.string(),
-            imageDescription: z.string().optional(),
+            imageDescription: z.string().nullable(),
         })
     ),
 });
@@ -73,16 +73,22 @@ const ProductResponseSchema = z.object({
                 })
             ),
             // For variant products: AI suggests 1-3 property group names
-            suggestedVariantGroups: z.array(z.string()).optional(),
+            suggestedVariantGroups: z.array(z.string()).nullable(),
         })
     ),
 });
 
 // Schema for AI-generated property options (when cache miss)
+// Note: Using array of objects instead of Record for OpenAI structured outputs compatibility
 const PropertyOptionsResponseSchema = z.object({
     groupName: z.string(),
     options: z.array(z.string()),
-    priceModifiers: z.record(z.string(), z.number()).optional(),
+    priceModifiers: z.array(
+        z.object({
+            option: z.string(),
+            modifier: z.number(),
+        })
+    ).nullable(),
 });
 
 type CategoryResponse = z.infer<typeof CategoryResponseSchema>;
@@ -111,14 +117,25 @@ function fitsInTokenLimit(payload: unknown, tokenLimit: number): boolean {
 // Blueprint Hydrator Class
 // =============================================================================
 
+/**
+ * Store context passed through hydration methods
+ */
+interface StoreContext {
+    name: string;
+    description: string;
+}
+
 export class BlueprintHydrator {
     private readonly textProvider: TextProvider;
-    private readonly propertyCache: PropertyCache;
+    private readonly cacheDir: string;
+    private propertyCache: PropertyCache;
 
     constructor(textProvider: TextProvider, cacheDir = "./generated") {
         this.textProvider = textProvider;
+        this.cacheDir = cacheDir;
+        // Initialize with global cache, will be replaced with store-scoped on hydrate
         this.propertyCache = new PropertyCache(cacheDir);
-        // Seed with default property groups if cache is empty
+        // Seed with universal property groups (Color) if cache is empty
         this.propertyCache.ensureDefaults();
     }
 
@@ -136,6 +153,18 @@ export class BlueprintHydrator {
             products: blueprint.products.length,
             existingProperties: existingProperties.length,
         });
+
+        // Create store-scoped PropertyCache for this sales channel
+        const storeSlug = toKebabCase(blueprint.salesChannel.name);
+        this.propertyCache = PropertyCache.forStore(this.cacheDir, storeSlug);
+        // Ensure universal properties (Color) are available
+        this.propertyCache.ensureDefaults();
+
+        // Store context for property generation
+        const storeContext: StoreContext = {
+            name: blueprint.salesChannel.name,
+            description: blueprint.salesChannel.description,
+        };
 
         // Step 1: Hydrate SalesChannel and categories
         console.log("  [1/2] Generating category names and descriptions...");
@@ -155,7 +184,8 @@ export class BlueprintHydrator {
         const hydratedProducts = await this.hydrateProducts(
             blueprint.products,
             hydratedCategories.categories,
-            existingProperties
+            existingProperties,
+            storeContext
         );
         logger.info("Products hydrated", { count: hydratedProducts.length });
 
@@ -295,7 +325,8 @@ Return JSON in this exact format:
     private async hydrateProducts(
         products: BlueprintProduct[],
         hydratedCategories: CategoryResponse["categories"],
-        existingProperties: ExistingProperty[]
+        existingProperties: ExistingProperty[],
+        storeContext: StoreContext
     ): Promise<BlueprintProduct[]> {
         // Group products by primary category (top-level branch)
         const productsByBranch = new Map<string, BlueprintProduct[]>();
@@ -340,22 +371,36 @@ Return JSON in this exact format:
         const branchTasks = branches.map(([branchId, branchProducts], index) => {
             const branchName = categoryNameMap.get(branchId) || `Branch ${index + 1}`;
 
+            // Collect sub-categories for this branch
+            const subCategories = new Set<string>();
+            for (const product of branchProducts) {
+                for (const catId of product.categoryIds) {
+                    const catName = categoryNameMap.get(catId);
+                    if (catName && catName !== branchName) {
+                        subCategories.add(catName);
+                    }
+                }
+            }
+            const subCatPreview = Array.from(subCategories).slice(0, 3).join(", ");
+
             return limiter.schedule(async () => {
                 const branchNum = index + 1;
+                const subCatText = subCatPreview ? ` → ${subCatPreview}${subCategories.size > 3 ? "..." : ""}` : "";
                 console.log(
-                    `    [Branch ${branchNum}/${totalBranches}] ${branchName} (${branchProducts.length} products)`
+                    `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`
                 );
 
                 const hydrated = await this.hydrateBranchProducts(
                     branchProducts,
                     branchName,
                     existingProperties,
-                    categoryNameMap
+                    categoryNameMap,
+                    storeContext
                 );
 
                 completedBranches++;
                 console.log(
-                    `    ✓ ${branchName} complete (${completedBranches}/${totalBranches} branches)`
+                    `    ✓ ${storeContext.name} > ${branchName} complete (${completedBranches}/${totalBranches} branches)`
                 );
 
                 return hydrated;
@@ -425,6 +470,7 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        storeContext: StoreContext,
         manufacturerNames: string[]
     ): Promise<BlueprintProduct[]> {
         const midpoint = Math.ceil(products.length / 2);
@@ -434,15 +480,15 @@ Return JSON in this exact format:
         // Parallel processing when provider supports it
         if (this.textProvider.maxConcurrency > 1) {
             const [hydrated1, hydrated2] = await Promise.all([
-                this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, manufacturerNames),
-                this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, manufacturerNames),
+                this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames),
+                this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames),
             ]);
             return [...hydrated1, ...hydrated2];
         }
 
         // Sequential processing for rate-limited providers
-        const hydrated1 = await this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, manufacturerNames);
-        const hydrated2 = await this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, manufacturerNames);
+        const hydrated1 = await this.hydrateBranchProducts(batch1, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
+        const hydrated2 = await this.hydrateBranchProducts(batch2, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
         return [...hydrated1, ...hydrated2];
     }
 
@@ -454,8 +500,22 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        storeContext: StoreContext,
         manufacturerNames: string[]
     ): Promise<BlueprintProduct[]> {
+        // Collect unique sub-categories for this batch
+        const subCategories = new Set<string>();
+        for (const product of products) {
+            for (const catId of product.categoryIds) {
+                const catName = categoryNameMap.get(catId);
+                if (catName && catName !== branchName) {
+                    subCategories.add(catName);
+                }
+            }
+        }
+        const subCatList = Array.from(subCategories).slice(0, 3); // Show up to 3
+        const subCatText = subCatList.length > 0 ? ` (${subCatList.join(", ")})` : "";
+
         // Update batch progress
         const counter = this.batchCounter.get(branchName);
         if (counter) {
@@ -463,10 +523,11 @@ Return JSON in this exact format:
             console.log(`      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`);
         }
 
-        const prompt = this.buildProductPrompt(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
-        logger.debug(`API call: Generating ${products.length} products for "${branchName}"`, {
+        const prompt = this.buildProductPrompt(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
+        logger.debug(`API call: ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`, {
             productIds: products.map((p) => p.id.slice(0, 8)),
             promptLength: prompt.length,
+            subCategories: Array.from(subCategories),
         });
 
         const startTime = Date.now();
@@ -480,7 +541,7 @@ Return JSON in this exact format:
     private async callProductApi(branchName: string, prompt: string, startTime: number): Promise<string> {
         try {
             return await executeWithRetry(async () => {
-                logger.debug(`Calling text provider for "${branchName}"...`);
+                logger.debug(`Calling text provider for "${branchName}"...`, { promptLength: prompt.length });
                 return this.textProvider.generateCompletion(
                     [
                         { role: "system", content: "You are a professional e-commerce copywriter. Generate realistic product content with consistent naming patterns." },
@@ -537,6 +598,7 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        storeContext: StoreContext,
         manufacturerNames?: string[]
     ): Promise<BlueprintProduct[]> {
         // Generate manufacturer names if not provided (first call for this branch)
@@ -549,21 +611,25 @@ Return JSON in this exact format:
 
         // Split batch if too large or exceeds token limit
         if (this.shouldSplitBatch(products, branchName)) {
-            return this.hydrateSplitBatch(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
+            return this.hydrateSplitBatch(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
         }
 
         // Process single batch
-        return this.hydrateSingleBatch(products, branchName, existingProperties, categoryNameMap, manufacturerNames);
+        return this.hydrateSingleBatch(products, branchName, existingProperties, categoryNameMap, storeContext, manufacturerNames);
     }
 
     /**
      * Build the prompt for product hydration
+     *
+     * Uses store context (name + description) and category context to let the AI
+     * generate domain-appropriate properties. No hardcoded property groups except Color.
      */
     private buildProductPrompt(
         products: BlueprintProduct[],
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        storeContext: StoreContext,
         manufacturerNames: string[]
     ): string {
         const productList = products.map((p) => ({
@@ -578,32 +644,37 @@ Return JSON in this exact format:
         const existingPropsText =
             existingProperties.length > 0
                 ? `
-Existing properties in the system (reuse these when applicable):
+Existing properties in Shopware (reuse when applicable):
 ${JSON.stringify(existingProperties, null, 2)}
 `
                 : "";
 
-        // Standard property groups that must be used for consistency
-        const standardPropertyGroups = `
-IMPORTANT - Use ONLY these standard property group names:
-- "Size" with values like: S, M, L, XL, Small, Medium, Large, Extra Large, Compact, Standard, Oversized
-- "Color" with values like: Black, White, Red, Blue, Green, Brown, Gray, Beige, Navy, etc.
-- "Material" with values like: Wood, Metal, Plastic, Leather, Fabric, Glass, Ceramic, Premium, Cotton, Polyester
-- "Style" with values like: Modern, Classic, Vintage, Industrial, Minimalist, Traditional, Contemporary
-
-Do NOT create variations like "Exterior Color", "Interior Color", "Frame Material" - use the standard names above.`;
-
-        // List cached property groups for AI context
+        // List cached property groups for AI context (includes Color and any previously generated groups)
         const cachedGroups = this.propertyCache.listNames();
         const cachedGroupsText = cachedGroups.length > 0
-            ? `\nALREADY KNOWN property groups (prefer these for variants): ${cachedGroups.join(", ")}`
+            ? `\nALREADY KNOWN property groups for this store (prefer these): ${cachedGroups.join(", ")}`
             : "";
 
         return `Generate product content for the "${branchName}" category.
 
+STORE CONTEXT:
+- Store name: "${storeContext.name}"
+- Store description: "${storeContext.description}"
+
 ${existingPropsText}
-${standardPropertyGroups}
 ${cachedGroupsText}
+
+PROPERTY GUIDELINES:
+- "Color" is the only predefined property group - use it when color is relevant for the product
+- STRONGLY PREFER reusing the ALREADY KNOWN property groups listed above - use their EXACT names
+- Only create NEW property groups if none of the existing ones fit
+- Keep property groups BROAD and REUSABLE across multiple products:
+  * Use "Size" not "Pot Size", "Fruit Size", "Bush Size" - just "Size"
+  * Use "Material" not "Handle Material", "Blade Material" - just "Material"
+  * Use "Type" not "Fruit Type", "Herb Type", "Leaf Type" - just "Type"
+- Maximum 5-6 unique property groups per category (not per product!)
+- Property values should be specific, but groups should be generic
+- Do NOT use generic properties that don't fit the product (e.g., don't use "Material: Metal" for shampoo)
 
 Products to fill (${products.length} total):
 ${JSON.stringify(productList, null, 2)}
@@ -613,14 +684,16 @@ ${manufacturerNames.map((n) => `- "${n}"`).join("\n")}
 
 For each product:
 1. Generate a name in format: "Product Type - Property1 - Property2"
-   Example: "Dining Chair - Oak - High Back"
+   Example for furniture: "Dining Chair - Oak - High Back"
+   Example for beauty: "Hydrating Cream - Rose Scent - 50ml"
 2. Write a detailed description (200+ words, HTML formatted)
-3. Generate 2-3 properties using ONLY the standard property group names above
+3. Generate 2-3 properties that are APPROPRIATE for this store type and product
 4. Assign one of the manufacturer names listed above (distribute evenly!)
 5. For each imageView, provide an AI image generation prompt
 6. For products with isVariant: true, suggest 1-3 property group NAMES in "suggestedVariantGroups"
-   - Use product-appropriate groups (e.g., "Guitar Finish" for guitars, "Drum Size" for drums)
-   - Prefer the ALREADY KNOWN groups listed above when they fit
+   - MUST use EXACT names from the ALREADY KNOWN groups when possible
+   - Only suggest new group names if absolutely no existing group fits
+   - Use BROAD group names: "Size" not "Pot Size", "Material" not "Handle Material"
    - Just group names, not the options (options come from cache or will be generated later)
 
 Return JSON in this exact format:
@@ -628,14 +701,14 @@ Return JSON in this exact format:
   "products": [
     {
       "id": "...",
-      "name": "Dining Chair - Oak - High Back",
+      "name": "Product Name - Property1 - Property2",
       "description": "<p>Detailed HTML description...</p>",
-      "properties": [{ "group": "Material", "value": "Oak" }, { "group": "Style", "value": "Modern" }],
+      "properties": [{ "group": "PropertyGroup", "value": "Value" }, ...],
       "manufacturerName": "${manufacturerNames[0]}",
       "imageDescriptions": [
-        { "view": "front", "prompt": "Oak dining chair with high back, studio lighting, white background" }
+        { "view": "front", "prompt": "Product description for image generation" }
       ],
-      "suggestedVariantGroups": ["Size", "Material"]
+      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"]
     }
   ]
 }`;
@@ -657,7 +730,7 @@ Return JSON in this exact format:
                     ...cat,
                     name: h?.name || cat.name,
                     description: h?.description || cat.description,
-                    imageDescription: h?.imageDescription,
+                    imageDescription: h?.imageDescription ?? undefined,
                     children: applyToTree(cat.children),
                 };
             });
@@ -803,6 +876,25 @@ Return JSON in this exact format:
                     });
                 }
             } else {
+                // Never generate Color via AI - it should always come from universal cache
+                if (normalizedName.toLowerCase() === "color" || groupName.toLowerCase() === "color") {
+                    logger.warn(`AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`);
+                    // Try to get Color from cache one more time with exact name
+                    const colorFromCache = this.propertyCache.get("Color");
+                    if (colorFromCache) {
+                        const selectedOptions = randomSamplePercent(colorFromCache.options, 0.4, 0.6);
+                        const finalOptions = selectedOptions.length >= 2
+                            ? selectedOptions
+                            : colorFromCache.options.slice(0, Math.min(2, colorFromCache.options.length));
+                        configs.push({
+                            group: colorFromCache.name,
+                            selectedOptions: finalOptions,
+                            priceModifiers: {},
+                        });
+                    }
+                    continue;
+                }
+
                 // Cache miss - ask AI to generate options
                 logger.info(`Property cache miss for "${groupName}", generating options...`);
                 try {
@@ -820,31 +912,31 @@ Return JSON in this exact format:
 
     /**
      * Normalize a property group name for cache lookup
-     * Handles variations like "Guitar Finish" -> "Finish"
+     * Uses fuzzy matching against cached groups to consolidate similar names
      */
     private normalizeGroupName(name: string): string {
-        // Common suffixes that might be prepended
-        const prefixesToRemove = [
-            "guitar", "piano", "drum", "bass", "violin", "keyboard",
-            "furniture", "sofa", "chair", "table", "bed",
-            "clothing", "shirt", "pants", "dress", "jacket",
-        ];
+        const normalized = name.trim();
 
-        let normalized = name.trim();
-
-        // Try to match against known cache entries directly first
+        // Try exact match first (case-insensitive)
         if (this.propertyCache.has(normalized)) {
             return normalized;
         }
 
-        // Remove common prefixes
-        for (const prefix of prefixesToRemove) {
-            const pattern = new RegExp(`^${prefix}\\s+`, "i");
-            if (pattern.test(normalized)) {
-                const stripped = normalized.replace(pattern, "");
-                if (this.propertyCache.has(stripped)) {
-                    return stripped;
-                }
+        // Try to find a cached group that the input name ends with
+        // e.g., "Pot Size" matches cached "Size", "Handle Material" matches cached "Material"
+        const cachedGroups = this.propertyCache.listNames();
+        for (const cached of cachedGroups) {
+            const cachedLower = cached.toLowerCase();
+            const normalizedLower = normalized.toLowerCase();
+
+            // Check if input ends with cached name (e.g., "Pot Size" ends with "Size")
+            if (normalizedLower.endsWith(cachedLower) && normalizedLower !== cachedLower) {
+                return cached;
+            }
+
+            // Check if input starts with cached name (e.g., "Size Large" starts with "Size")
+            if (normalizedLower.startsWith(`${cachedLower} `)) {
+                return cached;
             }
         }
 
@@ -853,11 +945,17 @@ Return JSON in this exact format:
 
     /**
      * Generate property options using AI for a new group
+     * Note: Color should NEVER be generated here - it must come from universal cache
      */
     private async generatePropertyOptions(
         groupName: string,
         productContext: { name: string; category: string }
     ): Promise<VariantConfig> {
+        // Safety net: refuse to generate Color (must use universal cache)
+        if (groupName.toLowerCase() === "color") {
+            throw new Error("Color must not be generated via AI - use universal cache");
+        }
+
         const prompt = `Generate property options for a variant property group.
 
 Product context:
@@ -880,7 +978,7 @@ Return JSON:
 {
   "groupName": "${groupName}",
   "options": ["Option 1", "Option 2", ...],
-  "priceModifiers": {"Option 1": 1.0, "Option 2": 1.1, ...}
+  "priceModifiers": [{"option": "Option 1", "modifier": 1.0}, {"option": "Option 2", "modifier": 1.1}, ...]
 }`;
 
         const response = await executeWithRetry(() =>
@@ -900,6 +998,14 @@ Return JSON:
         const parsed = JSON.parse(response);
         const validated = PropertyOptionsResponseSchema.parse(parsed);
 
+        // Convert array format to Record format for priceModifiers
+        const priceModifiersRecord: Record<string, number> = {};
+        if (validated.priceModifiers) {
+            for (const pm of validated.priceModifiers) {
+                priceModifiersRecord[pm.option] = pm.modifier;
+            }
+        }
+
         // Save to cache for future use
         const displayType = PropertyCache.inferDisplayType(groupName);
         const cachedGroup: CachedPropertyGroup = {
@@ -907,7 +1013,7 @@ Return JSON:
             slug: toKebabCase(validated.groupName),
             displayType,
             options: validated.options,
-            priceModifiers: validated.priceModifiers,
+            priceModifiers: Object.keys(priceModifiersRecord).length > 0 ? priceModifiersRecord : undefined,
             createdAt: new Date().toISOString(),
             source: "ai-generated",
         };
@@ -926,7 +1032,7 @@ Return JSON:
         // Build price modifiers for selected options
         const priceModifiers: Record<string, number> = {};
         for (const opt of finalOptions) {
-            priceModifiers[opt] = validated.priceModifiers?.[opt] ?? 1.0;
+            priceModifiers[opt] = priceModifiersRecord[opt] ?? 1.0;
         }
 
         return {
@@ -1029,7 +1135,7 @@ Return JSON:
             ),
         });
 
-        const prompt = `Generate category names for a furniture webshop.
+        const prompt = `Generate category names for this webshop.
 
 Store: "${blueprint.salesChannel.name}"
 Description: ${blueprint.salesChannel.description}
@@ -1038,9 +1144,9 @@ Fix these ${uniqueCategories.length} categories with placeholder names:
 ${uniqueCategories.map((c) => `- ID: "${c.id}" (current: "${c.name}")`).join("\n")}
 
 Requirements:
-- Names should be realistic furniture/home goods subcategories
-- Names like "Category L2-1" should become things like "Living Room", "Bedroom", "Office", etc.
-- Names like "Category L3-1" should become specific product types like "Sofas", "Coffee Tables", "Bookshelves"
+- Names should be realistic subcategories appropriate for this store type
+- Names like "Category L2-1" should become top-level categories relevant to the store
+- Names like "Category L3-1" should become specific product types
 - Each name should be unique and descriptive
 
 RESPOND ONLY WITH JSON. No explanation, no markdown. Just the JSON object:`;
@@ -1145,9 +1251,10 @@ RESPOND ONLY WITH JSON. No explanation, no markdown. Just the JSON object:`;
                 `Fixing product batch ${batchIdx + 1}/${batches.length} (${batch.length} products)...`
             );
 
-            const prompt = `Generate product names for a furniture webshop.
+            const prompt = `Generate product names for this webshop.
 
 Store: "${blueprint.salesChannel.name}"
+Description: ${blueprint.salesChannel.description}
 
 Fix these ${batch.length} products with placeholder names:
 ${batch
@@ -1156,13 +1263,13 @@ ${batch
             .map((id) => categoryMap.get(id)?.name)
             .filter(Boolean)
             .join(", ");
-        return `- ID: "${p.id}" (current: "${p.name}", categories: ${catNames || "furniture"})`;
+        return `- ID: "${p.id}" (current: "${p.name}", categories: ${catNames || "unknown"})`;
     })
     .join("\n")}
 
 Requirements:
-- Name pattern: "[Product Type] - [Color] - [Material/Feature]"
-- Examples: "Dining Chair - Vintage Cream - Mahogany", "Coffee Table - Jet Black - Glass Top"
+- Name pattern: "[Product Type] - [Property1] - [Property2]"
+- Names should be appropriate for the store type and categories
 - Description: 1-2 sentences about the product
 
 RESPOND ONLY WITH JSON:

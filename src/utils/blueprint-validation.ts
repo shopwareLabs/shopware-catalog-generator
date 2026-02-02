@@ -302,6 +302,89 @@ function validateBlueprintMeta(blueprint: HydratedBlueprint): BlueprintValidatio
 }
 
 // =============================================================================
+// Property Validation Functions
+// =============================================================================
+
+/**
+ * Validate property groups in the blueprint
+ *
+ * Checks for:
+ * - Property groups have required fields (name, options)
+ * - Color properties have hex codes
+ * - Product properties reference valid groups
+ */
+function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+
+    // Skip if no property groups
+    if (!blueprint.propertyGroups || blueprint.propertyGroups.length === 0) {
+        return issues;
+    }
+
+    // 1. Check property groups have required fields
+    for (const group of blueprint.propertyGroups) {
+        if (!group.name || group.name.trim() === "") {
+            issues.push({
+                type: "error",
+                code: "MISSING_PROPERTY_GROUP_NAME",
+                message: "Property group is missing name",
+                field: "propertyGroups[].name",
+                affectedIds: [group.id],
+            });
+        }
+
+        if (!group.options || group.options.length === 0) {
+            issues.push({
+                type: "error",
+                code: "EMPTY_PROPERTY_OPTIONS",
+                message: `Property group "${group.name}" has no options`,
+                field: "propertyGroups[].options",
+                affectedIds: [group.id],
+            });
+        }
+    }
+
+    // 2. Check Color properties have hex codes
+    const colorGroups = blueprint.propertyGroups.filter(
+        (g) => g.name.toLowerCase().includes("color")
+    );
+    for (const colorGroup of colorGroups) {
+        const missingHex = colorGroup.options.filter((o) => !o.colorHexCode);
+        if (missingHex.length > 0) {
+            issues.push({
+                type: "warning",
+                code: "MISSING_COLOR_HEX",
+                message: `Color options missing hex codes: ${missingHex.map((o) => o.name).join(", ")}`,
+                field: "propertyGroups[].options[].colorHexCode",
+            });
+        }
+    }
+
+    // 3. Check product properties reference valid groups
+    const validGroupNames = new Set(
+        blueprint.propertyGroups.map((g) => g.name.toLowerCase())
+    );
+
+    for (const product of blueprint.products) {
+        if (!product.metadata.properties) continue;
+
+        for (const prop of product.metadata.properties) {
+            if (!validGroupNames.has(prop.group.toLowerCase())) {
+                issues.push({
+                    type: "warning",
+                    code: "ORPHAN_PROPERTY_REFERENCE",
+                    message: `Product "${product.name}" references non-existent property group "${prop.group}"`,
+                    field: "products[].metadata.properties",
+                    affectedIds: [product.id],
+                });
+            }
+        }
+    }
+
+    return issues;
+}
+
+// =============================================================================
 // Main Validation Function
 // =============================================================================
 
@@ -313,6 +396,8 @@ function validateBlueprintMeta(blueprint: HydratedBlueprint): BlueprintValidatio
  * - Duplicate category names (at same level)
  * - Placeholder names (not hydrated)
  * - Missing required fields
+ * - Property group validation (names, options, hex codes)
+ * - Orphan property references
  *
  * @param blueprint - The hydrated blueprint to validate
  * @param options - Validation options
@@ -332,9 +417,15 @@ export function validateBlueprint(
     const productValidation = validateProducts(blueprint, autoFix, logFixes);
     const categoryIssues = validateCategories(blueprint);
     const metaIssues = validateBlueprintMeta(blueprint);
+    const propertyIssues = validatePropertyGroups(blueprint);
 
     // Collect all issues
-    const allIssues = [...productValidation.issues, ...categoryIssues, ...metaIssues];
+    const allIssues = [
+        ...productValidation.issues,
+        ...categoryIssues,
+        ...metaIssues,
+        ...propertyIssues,
+    ];
 
     // Filter out issues that were fixed
     const remainingIssues = autoFix

@@ -11,11 +11,10 @@
 
 // CMS Pages
 export { VIDEO_ELEMENTS_PAGE } from "./cms-pages.js";
-// Property Groups (default groups for seeding generated/properties/)
+// Property Groups (universal groups for seeding generated/properties/)
 export {
-    DEFAULT_PROPERTY_GROUPS,
-    getAllPropertyGroups,
-    getCommonPropertyGroups,
+    getUniversalPropertyGroups,
+    UNIVERSAL_PROPERTY_GROUPS,
 } from "./property-groups.js";
 // Review Data
 export {
