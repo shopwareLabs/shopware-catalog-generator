@@ -68,6 +68,9 @@ export async function syncCategories(
         categoryNodes
     );
 
+    // Build a map of old ID -> new ID for updating product categoryIds
+    const oldToNewIdMap = new Map<string, string>();
+
     // Update blueprint category IDs with existing ones
     const updateCategoryIds = (
         cats: HydratedBlueprint["categories"],
@@ -77,7 +80,9 @@ export async function syncCategories(
         for (const cat of cats) {
             const path = buildCategoryPath(parentPath, cat.name);
             const existingId = existingMap.get(path);
-            if (existingId) {
+            if (existingId && cat.id !== existingId) {
+                // Track the mapping from old ID to new ID
+                oldToNewIdMap.set(cat.id, existingId);
                 cat.id = existingId;
             }
             if (cat.children.length > 0) {
@@ -86,6 +91,18 @@ export async function syncCategories(
         }
     };
     updateCategoryIds(blueprint.categories, existingCategoryMap);
+
+    // Update product categoryIds to use the new Shopware IDs
+    if (oldToNewIdMap.size > 0) {
+        for (const product of blueprint.products) {
+            product.categoryIds = product.categoryIds.map((catId) =>
+                oldToNewIdMap.get(catId) ?? catId
+            );
+            if (product.primaryCategoryId && oldToNewIdMap.has(product.primaryCategoryId)) {
+                product.primaryCategoryId = oldToNewIdMap.get(product.primaryCategoryId)!;
+            }
+        }
+    }
 
     // Create/update categories (upsert)
     const categoryIdMap = await dataHydrator.createCategoryTree(
