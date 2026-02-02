@@ -57,18 +57,58 @@ class ImageProcessorImpl implements PostProcessor {
             metadata: NonNullable<ReturnType<typeof cache.loadProductMetadata>>;
             missingCount: number;
             cachedCount: number;
+            staleCount: number;
         }> = [];
 
         for (const product of products) {
             const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
             if (metadata && metadata.imageDescriptions.length > 0) {
-                const cachedCount = metadata.imageDescriptions.filter((desc) =>
-                    cache.hasImageWithView(context.salesChannelName, product.id, desc.view)
-                ).length;
-                const missingCount = metadata.imageDescriptions.length - cachedCount;
+                let cachedCount = 0;
+                let missingCount = 0;
+                let staleCount = 0;
+
+                for (const desc of metadata.imageDescriptions) {
+                    const hasImage = cache.hasImageWithView(
+                        context.salesChannelName,
+                        product.id,
+                        desc.view
+                    );
+
+                    if (!hasImage) {
+                        missingCount++;
+                    } else {
+                        // Check if cached image is stale (prompt mismatch)
+                        const basePrompt = metadata.baseImagePrompt || product.name;
+                        const isStale = cache.isImageStale(
+                            context.salesChannelName,
+                            product.id,
+                            desc.view,
+                            basePrompt
+                        );
+
+                        if (isStale) {
+                            // Delete stale image so it gets regenerated
+                            cache.deleteImageWithView(
+                                context.salesChannelName,
+                                product.id,
+                                desc.view
+                            );
+                            staleCount++;
+                            missingCount++;
+                        } else {
+                            cachedCount++;
+                        }
+                    }
+                }
 
                 if (missingCount > 0 || cachedCount > 0) {
-                    productsNeedingImages.push({ product, metadata, missingCount, cachedCount });
+                    productsNeedingImages.push({
+                        product,
+                        metadata,
+                        missingCount,
+                        cachedCount,
+                        staleCount,
+                    });
                 }
             }
         }
@@ -85,6 +125,7 @@ class ImageProcessorImpl implements PostProcessor {
             (sum, p) => sum + p.missingCount,
             0
         );
+        const totalStaleImages = productsNeedingImages.reduce((sum, p) => sum + p.staleCount, 0);
         const totalCategoryImages = categoriesNeedingImages.length;
         const totalImages = totalProductImages + totalCategoryImages;
 
@@ -103,12 +144,21 @@ class ImageProcessorImpl implements PostProcessor {
         console.log(
             `      - ${totalProductImages} product images (${productsNeedingImages.length} products)`
         );
+        if (totalStaleImages > 0) {
+            console.log(`      - ${totalStaleImages} stale images (product name changed)`);
+        }
         console.log(`      - ${totalCategoryImages} category banners`);
 
         if (options.dryRun) {
-            for (const { product, missingCount, cachedCount } of productsNeedingImages) {
+            for (const {
+                product,
+                missingCount,
+                cachedCount,
+                staleCount,
+            } of productsNeedingImages) {
+                const staleInfo = staleCount > 0 ? ` (${staleCount} stale)` : "";
                 console.log(
-                    `    [DRY RUN] ${product.name}: ${missingCount} to generate, ${cachedCount} cached`
+                    `    [DRY RUN] ${product.name}: ${missingCount} to generate${staleInfo}, ${cachedCount} cached`
                 );
                 processed++;
             }

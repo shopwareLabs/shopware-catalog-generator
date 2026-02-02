@@ -4,16 +4,20 @@
  * Exposes blueprint create, hydrate, and fix commands.
  */
 
+import type { ExistingProperty } from "../../utils/index.js";
 import type { FastMCP } from "fastmcp";
-
 import { z } from "zod";
 
 import { createCacheFromEnv } from "../../cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "../../generators/index.js";
 import { createProvidersFromEnv } from "../../providers/index.js";
 import { DataHydrator } from "../../shopware/index.js";
-import type { ExistingProperty } from "../../utils/index.js";
-import { countCategories, logger, PropertyCollector, validateSubdomainName } from "../../utils/index.js";
+import {
+    countCategories,
+    logger,
+    PropertyCollector,
+    validateSubdomainName,
+} from "../../utils/index.js";
 
 export function registerBlueprintTools(server: FastMCP): void {
     // blueprint_create - Generate blueprint.json (no AI)
@@ -126,7 +130,10 @@ Run blueprint_create first:
 
             // Collect properties
             const collector = new PropertyCollector();
-            const propertyGroups = collector.collectFromBlueprint(hydratedBlueprint, existingProperties);
+            const propertyGroups = collector.collectFromBlueprint(
+                hydratedBlueprint,
+                existingProperties
+            );
             hydratedBlueprint.propertyGroups = propertyGroups;
 
             // Save hydrated blueprint
@@ -194,17 +201,22 @@ Location: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`;
             // Update property groups if products were fixed
             if (placeholderProducts.length > 0) {
                 const collector = new PropertyCollector();
-                const existingProperties: ExistingProperty[] = blueprint.propertyGroups.map((pg) => ({
-                    id: pg.id,
-                    name: pg.name,
-                    displayType: pg.displayType || "text",
-                    options: pg.options.map((o) => ({
-                        id: o.id,
-                        name: o.name,
-                        colorHexCode: o.colorHexCode,
-                    })),
-                }));
-                const propertyGroups = collector.collectFromBlueprint(fixedBlueprint, existingProperties);
+                const existingProperties: ExistingProperty[] = blueprint.propertyGroups.map(
+                    (pg) => ({
+                        id: pg.id,
+                        name: pg.name,
+                        displayType: pg.displayType || "text",
+                        options: pg.options.map((o) => ({
+                            id: o.id,
+                            name: o.name,
+                            colorHexCode: o.colorHexCode,
+                        })),
+                    })
+                );
+                const propertyGroups = collector.collectFromBlueprint(
+                    fixedBlueprint,
+                    existingProperties
+                );
                 fixedBlueprint.propertyGroups = propertyGroups;
             }
 

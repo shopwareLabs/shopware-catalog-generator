@@ -321,7 +321,19 @@ export class ShopwareCleanup extends ShopwareClient {
     // =========================================================================
 
     /**
+     * Normalize a SalesChannel name for lookup
+     * Converts underscores to hyphens and capitalizes first letter
+     */
+    private normalizeSalesChannelName(name: string): string {
+        // Convert underscores to hyphens (common user input variation)
+        const normalized = name.replace(/_/g, "-");
+        // Capitalize first letter only (SalesChannel names are like "Digital-invitations")
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+    }
+
+    /**
      * Get a SalesChannel by name
+     * Handles common variations: underscores vs hyphens, case differences
      * @returns The SalesChannel details or null if not found
      */
     async getSalesChannelByName(
@@ -332,19 +344,31 @@ export class ShopwareCleanup extends ShopwareClient {
             return null;
         }
 
-        const response = await this.apiClient.post<
-            SearchResponse<{ id: string; navigationCategoryId: string }>
-        >("search/sales-channel", {
-            limit: 1,
-            filter: [{ type: "equals", field: "name", value: this.capitalizeString(name) }],
-        });
+        // Try multiple name variations to find the SalesChannel
+        const variations = [
+            this.normalizeSalesChannelName(name), // "digital_invitations" → "Digital-invitations"
+            this.capitalizeString(name), // Original behavior: "Digital_invitations"
+            name, // Exact match as provided
+        ];
 
-        const salesChannel = response.data.data[0];
-        if (response.data.total === 0 || !salesChannel) {
-            return null;
+        // Remove duplicates
+        const uniqueVariations = [...new Set(variations)];
+
+        for (const variation of uniqueVariations) {
+            const response = await this.apiClient.post<
+                SearchResponse<{ id: string; navigationCategoryId: string }>
+            >("search/sales-channel", {
+                limit: 1,
+                filter: [{ type: "equals", field: "name", value: variation }],
+            });
+
+            const salesChannel = response.data.data[0];
+            if (response.data.total > 0 && salesChannel) {
+                return salesChannel;
+            }
         }
 
-        return salesChannel;
+        return null;
     }
 
     /**

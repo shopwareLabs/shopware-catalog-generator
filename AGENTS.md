@@ -891,23 +891,23 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 
 ### Available Tools
 
-| Tool | Description |
-|------|-------------|
-| `blueprint_create` | Generate blueprint.json (no AI) |
-| `blueprint_hydrate` | Fill blueprint with AI content |
-| `blueprint_fix` | Fix placeholder names |
-| `generate` | Full pipeline: create + hydrate + upload |
-| `process` | Run post-processors |
-| `cache_list` | List cached SalesChannels |
-| `cache_clear` | Clear cache to trash |
-| `cache_trash` | List trash contents |
-| `cache_restore` | Restore from trash |
-| `cache_empty_trash` | Permanently delete trash |
-| `list_saleschannels` | List available SalesChannels |
-| `cleanup` | Delete SalesChannel data |
-| `cleanup_media` | Delete orphaned media |
-| `cleanup_unused_props` | Delete unused property groups |
-| `list_processors` | List available post-processors |
+| Tool                   | Description                              |
+| ---------------------- | ---------------------------------------- |
+| `blueprint_create`     | Generate blueprint.json (no AI)          |
+| `blueprint_hydrate`    | Fill blueprint with AI content           |
+| `blueprint_fix`        | Fix placeholder names                    |
+| `generate`             | Full pipeline: create + hydrate + upload |
+| `process`              | Run post-processors                      |
+| `cache_list`           | List cached SalesChannels                |
+| `cache_clear`          | Clear cache to trash                     |
+| `cache_trash`          | List trash contents                      |
+| `cache_restore`        | Restore from trash                       |
+| `cache_empty_trash`    | Permanently delete trash                 |
+| `list_saleschannels`   | List available SalesChannels             |
+| `cleanup`              | Delete SalesChannel data                 |
+| `cleanup_media`        | Delete orphaned media                    |
+| `cleanup_unused_props` | Delete unused property groups            |
+| `list_processors`      | List available post-processors           |
 
 ### Testing the MCP Server
 
@@ -920,6 +920,7 @@ bun run mcp:inspect
 ```
 
 The inspector opens a web UI where you can:
+
 - See all discovered tools with their schemas
 - Test tools with different parameters
 - Inspect responses in real-time
@@ -943,12 +944,12 @@ The config file `.cursor/mcp.json` is gitignored (contains local paths). The exa
 
 ```json
 {
-  "mcpServers": {
-    "catalog-generator": {
-      "command": "bun",
-      "args": ["run", "src/mcp/index.ts"]
+    "mcpServers": {
+        "catalog-generator": {
+            "command": "bun",
+            "args": ["run", "src/mcp/index.ts"]
+        }
     }
-  }
 }
 ```
 

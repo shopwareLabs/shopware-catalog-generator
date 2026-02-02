@@ -4,8 +4,8 @@
  * Exposes the main generate and process commands.
  */
 
+import type { ExistingProperty } from "../../utils/index.js";
 import type { FastMCP } from "fastmcp";
-
 import { z } from "zod";
 
 import { createCacheFromEnv } from "../../cache.js";
@@ -23,7 +23,6 @@ import {
     syncPropertyIdsToBlueprint,
 } from "../../shopware/index.js";
 import { createTemplateFetcherFromEnv } from "../../templates/index.js";
-import type { ExistingProperty } from "../../utils/index.js";
 import {
     countCategories,
     logger,
@@ -48,10 +47,7 @@ export function registerGenerateTools(server: FastMCP): void {
                 .number()
                 .default(90)
                 .describe("Number of products to generate (default: 90)"),
-            dryRun: z
-                .boolean()
-                .default(false)
-                .describe("Preview actions without making changes"),
+            dryRun: z.boolean().default(false).describe("Preview actions without making changes"),
             noTemplate: z
                 .boolean()
                 .default(false)
@@ -96,7 +92,9 @@ export function registerGenerateTools(server: FastMCP): void {
                 const blueprint = generator.generateBlueprint(salesChannelName, description);
                 cache.saveBlueprint(salesChannelName, blueprint);
                 const categoryCount = countCategories(blueprint.categories);
-                results.push(`  Created ${categoryCount} categories, ${blueprint.products.length} products`);
+                results.push(
+                    `  Created ${categoryCount} categories, ${blueprint.products.length} products`
+                );
             } else {
                 results.push(`Step 1: Using existing blueprint`);
             }
@@ -132,7 +130,10 @@ export function registerGenerateTools(server: FastMCP): void {
                 const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
 
                 const collector = new PropertyCollector();
-                const propertyGroups = collector.collectFromBlueprint(hydratedBlueprint, existingProperties);
+                const propertyGroups = collector.collectFromBlueprint(
+                    hydratedBlueprint,
+                    existingProperties
+                );
                 hydratedBlueprint.propertyGroups = propertyGroups;
 
                 cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
@@ -148,7 +149,10 @@ export function registerGenerateTools(server: FastMCP): void {
             }
 
             // Validate and auto-fix
-            const validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+            const validationResult = validateBlueprint(blueprint, {
+                autoFix: true,
+                logFixes: false,
+            });
             if (!validationResult.valid) {
                 const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
                 return `Error: Blueprint validation failed:\n${issues}`;
@@ -229,7 +233,9 @@ export function registerGenerateTools(server: FastMCP): void {
                 clientId: process.env.SW_CLIENT_ID,
                 clientSecret: process.env.SW_CLIENT_SECRET,
             });
-            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () => dataHydrator.getAccessToken());
+            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
+                dataHydrator.getAccessToken()
+            );
 
             const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
 
@@ -301,18 +307,14 @@ export function registerGenerateTools(server: FastMCP): void {
     // process - Run post-processors on existing SalesChannel
     server.addTool({
         name: "process",
-        description:
-            `Run post-processors on an existing SalesChannel. Available processors: ${processorNames.join(", ")}. Use to add images, manufacturers, reviews, or variants after initial generation.`,
+        description: `Run post-processors on an existing SalesChannel. Available processors: ${processorNames.join(", ")}. Use to add images, manufacturers, reviews, or variants after initial generation.`,
         parameters: z.object({
             name: z.string().describe("SalesChannel name (must exist in Shopware)"),
             processors: z
                 .array(z.enum(processorNames as [string, ...string[]]))
                 .optional()
                 .describe("List of processors to run. If omitted, runs all processors."),
-            dryRun: z
-                .boolean()
-                .default(false)
-                .describe("Preview actions without making changes"),
+            dryRun: z.boolean().default(false).describe("Preview actions without making changes"),
         }),
         execute: async (args) => {
             // Validate name
@@ -355,9 +357,10 @@ Run generate first to create it.`;
 
             // Determine which processors to run
             const availableProcessors = registry.getNames();
-            const selectedProcessors = args.processors && args.processors.length > 0
-                ? args.processors
-                : availableProcessors;
+            const selectedProcessors =
+                args.processors && args.processors.length > 0
+                    ? args.processors
+                    : availableProcessors;
 
             const results: string[] = [];
             results.push(`=== Post-Processors ===`);
@@ -374,7 +377,9 @@ Run generate first to create it.`;
                 clientId: process.env.SW_CLIENT_ID,
                 clientSecret: process.env.SW_CLIENT_SECRET,
             });
-            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () => dataHydrator.getAccessToken());
+            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
+                dataHydrator.getAccessToken()
+            );
 
             const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
 
@@ -400,7 +405,9 @@ Run generate first to create it.`;
 
             // Summarize results
             for (const result of processorResults) {
-                results.push(`${result.name}: ${result.processed} processed, ${result.errors.length} errors`);
+                results.push(
+                    `${result.name}: ${result.processed} processed, ${result.errors.length} errors`
+                );
             }
 
             let totalProcessed = 0;

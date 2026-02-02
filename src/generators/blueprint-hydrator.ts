@@ -74,6 +74,8 @@ const ProductResponseSchema = z.object({
             ),
             // For variant products: AI suggests 1-3 property group names
             suggestedVariantGroups: z.array(z.string()).nullable(),
+            // AI-assigned categories based on product type (1-3 category names)
+            assignedCategories: z.array(z.string()).nullable(),
         })
     ),
 });
@@ -347,11 +349,17 @@ Return JSON in this exact format:
             }
         }
 
-        // Build category name lookup
+        // Build category name lookup and reverse lookup (name -> id)
         const categoryNameMap = new Map<string, string>();
+        const categoryIdByName = new Map<string, string>();
         for (const cat of hydratedCategories) {
             categoryNameMap.set(cat.id, cat.name);
+            categoryIdByName.set(cat.name.toLowerCase(), cat.id);
         }
+
+        // Build map of branch -> all available subcategory names
+        // This helps AI assign products to appropriate subcategories
+        const branchSubcategories = this.buildBranchSubcategoryMap(products, categoryNameMap);
 
         const totalBranches = productsByBranch.size;
         const maxConcurrency = this.textProvider.maxConcurrency;
@@ -377,22 +385,14 @@ Return JSON in this exact format:
         const branchTasks = branches.map(([branchId, branchProducts], index) => {
             const branchName = categoryNameMap.get(branchId) || `Branch ${index + 1}`;
 
-            // Collect sub-categories for this branch
-            const subCategories = new Set<string>();
-            for (const product of branchProducts) {
-                for (const catId of product.categoryIds) {
-                    const catName = categoryNameMap.get(catId);
-                    if (catName && catName !== branchName) {
-                        subCategories.add(catName);
-                    }
-                }
-            }
-            const subCatPreview = Array.from(subCategories).slice(0, 3).join(", ");
+            // Get available subcategories for this branch
+            const availableSubcategories = branchSubcategories.get(branchId) || [];
+            const subCatPreview = availableSubcategories.slice(0, 3).join(", ");
 
             return limiter.schedule(async () => {
                 const branchNum = index + 1;
                 const subCatText = subCatPreview
-                    ? ` → ${subCatPreview}${subCategories.size > 3 ? "..." : ""}`
+                    ? ` → ${subCatPreview}${availableSubcategories.length > 3 ? "..." : ""}`
                     : "";
                 console.log(
                     `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`
@@ -403,6 +403,8 @@ Return JSON in this exact format:
                     branchName,
                     existingProperties,
                     categoryNameMap,
+                    categoryIdByName,
+                    availableSubcategories,
                     storeContext
                 );
 
@@ -420,6 +422,43 @@ Return JSON in this exact format:
 
         // Flatten results
         return results.flat();
+    }
+
+    /**
+     * Build a map of branch ID -> all available subcategory names within that branch
+     * This helps AI assign products to appropriate subcategories
+     */
+    private buildBranchSubcategoryMap(
+        products: BlueprintProduct[],
+        categoryNameMap: Map<string, string>
+    ): Map<string, string[]> {
+        const branchSubcategories = new Map<string, Set<string>>();
+
+        // Collect all category names used by products in each branch
+        for (const product of products) {
+            const branchId = product.primaryCategoryId;
+            const branchName = categoryNameMap.get(branchId);
+
+            if (!branchSubcategories.has(branchId)) {
+                branchSubcategories.set(branchId, new Set());
+            }
+
+            const subcats = branchSubcategories.get(branchId)!;
+            for (const catId of product.categoryIds) {
+                const catName = categoryNameMap.get(catId);
+                if (catName && catName !== branchName) {
+                    subcats.add(catName);
+                }
+            }
+        }
+
+        // Convert Sets to sorted arrays
+        const result = new Map<string, string[]>();
+        for (const [branchId, subcats] of branchSubcategories) {
+            result.set(branchId, Array.from(subcats).sort());
+        }
+
+        return result;
     }
 
     /**
@@ -478,6 +517,8 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        categoryIdByName: Map<string, string>,
+        availableSubcategories: string[],
         storeContext: StoreContext,
         manufacturerNames: string[]
     ): Promise<BlueprintProduct[]> {
@@ -493,6 +534,8 @@ Return JSON in this exact format:
                     branchName,
                     existingProperties,
                     categoryNameMap,
+                    categoryIdByName,
+                    availableSubcategories,
                     storeContext,
                     manufacturerNames
                 ),
@@ -501,6 +544,8 @@ Return JSON in this exact format:
                     branchName,
                     existingProperties,
                     categoryNameMap,
+                    categoryIdByName,
+                    availableSubcategories,
                     storeContext,
                     manufacturerNames
                 ),
@@ -514,6 +559,8 @@ Return JSON in this exact format:
             branchName,
             existingProperties,
             categoryNameMap,
+            categoryIdByName,
+            availableSubcategories,
             storeContext,
             manufacturerNames
         );
@@ -522,6 +569,8 @@ Return JSON in this exact format:
             branchName,
             existingProperties,
             categoryNameMap,
+            categoryIdByName,
+            availableSubcategories,
             storeContext,
             manufacturerNames
         );
@@ -536,22 +585,11 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        categoryIdByName: Map<string, string>,
+        availableSubcategories: string[],
         storeContext: StoreContext,
         manufacturerNames: string[]
     ): Promise<BlueprintProduct[]> {
-        // Collect unique sub-categories for this batch
-        const subCategories = new Set<string>();
-        for (const product of products) {
-            for (const catId of product.categoryIds) {
-                const catName = categoryNameMap.get(catId);
-                if (catName && catName !== branchName) {
-                    subCategories.add(catName);
-                }
-            }
-        }
-        const subCatList = Array.from(subCategories).slice(0, 3); // Show up to 3
-        const subCatText = subCatList.length > 0 ? ` (${subCatList.join(", ")})` : "";
-
         // Update batch progress
         const counter = this.batchCounter.get(branchName);
         if (counter) {
@@ -565,16 +603,17 @@ Return JSON in this exact format:
             products,
             branchName,
             existingProperties,
-            categoryNameMap,
+            availableSubcategories,
             storeContext,
             manufacturerNames
         );
+        const subCatPreview = availableSubcategories.slice(0, 3).join(", ");
         logger.debug(
-            `[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName}${subCatText} - ${products.length} products`,
+            `[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName} (${subCatPreview}) - ${products.length} products`,
             {
                 productIds: products.map((p) => p.id.slice(0, 8)),
                 promptLength: prompt.length,
-                subCategories: Array.from(subCategories),
+                availableSubcategories,
             }
         );
 
@@ -585,6 +624,7 @@ Return JSON in this exact format:
             products,
             branchName,
             categoryNameMap,
+            categoryIdByName,
             startTime
         );
     }
@@ -637,6 +677,7 @@ Return JSON in this exact format:
         products: BlueprintProduct[],
         branchName: string,
         categoryNameMap: Map<string, string>,
+        categoryIdByName: Map<string, string>,
         startTime: number
     ): Promise<BlueprintProduct[]> {
         const elapsed = Date.now() - startTime;
@@ -653,7 +694,13 @@ Return JSON in this exact format:
                 `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`
             );
             logger.debug(`Parsed ${validated.products.length} products for "${branchName}"`);
-            return await this.applyProductHydration(products, validated.products, categoryNameMap);
+            return await this.applyProductHydration(
+                products,
+                validated.products,
+                categoryNameMap,
+                categoryIdByName,
+                branchName
+            );
         } catch (error) {
             logger.error(`Failed to parse AI response for "${branchName}"`, {
                 error: error instanceof Error ? error.message : String(error),
@@ -672,6 +719,8 @@ Return JSON in this exact format:
         branchName: string,
         existingProperties: ExistingProperty[],
         categoryNameMap: Map<string, string>,
+        categoryIdByName: Map<string, string>,
+        availableSubcategories: string[],
         storeContext: StoreContext,
         manufacturerNames?: string[]
     ): Promise<BlueprintProduct[]> {
@@ -690,6 +739,8 @@ Return JSON in this exact format:
                 branchName,
                 existingProperties,
                 categoryNameMap,
+                categoryIdByName,
+                availableSubcategories,
                 storeContext,
                 manufacturerNames
             );
@@ -701,6 +752,8 @@ Return JSON in this exact format:
             branchName,
             existingProperties,
             categoryNameMap,
+            categoryIdByName,
+            availableSubcategories,
             storeContext,
             manufacturerNames
         );
@@ -716,17 +769,17 @@ Return JSON in this exact format:
         products: BlueprintProduct[],
         branchName: string,
         existingProperties: ExistingProperty[],
-        categoryNameMap: Map<string, string>,
+        availableSubcategories: string[],
         storeContext: StoreContext,
         manufacturerNames: string[]
     ): string {
+        // Don't include current categories - AI will assign appropriate ones
         const productList = products.map((p) => ({
             id: p.id,
             imageCount: p.metadata.imageCount,
             imageViews: p.metadata.imageDescriptions.map((d) => d.view),
             isVariant: p.metadata.isVariant,
             variantGroups: p.metadata.variantConfigs?.map((c) => c.group) ?? [],
-            categories: p.categoryIds.map((id) => categoryNameMap.get(id) || id),
         }));
 
         const existingPropsText =
@@ -744,6 +797,13 @@ ${JSON.stringify(existingProperties, null, 2)}
                 ? `\nALREADY KNOWN property groups for this store (prefer these): ${cachedGroups.join(", ")}`
                 : "";
 
+        // Build available categories text
+        const availableCategoriesText =
+            availableSubcategories.length > 0
+                ? `\nAVAILABLE SUBCATEGORIES for "${branchName}" (assign 1-2 that MATCH the product type):
+${availableSubcategories.map((c) => `- "${c}"`).join("\n")}`
+                : "";
+
         return `Generate product content for the "${branchName}" category.
 
 STORE CONTEXT:
@@ -752,6 +812,14 @@ STORE CONTEXT:
 
 ${existingPropsText}
 ${cachedGroupsText}
+${availableCategoriesText}
+
+CATEGORY ASSIGNMENT (CRITICAL):
+- You MUST assign each product to 1-2 subcategories that MATCH the product type
+- A "Guitar Strings" product should be in "Guitar Accessories" or "Guitar Strings", NOT in "Violins" or "Pianos"
+- A "Piano Bench" should be in "Piano Accessories", NOT in "Guitar Accessories"
+- Use the product name to determine the correct category
+- Only use categories from the AVAILABLE SUBCATEGORIES list above
 
 PROPERTY GUIDELINES:
 - "Color" is the only predefined property group - use it when color is relevant for the product
@@ -784,6 +852,9 @@ For each product:
    - Only suggest new group names if absolutely no existing group fits
    - Use BROAD group names: "Size" not "Pot Size", "Material" not "Handle Material"
    - Just group names, not the options (options come from cache or will be generated later)
+7. ASSIGN 1-2 subcategories from the AVAILABLE SUBCATEGORIES list that MATCH the product type
+   - Use "assignedCategories" field with EXACT category names from the list
+   - Choose categories that logically fit the product (e.g., guitar products → guitar categories)
 
 Return JSON in this exact format:
 {
@@ -797,7 +868,8 @@ Return JSON in this exact format:
       "imageDescriptions": [
         { "view": "front", "prompt": "Product description for image generation" }
       ],
-      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"]
+      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"],
+      "assignedCategories": ["Subcategory1", "Subcategory2"]
     }
   ]
 }`;
@@ -875,10 +947,15 @@ Return JSON in this exact format:
     private async applyProductHydration(
         original: BlueprintProduct[],
         hydrated: ProductResponse["products"],
-        categoryNameMap: Map<string, string>
+        categoryNameMap: Map<string, string>,
+        categoryIdByName: Map<string, string>,
+        branchName: string
     ): Promise<BlueprintProduct[]> {
         const hydratedMap = new Map(hydrated.map((p) => [p.id, p]));
         const results: BlueprintProduct[] = [];
+
+        // Get branch category ID for primary category
+        const branchCategoryId = categoryIdByName.get(branchName.toLowerCase());
 
         for (const product of original) {
             const h = hydratedMap.get(product.id);
@@ -905,10 +982,38 @@ Return JSON in this exact format:
                 });
             }
 
+            // Apply AI-assigned categories if provided
+            let categoryIds = product.categoryIds;
+            let primaryCategoryId = product.primaryCategoryId;
+
+            if (h.assignedCategories && h.assignedCategories.length > 0) {
+                // Start with the branch category (always include top-level)
+                const newCategoryIds: string[] = [];
+                if (branchCategoryId) {
+                    newCategoryIds.push(branchCategoryId);
+                    primaryCategoryId = branchCategoryId;
+                }
+
+                // Add AI-assigned subcategories
+                for (const catName of h.assignedCategories) {
+                    const catId = categoryIdByName.get(catName.toLowerCase());
+                    if (catId && !newCategoryIds.includes(catId)) {
+                        newCategoryIds.push(catId);
+                    }
+                }
+
+                // Use new categories if we found any
+                if (newCategoryIds.length > 0) {
+                    categoryIds = newCategoryIds;
+                }
+            }
+
             results.push({
                 ...product,
                 name: h.name,
                 description: h.description,
+                categoryIds,
+                primaryCategoryId,
                 metadata: {
                     ...product.metadata,
                     properties: h.properties as ProductProperty[],

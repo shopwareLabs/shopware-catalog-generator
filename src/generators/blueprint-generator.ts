@@ -86,13 +86,9 @@ export class BlueprintGenerator {
         // Generate category tree
         const categories = this.generateCategoryTree();
 
-        // Flatten categories for product assignment
-        const allCategories = this.flattenCategories(categories);
-        const topLevelCategories = categories;
-        const leafCategories = allCategories.filter((c) => c.children.length === 0);
-
-        // Generate products with cross-category assignment
-        const products = this.generateProducts(topLevelCategories, leafCategories, allCategories);
+        // Generate products for each top-level branch
+        // AI will assign appropriate subcategories during hydration
+        const products = this.generateProducts(categories);
 
         return {
             version: "1.0",
@@ -169,102 +165,27 @@ export class BlueprintGenerator {
     }
 
     /**
-     * Flatten category tree into a single array
+     * Generate products for each top-level branch.
+     * AI will assign appropriate subcategories during hydration.
      */
-    private flattenCategories(categories: BlueprintCategory[]): BlueprintCategory[] {
-        const result: BlueprintCategory[] = [];
-
-        const traverse = (cats: BlueprintCategory[]) => {
-            for (const cat of cats) {
-                result.push(cat);
-                if (cat.children.length > 0) {
-                    traverse(cat.children);
-                }
-            }
-        };
-
-        traverse(categories);
-        return result;
-    }
-
-    /**
-     * Generate products with cross-category assignment
-     */
-    private generateProducts(
-        topLevelCategories: BlueprintCategory[],
-        leafCategories: BlueprintCategory[],
-        allCategories: BlueprintCategory[]
-    ): BlueprintProduct[] {
+    private generateProducts(topLevelCategories: BlueprintCategory[]): BlueprintProduct[] {
         const products: BlueprintProduct[] = [];
 
-        // Group leaf categories by their top-level parent
-        const leafCategoriesByBranch = new Map<string, BlueprintCategory[]>();
-
-        for (const leaf of leafCategories) {
-            const topLevelId = this.getTopLevelParentId(leaf, allCategories);
-            const existing = leafCategoriesByBranch.get(topLevelId);
-            if (existing) {
-                existing.push(leaf);
-            } else {
-                leafCategoriesByBranch.set(topLevelId, [leaf]);
-            }
-        }
-
-        // Generate products for each top-level branch
         for (const topCategory of topLevelCategories) {
-            const branchLeafCategories = leafCategoriesByBranch.get(topCategory.id) || [];
-            const branchProducts = this.generateBranchProducts(
-                topCategory,
-                branchLeafCategories,
-                allCategories
-            );
-            products.push(...branchProducts);
+            products.push(...this.generateBranchProducts(topCategory));
         }
 
         return products;
     }
 
     /**
-     * Get the top-level parent ID for a category
-     */
-    private getTopLevelParentId(
-        category: BlueprintCategory,
-        allCategories: BlueprintCategory[]
-    ): string {
-        if (category.level === 1) {
-            return category.id;
-        }
-
-        let current = category;
-        while (current.parentId) {
-            const parent = allCategories.find((c) => c.id === current.parentId);
-            if (!parent) break;
-            if (parent.level === 1) {
-                return parent.id;
-            }
-            current = parent;
-        }
-
-        return category.id;
-    }
-
-    /**
      * Generate products for a single branch (top-level category)
      */
-    private generateBranchProducts(
-        topCategory: BlueprintCategory,
-        branchLeafCategories: BlueprintCategory[],
-        allCategories: BlueprintCategory[]
-    ): BlueprintProduct[] {
+    private generateBranchProducts(topCategory: BlueprintCategory): BlueprintProduct[] {
         const products: BlueprintProduct[] = [];
 
         for (let i = 0; i < this.config.productsPerBranch; i++) {
-            const product = this.createProduct(
-                i + 1,
-                topCategory,
-                branchLeafCategories,
-                allCategories
-            );
+            const product = this.createProduct(i + 1, topCategory);
             products.push(product);
         }
 
@@ -272,46 +193,10 @@ export class BlueprintGenerator {
     }
 
     /**
-     * Create a single product with category assignments
+     * Create a single product with initial branch assignment.
+     * AI will assign appropriate subcategories during hydration based on product name.
      */
-    private createProduct(
-        index: number,
-        topCategory: BlueprintCategory,
-        branchLeafCategories: BlueprintCategory[],
-        allCategories: BlueprintCategory[]
-    ): BlueprintProduct {
-        // Primary category is always the top-level category
-        const categoryIds: string[] = [topCategory.id];
-
-        // Assign to 1-3 leaf categories within this branch
-        if (branchLeafCategories.length > 0) {
-            const numLeafAssignments = randomInRange(1, Math.min(3, branchLeafCategories.length));
-            const shuffledLeaves = shuffle(branchLeafCategories);
-            for (let i = 0; i < numLeafAssignments; i++) {
-                const leaf = shuffledLeaves[i];
-                if (leaf) {
-                    categoryIds.push(leaf.id);
-                }
-            }
-        }
-
-        // ~20% of products also get assigned to additional categories within the SAME branch
-        // This creates realistic cross-category distribution (e.g., a product in both
-        // "Acoustic Guitars" and "Classical Guitars") without mixing unrelated categories
-        // (e.g., guitars should NOT appear in keyboards)
-        if (Math.random() < this.config.crossCategoryPercentage) {
-            // Get all categories within this branch that aren't already assigned
-            const sameBranchCategories = allCategories.filter(
-                (c) =>
-                    this.getTopLevelParentId(c, allCategories) === topCategory.id &&
-                    !categoryIds.includes(c.id)
-            );
-            if (sameBranchCategories.length > 0) {
-                categoryIds.push(randomPick(sameBranchCategories).id);
-            }
-        }
-
-        // Generate metadata
+    private createProduct(index: number, topCategory: BlueprintCategory): BlueprintProduct {
         const metadata = this.generateProductMetadata();
 
         return {
@@ -321,7 +206,7 @@ export class BlueprintGenerator {
             price: randomPrice(),
             stock: randomInRange(0, 100),
             primaryCategoryId: topCategory.id,
-            categoryIds: [...new Set(categoryIds)], // Deduplicate
+            categoryIds: [topCategory.id],
             metadata,
         };
     }

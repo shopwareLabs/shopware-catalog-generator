@@ -470,6 +470,64 @@ export class DataCache {
     }
 
     /**
+     * Load image metadata for a specific view (contains the prompt used to generate)
+     */
+    loadImageMetadataWithView(
+        salesChannel: string,
+        productId: string,
+        view: string
+    ): ImageCacheMetadata | null {
+        if (!this.shouldUseCache) return null;
+
+        const metadataPath = path.join(
+            this.getSalesChannelImagesDir(salesChannel),
+            `${productId}-${view}.json`
+        );
+
+        return this.loadJsonFile<ImageCacheMetadata>(metadataPath);
+    }
+
+    /**
+     * Check if cached image prompt matches current product prompt
+     * Returns true if the image should be regenerated (prompt mismatch)
+     */
+    isImageStale(
+        salesChannel: string,
+        productId: string,
+        view: string,
+        currentBasePrompt: string
+    ): boolean {
+        const metadata = this.loadImageMetadataWithView(salesChannel, productId, view);
+        if (!metadata) return false; // No cached image, not stale (will be generated fresh)
+
+        // Extract the base prompt from the cached prompt (remove view-specific suffixes)
+        const cachedPrompt = metadata.prompt || "";
+        // The cached prompt includes view-specific suffix like ", close-up showing texture..."
+        // Extract just the product name part for comparison
+        const cachedBase = (cachedPrompt.split(",")[0] || "").trim();
+        const currentBase = (currentBasePrompt.split(",")[0] || "").trim();
+
+        // Compare base prompts (product names)
+        return cachedBase.toLowerCase() !== currentBase.toLowerCase();
+    }
+
+    /**
+     * Delete cached image and metadata for a specific view
+     */
+    deleteImageWithView(salesChannel: string, productId: string, view: string): void {
+        const imagesDir = this.getSalesChannelImagesDir(salesChannel);
+        const imagePath = path.join(imagesDir, `${productId}-${view}.webp`);
+        const metadataPath = path.join(imagesDir, `${productId}-${view}.json`);
+
+        try {
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            if (fs.existsSync(metadataPath)) fs.unlinkSync(metadataPath);
+        } catch {
+            // Silently fail
+        }
+    }
+
+    /**
      * Save products for a specific category within a SalesChannel
      */
     saveProductsForSalesChannel(

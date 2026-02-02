@@ -5,7 +5,6 @@
  */
 
 import type { FastMCP } from "fastmcp";
-
 import { z } from "zod";
 
 import { DataCache } from "../../cache.js";
@@ -40,7 +39,9 @@ export function registerCleanupTools(server: FastMCP): void {
                     if (metadata?.shopwareId) {
                         results.push(`    Shopware ID: ${metadata.shopwareId}`);
                     }
-                    results.push(`    Categories: ${categoryCount}, Products: ${productCount}, Images: ${imageCount}`);
+                    results.push(
+                        `    Categories: ${categoryCount}, Products: ${productCount}, Images: ${imageCount}`
+                    );
                     results.push("");
                 }
 
@@ -52,7 +53,9 @@ export function registerCleanupTools(server: FastMCP): void {
                 results.push("No SalesChannels found in cache.");
                 results.push("");
                 results.push("Generate one with:");
-                results.push("  generate(name: 'store-name', description: 'Your store description')");
+                results.push(
+                    "  generate(name: 'store-name', description: 'Your store description')"
+                );
             }
 
             return results.join("\n");
@@ -62,8 +65,7 @@ export function registerCleanupTools(server: FastMCP): void {
     // cleanup - Delete SalesChannel data from Shopware
     server.addTool({
         name: "cleanup",
-        description:
-            `Delete products, categories, and optionally the SalesChannel from Shopware. Available processors: ${processorNames.join(", ")}. Does NOT delete local cache.`,
+        description: `Delete products, categories, and optionally the SalesChannel from Shopware. Available processors: ${processorNames.join(", ")}. Does NOT delete local cache.`,
         parameters: z.object({
             salesChannel: z.string().describe("SalesChannel name to clean up"),
             deleteSalesChannel: z
@@ -77,7 +79,9 @@ export function registerCleanupTools(server: FastMCP): void {
             processors: z
                 .array(z.enum(processorNames as [string, ...string[]]))
                 .optional()
-                .describe("Cleanup specific processor entities. If omitted with full=true, runs all."),
+                .describe(
+                    "Cleanup specific processor entities. If omitted with full=true, runs all."
+                ),
             full: z
                 .boolean()
                 .default(false)
@@ -111,9 +115,7 @@ export function registerCleanupTools(server: FastMCP): void {
 
             // Handle processor cleanup
             if ((args.processors && args.processors.length > 0) || args.full) {
-                const processorList = args.full
-                    ? registry.getNames()
-                    : args.processors ?? [];
+                const processorList = args.full ? registry.getNames() : (args.processors ?? []);
 
                 results.push(`Processors: ${processorList.join(", ")}`);
                 if (args.dryRun) {
@@ -127,7 +129,9 @@ export function registerCleanupTools(server: FastMCP): void {
                 let salesChannelId = metadata?.shopwareId;
 
                 if (!salesChannelId) {
-                    const scFromShopware = await hydrator.getStandardSalesChannel(args.salesChannel);
+                    const scFromShopware = await hydrator.getStandardSalesChannel(
+                        args.salesChannel
+                    );
                     if (!scFromShopware) {
                         return `Error: SalesChannel "${args.salesChannel}" not found in Shopware or cache.`;
                     }
@@ -151,10 +155,8 @@ export function registerCleanupTools(server: FastMCP): void {
                     clientId: process.env.SW_CLIENT_ID,
                     clientSecret: process.env.SW_CLIENT_SECRET,
                 });
-                const apiHelpers = createApiHelpers(
-                    adminClient,
-                    swEnvUrl,
-                    () => hydrator.getAccessToken()
+                const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
+                    hydrator.getAccessToken()
                 );
 
                 const context = {
@@ -176,7 +178,9 @@ export function registerCleanupTools(server: FastMCP): void {
                 let totalDeleted = 0;
                 let totalErrors = 0;
                 for (const result of processorResults) {
-                    results.push(`${result.name}: ${result.deleted} deleted, ${result.errors.length} errors`);
+                    results.push(
+                        `${result.name}: ${result.deleted} deleted, ${result.errors.length} errors`
+                    );
                     totalDeleted += result.deleted;
                     totalErrors += result.errors.length;
                 }
@@ -212,7 +216,9 @@ export function registerCleanupTools(server: FastMCP): void {
                         results.push(`  Property groups deleted: ${result.propertyGroups}`);
                     }
                     if (args.deleteSalesChannel || args.full) {
-                        results.push(`  SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`);
+                        results.push(
+                            `  SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`
+                        );
                     }
                 }
             }

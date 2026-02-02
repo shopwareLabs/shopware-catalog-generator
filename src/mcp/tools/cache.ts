@@ -5,7 +5,6 @@
  */
 
 import type { FastMCP } from "fastmcp";
-
 import { z } from "zod";
 
 import { createCacheFromEnv } from "../../cache.js";
@@ -32,7 +31,8 @@ export function registerCacheTools(server: FastMCP): void {
             for (const sc of salesChannels) {
                 const metadata = cache.loadSalesChannelMetadata(sc);
                 const blueprint = cache.loadHydratedBlueprint(sc);
-                const hasCategories = blueprint && blueprint.categories && blueprint.categories.length > 0;
+                const hasCategories =
+                    blueprint && blueprint.categories && blueprint.categories.length > 0;
                 const categoryCount = blueprint?.categories?.length ?? 0;
                 const productCount = blueprint?.products?.length ?? 0;
                 const imageCount = cache.getImageCountForSalesChannel(sc);
@@ -90,7 +90,8 @@ To list trash: cache_trash()`;
     // cache_trash - List trash contents
     server.addTool({
         name: "cache_trash",
-        description: "List contents of the trash folder. Items can be restored or permanently deleted.",
+        description:
+            "List contents of the trash folder. Items can be restored or permanently deleted.",
         parameters: z.object({}),
         execute: async () => {
             const cache = createCacheFromEnv();
@@ -132,7 +133,9 @@ To list trash: cache_trash()`;
                 // Extract sales channel name from trash item name
                 // Format: sales-channel-{name}-{timestamp}
                 const match = args.item.match(/^sales-channel-(.+?)-\d{4}-\d{2}-\d{2}T/);
-                const scName = match ? match[1] : args.item.replace("sales-channel-", "").split("-")[0];
+                const scName = match
+                    ? match[1]
+                    : args.item.replace("sales-channel-", "").split("-")[0];
                 targetPath = `generated/sales-channels/${scName}`;
             } else if (args.item.startsWith("all-cache-")) {
                 targetPath = "generated";
@@ -155,9 +158,7 @@ To list trash: cache_trash()`;
         description:
             "PERMANENTLY delete all items in trash. This cannot be undone! Use cache_trash() first to review contents.",
         parameters: z.object({
-            confirm: z
-                .boolean()
-                .describe("Must be true to confirm permanent deletion"),
+            confirm: z.boolean().describe("Must be true to confirm permanent deletion"),
         }),
         execute: async (args) => {
             if (!args.confirm) {
