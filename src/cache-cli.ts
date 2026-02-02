@@ -56,7 +56,10 @@ function listCache(): void {
 
     for (const sc of salesChannels) {
         const metadata = cache.loadSalesChannelMetadata(sc);
-        const hasTree = cache.hasCategoryTree(sc);
+        const blueprint = cache.loadHydratedBlueprint(sc);
+        const hasCategories = blueprint && blueprint.categories && blueprint.categories.length > 0;
+        const categoryCount = blueprint?.categories?.length ?? 0;
+        const productCount = blueprint?.products?.length ?? 0;
         const imageCount = cache.getImageCountForSalesChannel(sc);
 
         console.log(`  ${sc}`);
@@ -67,7 +70,8 @@ function listCache(): void {
                 console.log(`    Shopware ID: ${metadata.shopwareId}`);
             }
         }
-        console.log(`    Category Tree: ${hasTree ? "Yes" : "No"}`);
+        console.log(`    Categories: ${hasCategories ? categoryCount : "No"}`);
+        console.log(`    Products: ${productCount}`);
         console.log(`    Images: ${imageCount}`);
         console.log("");
     }

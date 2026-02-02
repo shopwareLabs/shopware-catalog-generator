@@ -264,6 +264,37 @@ bun run format        # Format code
 bun run build         # Build
 ```
 
+## MCP Server (AI Assistant Integration)
+
+This project includes an MCP server for seamless AI assistant integration in Cursor IDE. All CLI commands are exposed as auto-discoverable tools.
+
+### Setup
+
+Copy the example config and restart Cursor:
+
+```bash
+cp .cursor/mcp.json.example .cursor/mcp.json
+```
+
+If `bun` isn't in Cursor's PATH, edit `.cursor/mcp.json` to use the absolute path:
+
+```json
+"command": "/home/youruser/.bun/bin/bun"
+```
+
+### Testing
+
+```bash
+# Test interactively
+bun run mcp:dev
+
+# Inspect tools in web UI
+bun run mcp:inspect
+```
+
+The MCP server exposes all CLI commands as tools that Cursor can discover and call directly.
+See [AGENTS.md](AGENTS.md) for details on adding new commands.
+
 ## Extending
 
 See [AGENTS.md](AGENTS.md) for developer documentation:

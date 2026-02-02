@@ -80,6 +80,15 @@ src/
 │   ├── index.ts              # Exports ProcessManager + types
 │   └── process-manager.ts    # Background task management
 │
+├── mcp/                      # MCP server for Cursor AI integration
+│   ├── index.ts              # MCP server entry point (stdio transport)
+│   └── tools/                # Tool definitions by category
+│       ├── index.ts          # Re-exports all tools
+│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix
+│       ├── generate.ts       # generate, process
+│       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
+│       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
+│
 ├── cache.ts                  # DataCache class (+ blueprint storage)
 ├── property-cache.ts         # PropertyCache (store-scoped property caching)
 ├── main.ts                   # CLI entry point (v2 subcommand-based)
@@ -684,6 +693,37 @@ export function extractSalesChannelIds(data: ShopwareEntity): string[] {
 }
 ```
 
+### MCP Server Sync
+
+**All CLI commands MUST be exposed via the MCP server.**
+
+When adding a new command to any CLI entry point (`main.ts`, `cache-cli.ts`, `cleanup-cli.ts`):
+
+1. Create or update the corresponding tool in `src/mcp/tools/`
+2. Use Zod schemas matching the CLI parameters
+3. Import and call the same underlying functions (don't duplicate logic)
+4. Test with `bun run mcp:dev`
+
+This ensures AI assistants can discover and use all commands without manual lookup.
+
+```typescript
+// Good: MCP tool calls the same function as CLI
+server.addTool({
+    name: "blueprint_create",
+    parameters: z.object({
+        name: z.string(),
+        products: z.number().default(90),
+    }),
+    execute: async (args) => {
+        // Reuse existing logic
+        const generator = new BlueprintGenerator({ totalProducts: args.products });
+        const blueprint = generator.generateBlueprint(args.name, description);
+        cache.saveBlueprint(args.name, blueprint);
+        return `Blueprint created for ${args.name}`;
+    },
+});
+```
+
 ### Linting & Formatting
 
 - **Linter:** `oxlint` (via `bun run lint`)
@@ -829,6 +869,87 @@ bun run cleanup -- --salesChannel="test" --props --manufacturers
 bun run cleanup -- --salesChannel="test" --processors=cms  # Cleanup specific processor entities
 bun run cleanup:props
 bun run cleanup:media
+
+# MCP Server (Cursor AI integration)
+bun run mcp             # Run MCP server (stdio)
+bun run mcp:dev         # Interactive terminal testing
+bun run mcp:inspect     # Web UI inspector
+```
+
+## MCP Server (Cursor Integration)
+
+This project includes an MCP server that exposes CLI commands as tools for Cursor AI.
+This enables auto-discovery of available commands without grepping the codebase.
+
+### Why MCP?
+
+Instead of grepping the codebase to discover commands, Cursor auto-discovers tools via MCP:
+
+- **Self-documenting**: All commands have schemas with parameters, types, and descriptions
+- **Validated**: Parameters are validated before execution
+- **Structured output**: JSON responses instead of parsing stdout
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `blueprint_create` | Generate blueprint.json (no AI) |
+| `blueprint_hydrate` | Fill blueprint with AI content |
+| `blueprint_fix` | Fix placeholder names |
+| `generate` | Full pipeline: create + hydrate + upload |
+| `process` | Run post-processors |
+| `cache_list` | List cached SalesChannels |
+| `cache_clear` | Clear cache to trash |
+| `cache_trash` | List trash contents |
+| `cache_restore` | Restore from trash |
+| `cache_empty_trash` | Permanently delete trash |
+| `list_saleschannels` | List available SalesChannels |
+| `cleanup` | Delete SalesChannel data |
+| `cleanup_media` | Delete orphaned media |
+| `cleanup_unused_props` | Delete unused property groups |
+| `list_processors` | List available post-processors |
+
+### Testing the MCP Server
+
+```bash
+# Interactive terminal testing (mcp-cli)
+bun run mcp:dev
+
+# Web UI inspector
+bun run mcp:inspect
+```
+
+The inspector opens a web UI where you can:
+- See all discovered tools with their schemas
+- Test tools with different parameters
+- Inspect responses in real-time
+
+### Cursor Configuration
+
+Setup (first time only):
+
+```bash
+cp .cursor/mcp.json.example .cursor/mcp.json
+# Restart Cursor to load the MCP server
+```
+
+If `bun` isn't in Cursor's PATH, use the absolute path in `.cursor/mcp.json`:
+
+```json
+"command": "/home/youruser/.bun/bin/bun"
+```
+
+The config file `.cursor/mcp.json` is gitignored (contains local paths). The example file shows the required format:
+
+```json
+{
+  "mcpServers": {
+    "catalog-generator": {
+      "command": "bun",
+      "args": ["run", "src/mcp/index.ts"]
+    }
+  }
+}
 ```
 
 ## Common Tasks
@@ -854,6 +975,18 @@ bun run cleanup:media
 1. Add interface to appropriate file in `types/`
 2. Export from `types/index.ts`
 3. Import from `./types/index.js` where needed
+
+### Adding New CLI Commands
+
+When adding a new CLI command, you MUST also add it to the MCP server:
+
+1. Implement the command logic in the appropriate CLI file (`main.ts`, `cache-cli.ts`, `cleanup-cli.ts`)
+2. Add corresponding MCP tool in `src/mcp/tools/<category>.ts`
+3. Use Zod schemas that match CLI parameters
+4. Register the tool in `src/mcp/index.ts` if creating a new category
+5. Test with `bun run mcp:dev`
+
+This ensures Cursor can discover and use new commands without manual documentation lookup.
 
 ### Adding Post-Processor Cleanup
 

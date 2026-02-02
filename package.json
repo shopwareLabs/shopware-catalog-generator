@@ -38,7 +38,10 @@
         "test:coverage": "bun test --coverage",
         "test:e2e": "./test-e2e.sh",
         "test:verify": "bun run tests/e2e/verify.ts",
-        "migrate:variants": "bun run src/migrate-variants.ts"
+        "migrate:variants": "bun run src/migrate-variants.ts",
+        "mcp": "bun run src/mcp/index.ts",
+        "mcp:dev": "npx fastmcp dev src/mcp/index.ts",
+        "mcp:inspect": "npx fastmcp inspect src/mcp/index.ts"
     },
     "dependencies": {
         "@shopware/api-client": "^1.4.0",
@@ -47,6 +50,8 @@
     },
     "devDependencies": {
         "@types/bun": "latest",
+        "@wong2/mcp-cli": "^1.13.0",
+        "fastmcp": "^3.28.0",
         "knip": "^5.82.1",
         "oxfmt": "^0.27.0",
         "oxlint": "^1.42.0",

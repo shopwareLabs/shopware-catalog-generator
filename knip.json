@@ -3,5 +3,5 @@
     "project": ["src/**/*.ts"],
     "ignore": ["tests/**/*"],
     "ignoreExportsUsedInFile": true,
-    "ignoreDependencies": ["bun-types"]
+    "ignoreDependencies": ["bun-types", "@wong2/mcp-cli"]
 }

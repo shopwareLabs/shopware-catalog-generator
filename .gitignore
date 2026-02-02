@@ -10,6 +10,8 @@ dist/
 *.http
 /.run/
 .vscode
+.cursor/
+!.cursor/mcp.json.example
 .env
 .env.local
 tsconfig.tsbuildinfo
