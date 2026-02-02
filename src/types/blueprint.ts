@@ -250,7 +250,7 @@ export interface BlueprintConfig {
     /** Products per top-level category branch (default: 30) */
     productsPerBranch: number;
 
-    /** Percentage of products with cross-category assignment (default: 0.2) */
+    /** Percentage of products with cross-category assignment within the same branch (default: 0.2) */
     crossCategoryPercentage: number;
 
     /** Percentage of categories with images (default: 0.4) */

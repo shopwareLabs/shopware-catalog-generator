@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { BlueprintCategory, CategoryNode } from "../../src/types/index.js";
+import type { BlueprintCategory, CategoryNode } from "../../../src/types/index.js";
 import {
     buildBlueprintCategoryPathMap,
     buildCategoryPath,
@@ -18,7 +18,7 @@ import {
     getLeafCategoriesWithProducts,
     getTreeDepth,
     redistributeProductsToTree,
-} from "../../src/utils/category-tree.js";
+} from "../../../src/utils/category-tree.js";
 
 // Test fixtures
 const createTestTree = (): CategoryNode[] => [

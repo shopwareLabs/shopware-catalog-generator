@@ -4,7 +4,7 @@ import {
     generateSubdomainUrl,
     isValidSubdomain,
     validateSubdomainName,
-} from "../../src/utils/validation.js";
+} from "../../../src/utils/validation.js";
 
 describe("validateSubdomainName", () => {
     test("accepts valid subdomain names", () => {

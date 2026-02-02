@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import type { HydratedBlueprint } from "../../src/types/index.js";
-import { validateBlueprint } from "../../src/utils/blueprint-validation.js";
+import type { HydratedBlueprint } from "../../../src/types/index.js";
+import { validateBlueprint } from "../../../src/utils/blueprint-validation.js";
 
 /**
  * Helper to create a minimal valid blueprint for testing

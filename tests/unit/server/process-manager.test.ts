@@ -4,8 +4,8 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { ProcessManager } from "../../src/server/process-manager.js";
-import { sleep } from "../../src/utils/retry.js";
+import { ProcessManager } from "../../../src/server/process-manager.js";
+import { sleep } from "../../../src/utils/retry.js";
 
 describe("ProcessManager", () => {
     let manager: ProcessManager;

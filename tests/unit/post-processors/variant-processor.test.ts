@@ -429,5 +429,57 @@ describe("VariantProcessor", () => {
             expect(result.processed).toBe(1);
             expect(result.errors).toHaveLength(0);
         });
+
+        test("generates product numbers within 64 character limit", async () => {
+            // Test with very long option names that would exceed 64 chars
+            const longConfig: VariantConfig = {
+                group: "Format",
+                selectedOptions: [
+                    "Printable PDF with Assembly Guide",
+                    "1920x1080 HD Video Format",
+                    "Ultra High Definition 4K",
+                ],
+                priceModifiers: {},
+            };
+
+            const propertyGroups: BlueprintPropertyGroup[] = [
+                {
+                    id: "pg-format",
+                    name: "Format",
+                    displayType: "text",
+                    options: [
+                        { id: "opt-pdf", name: "Printable PDF with Assembly Guide" },
+                        { id: "opt-hd", name: "1920x1080 HD Video Format" },
+                        { id: "opt-4k", name: "Ultra High Definition 4K" },
+                    ],
+                },
+            ];
+
+            const blueprint = createMockBlueprint(
+                [
+                    {
+                        id: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", // 32-char UUID
+                        name: "Product with Long Options",
+                        isVariant: true,
+                        variantConfigs: [longConfig],
+                    },
+                ],
+                propertyGroups
+            );
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                [
+                    "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+                    { isVariant: true, variantConfigs: [longConfig] },
+                ],
+            ]);
+
+            const context = createMockContext(blueprint, metadataMap, { dryRun: true });
+            const result = await VariantProcessor.process(context);
+
+            // Should process without errors (product number truncation prevents 64-char limit issue)
+            expect(result.processed).toBe(1);
+            expect(result.errors).toHaveLength(0);
+        });
     });
 });

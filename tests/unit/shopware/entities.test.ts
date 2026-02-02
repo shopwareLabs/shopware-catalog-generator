@@ -5,7 +5,7 @@ import {
     ProductReviewDefinition,
     PropertyGroupDefinition,
     PropertyOptionDefinition,
-} from "../../src/types/index.js";
+} from "../../../src/types/index.js";
 
 describe("ProductDefinition", () => {
     test("validates a valid product", () => {

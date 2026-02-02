@@ -91,28 +91,42 @@ scripts/
 └── migrate-properties.ts     # One-time migration for store-scoped properties
 
 tests/
-├── unit/                     # Unit tests
-│   ├── blueprint-generator.test.ts  # v2 blueprint tests
-│   ├── property-collector.test.ts   # v2 property collector
-│   ├── post-processors/             # Post-processor tests
+├── unit/                     # Unit tests (mirrors src/ structure)
+│   ├── generators/           # Generator tests
+│   │   └── blueprint-generator.test.ts
+│   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
 │   │   ├── cms-processor.test.ts
 │   │   ├── image-processor.test.ts
 │   │   ├── manufacturer-processor.test.ts
 │   │   ├── review-processor.test.ts
 │   │   └── variant-processor.test.ts
-│   ├── cache.test.ts
-│   ├── concurrency.test.ts          # ConcurrencyLimiter tests
-│   ├── color-palette.test.ts        # Color matching tests
-│   ├── entities.test.ts
-│   ├── validation.test.ts
-│   ├── property-validation.test.ts  # Property group validation tests
-│   ├── property-cache.test.ts       # Store-scoped property cache tests
-│   ├── saleschannel-cache.test.ts
-│   ├── shopware-export.test.ts
-│   ├── retry.test.ts
-│   ├── strings.test.ts
-│   └── category-tree.test.ts
+│   ├── providers/            # Provider tests
+│   │   └── pollinations-provider.test.ts
+│   ├── server/               # Server tests
+│   │   └── process-manager.test.ts
+│   ├── shopware/             # Shopware client tests
+│   │   ├── entities.test.ts
+│   │   ├── export.test.ts
+│   │   └── sync.test.ts
+│   ├── templates/            # Template tests
+│   │   └── fetcher.test.ts
+│   ├── utils/                # Utility tests
+│   │   ├── arrays.test.ts
+│   │   ├── blueprint-validation.test.ts
+│   │   ├── category-tree.test.ts
+│   │   ├── color-palette.test.ts
+│   │   ├── concurrency.test.ts
+│   │   ├── logger.test.ts
+│   │   ├── property-collector.test.ts
+│   │   ├── property-validation.test.ts
+│   │   ├── retry.test.ts
+│   │   ├── strings.test.ts
+│   │   ├── uuid.test.ts
+│   │   └── validation.test.ts
+│   ├── cache.test.ts         # Root-level src/ file tests
+│   ├── property-cache.test.ts
+│   └── saleschannel-cache.test.ts
 ├── integration/              # Integration tests
 │   └── blueprint.test.ts     # v2 blueprint integration
 ├── e2e/                      # E2E tests
@@ -120,6 +134,7 @@ tests/
 │   └── browser-checks.md     # Browser verification guide
 └── mocks/                    # Test mocks
     ├── index.ts
+    ├── api-helpers.mock.ts
     ├── text-provider.mock.ts
     └── image-provider.mock.ts
 ```
@@ -429,102 +444,13 @@ Benefits:
 
 ### Unit Tests
 
-**All new code MUST have unit tests.** Follow these guidelines:
+**All new code MUST have unit tests.**
 
-1. **Post-processors**: Test metadata, dry-run mode, and API interactions
-2. **Utilities**: Test pure functions with edge cases
-3. **Fixtures**: Test that fixture data has expected structure
-
-Test file locations:
-
-- `tests/unit/` - Unit tests for individual modules
-- `tests/unit/post-processors/` - Post-processor tests
-- `tests/integration/` - Integration tests
-- `tests/e2e/` - End-to-end tests
-
-```typescript
-// Test pattern for post-processors
-describe("ProcessorName", () => {
-    describe("metadata", () => {
-        test("has correct name", () => { ... });
-        test("has description", () => { ... });
-        test("has dependencies", () => { ... });
-    });
-
-    describe("process - dry run mode", () => {
-        test("logs actions without making API calls", async () => { ... });
-    });
-
-    describe("process - API calls", () => {
-        test("checks for existing entities (idempotency)", async () => { ... });
-        test("creates new entities when needed", async () => { ... });
-        test("skips creation when entities exist", async () => { ... });
-    });
-});
-```
-
-Run tests:
-
-```bash
-bun test                              # All tests
-bun test tests/unit/                  # Unit tests only
-bun test tests/unit/post-processors/  # Post-processor tests
-bun test --watch                      # Watch mode
-```
-
-#### Unit Test Best Practices
-
-1. **No Non-Null Assertions (`!`)**: Use type guards instead of `!` operator
-
-```typescript
-// Bad: Non-null assertion
-expect(meta.variantConfigs!.length).toBeGreaterThan(0);
-
-// Good: Type guard in condition
-if (meta.variantConfigs) {
-    expect(meta.variantConfigs.length).toBeGreaterThan(0);
-}
-
-// Good: Assign after check for multiple uses
-const configs = meta.variantConfigs;
-if (configs) {
-    expect(configs.length).toBeGreaterThan(0);
-    for (const config of configs) { ... }
-}
-```
-
-2. **Use `bun:test` imports**: Always use Bun's native test runner
-
-```typescript
-import { describe, expect, test, mock, beforeEach } from "bun:test";
-```
-
-3. **Mock external dependencies**: Use `mock()` from `bun:test` or dedicated mocks in `tests/mocks/`
-
-```typescript
-import { createMockApiHelpers } from "../../mocks/index.js";
-
-const mockApi = createMockApiHelpers();
-mockApi.mockPostResponse("search/product", { data: [...] });
-```
-
-4. **Test structure**: Group related tests with `describe()`, use descriptive test names
-
-```typescript
-describe("ModuleName", () => {
-    describe("methodName", () => {
-        test("returns expected result for valid input", () => { ... });
-        test("throws error for invalid input", () => { ... });
-        test("handles edge case X", () => { ... });
-    });
-});
-```
-
-5. **Avoid test interdependence**: Each test should be independent and not rely on state from other tests
-
-6. **Test edge cases**: Empty arrays, null/undefined, boundary values, error conditions
-
-7. **Keep tests focused**: One assertion concept per test (multiple `expect()` calls are fine if testing the same behavior)
+See **[tests/AGENTS.md](tests/AGENTS.md)** for detailed testing documentation including:
+- Directory structure (must mirror `src/`)
+- Test patterns and best practices
+- Mock providers usage
+- Running tests
 
 ### Imports
 
@@ -870,35 +796,12 @@ bun run test:verify --name=furniture       # Verify Shopware data
 ## Testing
 
 ```bash
-# Run all tests
-bun test
-
-# Run tests with watch mode
-bun test --watch
-
-# Run tests with coverage
-bun test --coverage
-
-# Run specific test file
-bun test tests/unit/validation.test.ts
+bun test                    # Run all tests
+bun test --watch            # Watch mode
+bun test --coverage         # With coverage report
 ```
 
-### Mock Providers
-
-Test mocks support both static and dynamic responses:
-
-```typescript
-// Static response
-textProvider.setResponse("products", { products: [...] });
-
-// Dynamic response (parses prompt to determine count)
-textProvider.setDynamicResponse("products", (messages) => {
-    const prompt = messages[0]?.content || "";
-    const match = prompt.match(/for (\d+) different products/);
-    const count = match ? parseInt(match[1], 10) : 5;
-    return { products: generateMockProducts(count) };
-});
-```
+See **[tests/AGENTS.md](tests/AGENTS.md)** for detailed testing documentation.
 
 ## Development Commands
 

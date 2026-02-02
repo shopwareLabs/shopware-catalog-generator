@@ -8,7 +8,7 @@ import {
     getViewSuffix,
     isColorGroup,
     VIEW_SUFFIXES,
-} from "../../src/utils/color-palette.js";
+} from "../../../src/utils/color-palette.js";
 
 describe("Color Palette", () => {
     describe("COLOR_PALETTE", () => {

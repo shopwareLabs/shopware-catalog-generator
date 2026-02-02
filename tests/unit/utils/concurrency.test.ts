@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { ConcurrencyLimiter } from "../../src/utils/concurrency.js";
+import { ConcurrencyLimiter } from "../../../src/utils/concurrency.js";
 
 describe("ConcurrencyLimiter", () => {
     describe("constructor", () => {

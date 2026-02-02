@@ -9,7 +9,7 @@ import {
     normalizeDescription,
     normalizeString,
     stripHtml,
-} from "../../src/utils/strings.js";
+} from "../../../src/utils/strings.js";
 
 describe("string utilities", () => {
     describe("normalizeString", () => {

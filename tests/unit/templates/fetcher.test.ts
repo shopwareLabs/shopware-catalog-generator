@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
-import { DataCache } from "../../src/cache.js";
-import { TemplateFetcher } from "../../src/templates/index.js";
+import { DataCache } from "../../../src/cache.js";
+import { TemplateFetcher } from "../../../src/templates/index.js";
 
 const TEST_BASE_DIR = "./test-template-temp";
 const TEST_CACHE_DIR = `${TEST_BASE_DIR}/cache`;

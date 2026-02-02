@@ -215,8 +215,7 @@ export class BlueprintGenerator {
             const branchProducts = this.generateBranchProducts(
                 topCategory,
                 branchLeafCategories,
-                allCategories,
-                topLevelCategories
+                allCategories
             );
             products.push(...branchProducts);
         }
@@ -254,8 +253,7 @@ export class BlueprintGenerator {
     private generateBranchProducts(
         topCategory: BlueprintCategory,
         branchLeafCategories: BlueprintCategory[],
-        allCategories: BlueprintCategory[],
-        topLevelCategories: BlueprintCategory[]
+        allCategories: BlueprintCategory[]
     ): BlueprintProduct[] {
         const products: BlueprintProduct[] = [];
 
@@ -264,8 +262,7 @@ export class BlueprintGenerator {
                 i + 1,
                 topCategory,
                 branchLeafCategories,
-                allCategories,
-                topLevelCategories
+                allCategories
             );
             products.push(product);
         }
@@ -280,8 +277,7 @@ export class BlueprintGenerator {
         index: number,
         topCategory: BlueprintCategory,
         branchLeafCategories: BlueprintCategory[],
-        allCategories: BlueprintCategory[],
-        topLevelCategories: BlueprintCategory[]
+        allCategories: BlueprintCategory[]
     ): BlueprintProduct {
         // Primary category is always the top-level category
         const categoryIds: string[] = [topCategory.id];
@@ -298,19 +294,19 @@ export class BlueprintGenerator {
             }
         }
 
-        // ~20% of products also get assigned to a category in a different branch
+        // ~20% of products also get assigned to additional categories within the SAME branch
+        // This creates realistic cross-category distribution (e.g., a product in both
+        // "Acoustic Guitars" and "Classical Guitars") without mixing unrelated categories
+        // (e.g., guitars should NOT appear in keyboards)
         if (Math.random() < this.config.crossCategoryPercentage) {
-            const otherBranches = topLevelCategories.filter((c) => c.id !== topCategory.id);
-            if (otherBranches.length > 0) {
-                const otherBranch = randomPick(otherBranches);
-                const otherBranchCategories = allCategories.filter(
-                    (c) =>
-                        c.id === otherBranch.id ||
-                        this.getTopLevelParentId(c, allCategories) === otherBranch.id
-                );
-                if (otherBranchCategories.length > 0) {
-                    categoryIds.push(randomPick(otherBranchCategories).id);
-                }
+            // Get all categories within this branch that aren't already assigned
+            const sameBranchCategories = allCategories.filter(
+                (c) =>
+                    this.getTopLevelParentId(c, allCategories) === topCategory.id &&
+                    !categoryIds.includes(c.id)
+            );
+            if (sameBranchCategories.length > 0) {
+                categoryIds.push(randomPick(sameBranchCategories).id);
             }
         }
 

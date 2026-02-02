@@ -568,10 +568,15 @@ class VariantProcessorImpl implements PostProcessor {
             const variantPrice = Math.round(product.price * totalModifier * 100) / 100;
             const optionSuffix = combo.map((o) => o.name.toLowerCase().replace(/\s+/g, "-")).join("-");
 
+            // Shopware productNumber has max 64 chars. Use 8-char UUID prefix + truncated suffix
+            const prefix = product.id.slice(0, 8);
+            const maxSuffixLength = 64 - prefix.length - 1; // -1 for the hyphen
+            const truncatedSuffix = optionSuffix.slice(0, maxSuffixLength);
+
             return {
                 id: generateUUID(),
                 parentId: product.id,
-                productNumber: `${product.id.slice(0, 8)}-${optionSuffix}`,
+                productNumber: `${prefix}-${truncatedSuffix}`,
                 stock: Math.floor(Math.random() * 100) + 10,
                 options: combo.map((o) => ({ id: o.id })),
                 price: [

@@ -6,7 +6,7 @@ import {
     randomSample,
     randomSamplePercent,
     weightedRandomPick,
-} from "../../src/utils/arrays.js";
+} from "../../../src/utils/arrays.js";
 
 describe("cartesianProduct", () => {
     test("returns empty array for empty input", () => {

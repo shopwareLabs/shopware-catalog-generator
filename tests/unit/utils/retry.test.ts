@@ -7,7 +7,7 @@ import {
     getRetryAfterMs,
     isRateLimitError,
     sleep,
-} from "../../src/utils/retry.js";
+} from "../../../src/utils/retry.js";
 
 describe("retry utilities", () => {
     describe("isRateLimitError", () => {
