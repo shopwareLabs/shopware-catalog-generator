@@ -6,13 +6,13 @@
  */
 
 import type { HydratedBlueprint, SalesChannelFull } from "../types/index.js";
-import type { DataHydrator } from "./index.js";
-
 import {
     buildCategoryPath,
     convertBlueprintCategories,
     findCategoryPathById,
+    logger,
 } from "../utils/index.js";
+import type { DataHydrator } from "./index.js";
 
 // =============================================================================
 // Types
@@ -58,7 +58,7 @@ export async function syncCategories(
             salesChannel.navigationCategoryId,
             salesChannel.id
         );
-        console.log(`  Created ${categoryIdMap.size} categories`);
+        logger.cli(`  Created ${categoryIdMap.size} categories`);
         return categoryIdMap;
     }
 
@@ -98,8 +98,11 @@ export async function syncCategories(
             product.categoryIds = product.categoryIds.map(
                 (catId) => oldToNewIdMap.get(catId) ?? catId
             );
-            if (product.primaryCategoryId && oldToNewIdMap.has(product.primaryCategoryId)) {
-                product.primaryCategoryId = oldToNewIdMap.get(product.primaryCategoryId)!;
+            const newPrimaryCatId = product.primaryCategoryId
+                ? oldToNewIdMap.get(product.primaryCategoryId)
+                : undefined;
+            if (newPrimaryCatId) {
+                product.primaryCategoryId = newPrimaryCatId;
             }
         }
     }
@@ -110,7 +113,7 @@ export async function syncCategories(
         salesChannel.navigationCategoryId,
         salesChannel.id
     );
-    console.log(`  Synced ${categoryIdMap.size} categories`);
+    logger.cli(`  Synced ${categoryIdMap.size} categories`);
     return categoryIdMap;
 }
 
@@ -155,6 +158,7 @@ export async function syncPropertyGroups(
 
         // New group - create with blueprint IDs
         if (!existing) {
+            const isColorType = blueprintGroup.displayType === "color";
             propertyGroupsToSync.push({
                 id: blueprintGroup.id,
                 name: blueprintGroup.name,
@@ -163,7 +167,8 @@ export async function syncPropertyGroups(
                 options: blueprintGroup.options.map((o) => ({
                     id: o.id,
                     name: o.name,
-                    colorHexCode: o.colorHexCode,
+                    // Only include colorHexCode for color-type property groups
+                    colorHexCode: isColorType ? o.colorHexCode : undefined,
                 })),
             });
             created++;
@@ -190,26 +195,79 @@ export async function syncPropertyGroups(
             (o) => !existingOptionNames.has(o.name.toLowerCase())
         );
 
-        // No missing options - skip
-        if (missingOptions.length === 0) {
+        // Check what the blueprint wants (not what Shopware currently has)
+        const blueprintWantsColor = blueprintGroup.displayType === "color";
+        const needsDisplayTypeUpdate =
+            blueprintWantsColor && existing.displayType !== "color";
+
+        // For color groups, check if existing options need hex code updates
+        let optionsNeedingHexUpdate: typeof blueprintGroup.options = [];
+        if (blueprintWantsColor) {
+            const existingOptionMap = new Map(
+                existing.options.map((o) => [o.name.toLowerCase(), o])
+            );
+            optionsNeedingHexUpdate = blueprintGroup.options.filter((o) => {
+                const existingOpt = existingOptionMap.get(o.name.toLowerCase());
+                // Option exists but has no hex code (or wrong hex), and we have one to provide
+                return existingOpt && o.colorHexCode && existingOpt.colorHexCode !== o.colorHexCode;
+            });
+        }
+
+        // No changes needed - skip
+        if (
+            missingOptions.length === 0 &&
+            optionsNeedingHexUpdate.length === 0 &&
+            !needsDisplayTypeUpdate
+        ) {
             skipped++;
             continue;
         }
 
-        // Need to add missing options to existing group
+        // When updating displayType to color, we need to include ALL options with hex codes
+        const allOptionsToSync = needsDisplayTypeUpdate
+            ? blueprintGroup.options.map((o) => ({
+                  id:
+                      existing.options.find(
+                          (e) => e.name.toLowerCase() === o.name.toLowerCase()
+                      )?.id ?? o.id,
+                  name: o.name,
+                  colorHexCode: o.colorHexCode,
+              }))
+            : [
+                  ...missingOptions.map((o) => ({
+                      id: o.id,
+                      name: o.name,
+                      colorHexCode: blueprintWantsColor ? o.colorHexCode : undefined,
+                  })),
+                  ...optionsNeedingHexUpdate.map((o) => ({
+                      id:
+                          existing.options.find(
+                              (e) => e.name.toLowerCase() === o.name.toLowerCase()
+                          )?.id ?? o.id,
+                      name: o.name,
+                      colorHexCode: o.colorHexCode,
+                  })),
+              ];
+
         propertyGroupsToSync.push({
             id: existing.id,
             name: existing.name,
             description: `Properties for ${existing.name}`,
-            displayType: existing.displayType,
-            options: missingOptions.map((o) => ({
-                id: o.id,
-                name: o.name,
-                colorHexCode: o.colorHexCode,
-            })),
+            displayType: blueprintWantsColor ? "color" : existing.displayType,
+            options: allOptionsToSync,
         });
         updated++;
-        console.log(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`);
+
+        if (needsDisplayTypeUpdate) {
+            logger.cli(`  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`);
+        } else if (missingOptions.length > 0) {
+            logger.cli(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`);
+        }
+        if (optionsNeedingHexUpdate.length > 0 && !needsDisplayTypeUpdate) {
+            logger.cli(
+                `  ⊕ Updating ${optionsNeedingHexUpdate.length} color hex codes in "${existing.name}"`
+            );
+        }
     }
 
     // Sync only the groups that need changes
@@ -217,7 +275,85 @@ export async function syncPropertyGroups(
         await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToSync);
     }
 
-    console.log(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`);
+    logger.cli(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`);
+
+    // Upload images for color options that can't use hex codes (Multicolor, Rainbow, etc.)
+    await uploadColorImages(dataHydrator, blueprint);
+}
+
+// =============================================================================
+// Special Color Images
+// =============================================================================
+
+/**
+ * Upload images for color options that can't be represented with hex codes.
+ * This runs after property groups are synced to set mediaId on options.
+ */
+async function uploadColorImages(
+    dataHydrator: DataHydrator,
+    blueprint: HydratedBlueprint
+): Promise<void> {
+    const { colorHasImage, getColorImagePath } = await import("../fixtures/index.js");
+    const fs = await import("fs");
+    const path = await import("path");
+
+    // Find Color property group in blueprint
+    const colorGroup = blueprint.propertyGroups.find(
+        (g) => g.name.toLowerCase() === "color"
+    );
+    if (!colorGroup) return;
+
+    // Find color options that use images
+    const imageOptions = colorGroup.options.filter((o) => colorHasImage(o.name));
+    if (imageOptions.length === 0) return;
+
+    logger.cli(`  Uploading images for ${imageOptions.length} color options...`);
+
+    // Get or create media folder for property images
+    const folderId = await dataHydrator.getOrCreateMediaFolder("Property Images");
+    if (!folderId) {
+        logger.warn("Could not create media folder for property images");
+        return;
+    }
+
+    // Get fixtures directory path
+    const fixturesDir = path.join(import.meta.dir, "..", "fixtures");
+
+    for (const option of imageOptions) {
+        const imagePath = getColorImagePath(option.name);
+        if (!imagePath) continue;
+
+        const fullPath = path.join(fixturesDir, imagePath);
+        if (!fs.existsSync(fullPath)) {
+            logger.warn(`Color image not found: ${fullPath}`);
+            continue;
+        }
+
+        try {
+            // Read image file
+            const imageBuffer = fs.readFileSync(fullPath);
+            const extension = path.extname(imagePath).slice(1); // "png" or "svg"
+
+            // Create media entity
+            const mediaId = await dataHydrator.createMedia(
+                folderId,
+                `color-${option.name.toLowerCase().replace(/\s+/g, "-")}`
+            );
+            if (!mediaId) continue;
+
+            // Upload image
+            await dataHydrator.uploadMediaFile(mediaId, imageBuffer, extension);
+
+            // Update property option with mediaId
+            await dataHydrator.updatePropertyOptionMedia(option.id, mediaId);
+
+            logger.info(`Uploaded image for color option: ${option.name}`);
+        } catch (error) {
+            logger.warn(
+                `Failed to upload image for ${option.name}: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+    }
 }
 
 // =============================================================================
@@ -311,7 +447,7 @@ export async function syncProducts(
         salesChannel.id,
         salesChannel.navigationCategoryId
     );
-    console.log(`  Synced ${productsToCreate.length} products`);
+    logger.cli(`  Synced ${productsToCreate.length} products`);
 }
 
 // =============================================================================

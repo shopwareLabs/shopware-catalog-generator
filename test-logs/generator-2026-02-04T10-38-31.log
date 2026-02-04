@@ -1,0 +1,269 @@
+[2026-02-04T10:38:31.505Z] INFO  Hydrating blueprint with AI...
+[2026-02-04T10:38:31.505Z] INFO  Starting blueprint hydration
+{
+  "salesChannel": "test-furniture",
+  "categories": 2,
+  "products": 2,
+  "existingProperties": 0
+}
+[2026-02-04T10:38:31.506Z] INFO    [1/2] Generating category names and descriptions...
+[2026-02-04T10:38:31.506Z] INFO  Hydrating categories...
+[2026-02-04T10:38:31.506Z] DEBUG Generating content for 4 categories
+{
+  "salesChannelName": "test-furniture"
+}
+[2026-02-04T10:38:31.506Z] DEBUG Category prompt built
+{
+  "promptLength": 1014
+}
+[2026-02-04T10:38:31.506Z] DEBUG [AI Provider: mock] Generating categories...
+[2026-02-04T10:38:31.506Z] INFO  [AI Provider: mock] Categories generated in 0ms
+{
+  "responseLength": 592
+}
+[2026-02-04T10:38:31.507Z] DEBUG Parsed 4 categories from response
+[2026-02-04T10:38:31.507Z] INFO  Categories hydrated
+{
+  "count": 4
+}
+[2026-02-04T10:38:31.507Z] INFO    [2/2] Generating product content...
+[2026-02-04T10:38:31.507Z] INFO  Hydrating products...
+[2026-02-04T10:38:31.507Z] INFO      Using parallel processing (max 10 concurrent branches)
+[2026-02-04T10:38:31.507Z] INFO  Parallel branch processing enabled
+{
+  "maxConcurrency": 10,
+  "totalBranches": 1
+}
+[2026-02-04T10:38:31.507Z] INFO      [Branch 1/1] test-furniture > Living Room Furniture → Sofas (2 products)
+[2026-02-04T10:38:31.507Z] INFO        [Batch 1/1] Generating 2 products...
+[2026-02-04T10:38:31.508Z] DEBUG [AI Provider: mock] test-furniture > Living Room Furniture (Sofas) - 2 products
+{
+  "productIds": [
+    "prod1",
+    "prod2"
+  ],
+  "promptLength": 3772,
+  "availableSubcategories": [
+    "Sofas"
+  ]
+}
+[2026-02-04T10:38:31.508Z] DEBUG [AI Provider: mock] Generating products for "Living Room Furniture"...
+{
+  "promptLength": 3772
+}
+[2026-02-04T10:38:31.508Z] INFO  [AI Provider: mock] Products generated for "Living Room Furniture" in 0ms
+{
+  "responseLength": 891
+}
+[2026-02-04T10:38:31.508Z] INFO          ✓ Generated 2 products (0.0s)
+[2026-02-04T10:38:31.508Z] DEBUG Parsed 2 products for "Living Room Furniture"
+[2026-02-04T10:38:31.509Z] INFO      ✓ test-furniture > Living Room Furniture complete (1/1 branches)
+[2026-02-04T10:38:31.509Z] INFO  Products hydrated
+{
+  "count": 2
+}
+[2026-02-04T10:38:31.509Z] INFO    Blueprint hydrated successfully
+[2026-02-04T10:38:31.509Z] INFO  Blueprint hydration complete
+[2026-02-04T10:38:31.509Z] INFO  Hydrating blueprint with AI...
+[2026-02-04T10:38:31.509Z] INFO  Starting blueprint hydration
+{
+  "salesChannel": "test-furniture",
+  "categories": 2,
+  "products": 2,
+  "existingProperties": 0
+}
+[2026-02-04T10:38:31.509Z] INFO    [1/2] Generating category names and descriptions...
+[2026-02-04T10:38:31.509Z] INFO  Hydrating categories...
+[2026-02-04T10:38:31.509Z] DEBUG Generating content for 4 categories
+{
+  "salesChannelName": "test-furniture"
+}
+[2026-02-04T10:38:31.509Z] DEBUG Category prompt built
+{
+  "promptLength": 1014
+}
+[2026-02-04T10:38:31.510Z] DEBUG [AI Provider: mock] Generating categories...
+[2026-02-04T10:38:31.510Z] INFO  [AI Provider: mock] Categories generated in 1ms
+{
+  "responseLength": 592
+}
+[2026-02-04T10:38:31.510Z] DEBUG Parsed 4 categories from response
+[2026-02-04T10:38:31.510Z] INFO  Categories hydrated
+{
+  "count": 4
+}
+[2026-02-04T10:38:31.510Z] INFO    [2/2] Generating product content...
+[2026-02-04T10:38:31.510Z] INFO  Hydrating products...
+[2026-02-04T10:38:31.510Z] INFO      Using parallel processing (max 10 concurrent branches)
+[2026-02-04T10:38:31.510Z] INFO  Parallel branch processing enabled
+{
+  "maxConcurrency": 10,
+  "totalBranches": 1
+}
+[2026-02-04T10:38:31.510Z] INFO      [Branch 1/1] test-furniture > Living Room Furniture → Sofas (2 products)
+[2026-02-04T10:38:31.510Z] INFO        [Batch 1/1] Generating 2 products...
+[2026-02-04T10:38:31.510Z] DEBUG [AI Provider: mock] test-furniture > Living Room Furniture (Sofas) - 2 products
+{
+  "productIds": [
+    "prod1",
+    "prod2"
+  ],
+  "promptLength": 3772,
+  "availableSubcategories": [
+    "Sofas"
+  ]
+}
+[2026-02-04T10:38:31.510Z] DEBUG [AI Provider: mock] Generating products for "Living Room Furniture"...
+{
+  "promptLength": 3772
+}
+[2026-02-04T10:38:31.510Z] INFO  [AI Provider: mock] Products generated for "Living Room Furniture" in 0ms
+{
+  "responseLength": 891
+}
+[2026-02-04T10:38:31.510Z] INFO          ✓ Generated 2 products (0.0s)
+[2026-02-04T10:38:31.510Z] DEBUG Parsed 2 products for "Living Room Furniture"
+[2026-02-04T10:38:31.510Z] INFO      ✓ test-furniture > Living Room Furniture complete (1/1 branches)
+[2026-02-04T10:38:31.510Z] INFO  Products hydrated
+{
+  "count": 2
+}
+[2026-02-04T10:38:31.510Z] INFO    Blueprint hydrated successfully
+[2026-02-04T10:38:31.510Z] INFO  Blueprint hydration complete
+[2026-02-04T10:38:31.510Z] INFO  Hydrating categories only (preserving product data)...
+[2026-02-04T10:38:31.510Z] INFO  Starting categories-only hydration
+{
+  "salesChannel": "test-furniture",
+  "categories": 2,
+  "products": 2
+}
+[2026-02-04T10:38:31.510Z] INFO    Generating category names and descriptions...
+[2026-02-04T10:38:31.510Z] DEBUG Generating content for 4 categories
+{
+  "salesChannelName": "test-furniture"
+}
+[2026-02-04T10:38:31.510Z] DEBUG Category prompt built
+{
+  "promptLength": 1018
+}
+[2026-02-04T10:38:31.510Z] DEBUG [AI Provider: mock] Generating categories...
+[2026-02-04T10:38:31.510Z] INFO  [AI Provider: mock] Categories generated in 0ms
+{
+  "responseLength": 592
+}
+[2026-02-04T10:38:31.510Z] DEBUG Parsed 4 categories from response
+[2026-02-04T10:38:31.510Z] INFO  Categories hydrated
+{
+  "count": 4
+}
+[2026-02-04T10:38:31.510Z] INFO    Categories hydrated successfully (products preserved)
+[2026-02-04T10:38:31.510Z] INFO  Categories-only hydration complete
+[2026-02-04T10:38:31.511Z] INFO  Hydrating categories only (preserving product data)...
+[2026-02-04T10:38:31.511Z] INFO  Starting categories-only hydration
+{
+  "salesChannel": "test-furniture",
+  "categories": 2,
+  "products": 2
+}
+[2026-02-04T10:38:31.511Z] INFO    Generating category names and descriptions...
+[2026-02-04T10:38:31.511Z] DEBUG Generating content for 4 categories
+{
+  "salesChannelName": "test-furniture"
+}
+[2026-02-04T10:38:31.511Z] DEBUG Category prompt built
+{
+  "promptLength": 1018
+}
+[2026-02-04T10:38:31.511Z] DEBUG [AI Provider: mock] Generating categories...
+[2026-02-04T10:38:31.511Z] INFO  [AI Provider: mock] Categories generated in 0ms
+{
+  "responseLength": 592
+}
+[2026-02-04T10:38:31.511Z] DEBUG Parsed 4 categories from response
+[2026-02-04T10:38:31.511Z] INFO  Categories hydrated
+{
+  "count": 4
+}
+[2026-02-04T10:38:31.511Z] INFO    Categories hydrated successfully (products preserved)
+[2026-02-04T10:38:31.511Z] INFO  Categories-only hydration complete
+[2026-02-04T10:38:31.511Z] INFO  Hydrating categories only (preserving product data)...
+[2026-02-04T10:38:31.511Z] INFO  Starting categories-only hydration
+{
+  "salesChannel": "test-furniture",
+  "categories": 2,
+  "products": 2
+}
+[2026-02-04T10:38:31.511Z] INFO    Generating category names and descriptions...
+[2026-02-04T10:38:31.511Z] DEBUG Generating content for 4 categories
+{
+  "salesChannelName": "test-furniture"
+}
+[2026-02-04T10:38:31.511Z] DEBUG Category prompt built
+{
+  "promptLength": 1018
+}
+[2026-02-04T10:38:31.511Z] DEBUG [AI Provider: mock] Generating categories...
+[2026-02-04T10:38:31.511Z] INFO  [AI Provider: mock] Categories generated in 0ms
+{
+  "responseLength": 592
+}
+[2026-02-04T10:38:31.511Z] DEBUG Parsed 4 categories from response
+[2026-02-04T10:38:31.511Z] INFO  Categories hydrated
+{
+  "count": 4
+}
+[2026-02-04T10:38:31.511Z] INFO    Categories hydrated successfully (products preserved)
+[2026-02-04T10:38:31.511Z] INFO  Categories-only hydration complete
+[2026-02-04T10:38:31.512Z] INFO  Hydrating properties only (preserving product names)...
+[2026-02-04T10:38:31.512Z] INFO  Starting properties-only hydration
+{
+  "salesChannel": "test-furniture",
+  "products": 2
+}
+[2026-02-04T10:38:31.512Z] INFO    Processing Living Room (2 products)...
+[2026-02-04T10:38:31.513Z] DEBUG Property cache hit for "Color" -> "Color"
+{
+  "options": 47
+}
+[2026-02-04T10:38:31.513Z] INFO    Properties hydrated successfully (names preserved)
+[2026-02-04T10:38:31.513Z] INFO  Properties-only hydration complete
+[2026-02-04T10:38:31.513Z] INFO  Hydrating properties only (preserving product names)...
+[2026-02-04T10:38:31.513Z] INFO  Starting properties-only hydration
+{
+  "salesChannel": "test-furniture",
+  "products": 2
+}
+[2026-02-04T10:38:31.513Z] INFO    Processing Living Room (2 products)...
+[2026-02-04T10:38:31.513Z] DEBUG Property cache hit for "Color" -> "Color"
+{
+  "options": 49
+}
+[2026-02-04T10:38:31.513Z] INFO    Properties hydrated successfully (names preserved)
+[2026-02-04T10:38:31.513Z] INFO  Properties-only hydration complete
+[2026-02-04T10:38:31.513Z] INFO  Hydrating properties only (preserving product names)...
+[2026-02-04T10:38:31.513Z] INFO  Starting properties-only hydration
+{
+  "salesChannel": "test-furniture",
+  "products": 2
+}
+[2026-02-04T10:38:31.514Z] INFO    Processing Living Room (2 products)...
+[2026-02-04T10:38:31.514Z] DEBUG Property cache hit for "Color" -> "Color"
+{
+  "options": 57
+}
+[2026-02-04T10:38:31.514Z] INFO    Properties hydrated successfully (names preserved)
+[2026-02-04T10:38:31.514Z] INFO  Properties-only hydration complete
+[2026-02-04T10:38:32.557Z] INFO  Moved cache for SalesChannel "cache-test-store" to trash
+[2026-02-04T10:38:32.557Z] INFO     Trash location: /home/brocksinet/Dokumente/Projects/shopware-catalog-generator/.trash
+[2026-02-04T10:38:32.557Z] INFO     To permanently delete: rm -rf .trash/
+[2026-02-04T10:38:32.558Z] INFO  Moved cache for SalesChannel "cache-test-store" to trash
+[2026-02-04T10:38:32.558Z] INFO     Trash location: /home/brocksinet/Dokumente/Projects/shopware-catalog-generator/.trash
+[2026-02-04T10:38:32.558Z] INFO     To permanently delete: rm -rf .trash/
+[2026-02-04T10:38:32.558Z] INFO  Moved cache for SalesChannel "cache-test-store" to trash
+[2026-02-04T10:38:32.558Z] INFO     Trash location: /home/brocksinet/Dokumente/Projects/shopware-catalog-generator/.trash
+[2026-02-04T10:38:32.558Z] INFO     To permanently delete: rm -rf .trash/
+[2026-02-04T10:38:32.558Z] INFO  Restored sales-channel-cache-test-store-2026-02-04T10-38-32-558Z to test-generated-mcp-cache/sales-channels/cache-test-store
+[2026-02-04T10:38:32.559Z] INFO  Moved cache for SalesChannel "cache-test-store" to trash
+[2026-02-04T10:38:32.559Z] INFO     Trash location: /home/brocksinet/Dokumente/Projects/shopware-catalog-generator/.trash
+[2026-02-04T10:38:32.559Z] INFO     To permanently delete: rm -rf .trash/
+[2026-02-04T10:38:32.559Z] INFO  🗑️  Permanently deleted all trash

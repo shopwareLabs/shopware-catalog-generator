@@ -1,13 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
-
+import { ImageProcessor } from "../../../src/post-processors/image-processor.js";
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 import type {
     HydratedBlueprint,
     ImageDescription,
     ProductMetadata,
 } from "../../../src/types/index.js";
-
-import { ImageProcessor } from "../../../src/post-processors/image-processor.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint
@@ -49,7 +47,11 @@ function createMockBlueprint(
 function createMockCache(config: {
     metadataMap?: Map<string, Partial<ProductMetadata>>;
     cachedImages?: Set<string>; // Set of "productId-view" keys
+    staleImages?: Set<string>; // Set of "productId-view" keys
 }) {
+    const cachedImages = new Set(config.cachedImages || []);
+    const staleImages = config.staleImages || new Set<string>();
+
     return {
         loadProductMetadata: mock((_salesChannelName: string, productId: string) => {
             const meta = config.metadataMap?.get(productId);
@@ -65,16 +67,26 @@ function createMockCache(config: {
             } as ProductMetadata;
         }),
         hasImageWithView: mock((_salesChannelName: string, productId: string, view: string) => {
-            return config.cachedImages?.has(`${productId}-${view}`) || false;
+            return cachedImages.has(`${productId}-${view}`);
         }),
         loadImageWithView: mock((_salesChannelName: string, productId: string, view: string) => {
-            if (config.cachedImages?.has(`${productId}-${view}`)) {
+            if (cachedImages.has(`${productId}-${view}`)) {
                 // Return a fake base64 image (JPEG magic bytes)
                 return Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64");
             }
             return null;
         }),
-        saveImageWithView: mock(() => {}),
+        saveImageWithView: mock(
+            (_salesChannelName: string, productId: string, view: string, _data: string) => {
+                cachedImages.add(`${productId}-${view}`);
+            }
+        ),
+        deleteImageWithView: mock((_salesChannelName: string, productId: string, view: string) => {
+            cachedImages.delete(`${productId}-${view}`);
+        }),
+        isImageStale: mock((_salesChannelName: string, productId: string, view: string) => {
+            return staleImages.has(`${productId}-${view}`);
+        }),
     };
 }
 
@@ -177,10 +189,21 @@ describe("ImageProcessor", () => {
                 ["p1", { imageDescriptions: [{ view: "front" as const, prompt: "test" }] }],
             ]);
 
+            const mockApi = createMockApiHelpers();
+            // Mock product search (no existing images)
+            mockApi.mockPostResponse("search/product", { data: [] });
+            // Mock media folder search
+            mockApi.mockPostResponse("search/media-folder", { data: [{ id: "folder-1" }] });
+            // Mock media search
+            mockApi.mockPostResponse("search/media", { data: [] });
+            // Mock sync success
+            mockApi.setDefaultPostResponse({ success: true });
+            mockApi.mockSyncSuccess();
+
             const context = createMockContext(
                 blueprint,
                 { metadataMap, cachedImages: new Set() },
-                { includeImageProvider: true }
+                { includeImageProvider: true, mockApi }
             );
             const result = await ImageProcessor.process(context);
 
@@ -248,7 +271,7 @@ describe("ImageProcessor", () => {
             expect(result.skipped).toBe(0);
         });
 
-        test("skips products that already have images in Shopware", async () => {
+        test("cleans up existing images before re-upload", async () => {
             const blueprint = createMockBlueprint([
                 {
                     id: "p1",
@@ -293,11 +316,19 @@ describe("ImageProcessor", () => {
             // Mock sync and media upload
             mockApi.setDefaultPostResponse({ success: true });
             mockApi.mockSyncSuccess();
+            mockApi.mockSearchResponse("product-media", [
+                { id: "pm-1", mediaId: "media-1" },
+                { id: "pm-2", mediaId: "media-2" },
+            ]);
 
             // Both products have cached images
             const context = createMockContext(
                 blueprint,
-                { metadataMap, cachedImages: new Set(["p1-front", "p2-front"]) },
+                {
+                    metadataMap,
+                    cachedImages: new Set(["p1-front", "p2-front"]),
+                    staleImages: new Set(["p1-front", "p2-front"]),
+                },
                 { dryRun: false, includeImageProvider: true, mockApi }
             );
             const result = await ImageProcessor.process(context);
@@ -306,10 +337,12 @@ describe("ImageProcessor", () => {
             const productSearchCalls = mockApi.getCallsByEndpoint("search/product");
             expect(productSearchCalls.length).toBeGreaterThan(0);
 
-            // Both products are processed (attempted upload) but skipped in Shopware
-            // The processor still counts them as "processed" since it went through the flow
+            // Both products are processed (attempted upload)
             expect(result.processed).toBe(2);
             expect(result.errors).toHaveLength(0);
+
+            // Cleanup should remove existing product media before upload
+            expect(mockApi.deleteEntitiesMock).toHaveBeenCalled();
         });
     });
 });

@@ -482,5 +482,110 @@ describe("VariantProcessor", () => {
             expect(result.processed).toBe(1);
             expect(result.errors).toHaveLength(0);
         });
+
+        test("finds property group via partial match", async () => {
+            // The processor should find "Size Type" when looking for "Size"
+            const sizeConfig: VariantConfig = {
+                group: "Size Type", // Partial match needed
+                selectedOptions: ["Small", "Large"],
+                priceModifiers: {},
+            };
+
+            const propertyGroups: BlueprintPropertyGroup[] = [
+                {
+                    id: "pg-size-type",
+                    name: "Size Type",
+                    displayType: "text",
+                    options: [
+                        { id: "opt-small", name: "Small" },
+                        { id: "opt-large", name: "Large" },
+                    ],
+                },
+            ];
+
+            const blueprint = createMockBlueprint(
+                [
+                    {
+                        id: "p1",
+                        name: "Product 1",
+                        isVariant: true,
+                        variantConfigs: [sizeConfig],
+                    },
+                ],
+                propertyGroups
+            );
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { isVariant: true, variantConfigs: [sizeConfig] }],
+            ]);
+
+            const context = createMockContext(blueprint, metadataMap, { dryRun: true });
+            const result = await VariantProcessor.process(context);
+
+            // Should find the property group via exact match
+            expect(result.processed).toBe(1);
+        });
+
+        test("handles missing property group", async () => {
+            const nonExistentConfig: VariantConfig = {
+                group: "NonExistent",
+                selectedOptions: ["A", "B"],
+                priceModifiers: {},
+            };
+
+            const blueprint = createMockBlueprint(
+                [
+                    {
+                        id: "p1",
+                        name: "Product 1",
+                        isVariant: true,
+                        variantConfigs: [nonExistentConfig],
+                    },
+                ],
+                [] // No property groups
+            );
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { isVariant: true, variantConfigs: [nonExistentConfig] }],
+            ]);
+
+            const mockApi = createMockApiHelpers();
+            // Mock property group search - nothing found
+            mockApi.mockPostResponse("search/property-group", { data: [] });
+            // Mock product search - no existing variants
+            mockApi.mockPostResponse("search/product", {
+                data: [{ id: "p1", children: [], configuratorSettings: [] }],
+            });
+            // Mock currency
+            mockApi.mockPostResponse("search/currency", { data: [{ id: "eur-id" }] });
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await VariantProcessor.process(context);
+
+            // Product should be skipped because property group not found
+            expect(result.skipped).toBe(1);
+        });
+
+        test("skips products with no metadata", async () => {
+            const sizeConfig: VariantConfig = {
+                group: "Size",
+                selectedOptions: ["S", "M"],
+                priceModifiers: {},
+            };
+
+            const blueprint = createMockBlueprint(
+                [{ id: "p1", name: "Product 1", isVariant: true, variantConfigs: [sizeConfig] }],
+                []
+            );
+
+            // No metadata for p1
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+
+            const context = createMockContext(blueprint, metadataMap);
+            const result = await VariantProcessor.process(context);
+
+            // Product p1 should be skipped because metadata is missing
+            expect(result.skipped).toBe(1);
+        });
     });
 });

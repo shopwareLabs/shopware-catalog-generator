@@ -1,6 +1,7 @@
 import {
     capitalizeString as capitalizeStringUtil,
     generateAccessKey as generateAccessKeyUtil,
+    logger,
 } from "../utils/index.js";
 
 /**
@@ -137,7 +138,7 @@ export class ShopwareClient {
     async getAccessToken(): Promise<string> {
         // Check if token is expired or about to expire
         if (this.isTokenExpired()) {
-            console.log("    Token expired or expiring soon, refreshing...");
+            logger.info("    Token expired or expiring soon, refreshing...");
             await this.refreshToken();
         }
         return this.apiClientAccessToken || "";
@@ -178,7 +179,7 @@ export class ShopwareClient {
             );
         }
 
-        console.warn("Cannot refresh token: authentication method not supported for refresh");
+        logger.warn("Cannot refresh token: authentication method not supported for refresh");
         return false;
     }
 
@@ -224,8 +225,6 @@ export class ShopwareClient {
         }>("oauth/token", authPayload);
 
         if (!authResponse.data.access_token) {
-            console.error("Authentication failed.");
-            console.log(authResponse);
             this.apiClientAccessToken = null;
             this.tokenExpiresAt = 0;
             return false;
@@ -462,7 +461,7 @@ export class ShopwareClient {
             this.productMediaFolderId = null;
             return null;
         } catch (error) {
-            console.warn("Failed to get Product Media folder:", error);
+            logger.warn("Failed to get Product Media folder:", error);
             this.productMediaFolderId = null;
             return null;
         }
@@ -553,7 +552,7 @@ export class ShopwareClient {
                 return response.data.data[0].id;
             }
         } catch (error) {
-            console.warn(`Failed to find CMS page "${name}":`, error);
+            logger.warn(`Failed to find CMS page "${name}":`, error);
         }
 
         return null;
@@ -723,7 +722,7 @@ export class ShopwareClient {
                 sections,
             };
         } catch (error) {
-            console.warn(`Failed to get CMS page "${id}":`, error);
+            logger.warn(`Failed to get CMS page "${id}":`, error);
             return null;
         }
     }
@@ -750,7 +749,7 @@ export class ShopwareClient {
                 return response.data.data[0].id;
             }
         } catch (error) {
-            console.warn(`Failed to find category "${name}":`, error);
+            logger.warn(`Failed to find category "${name}":`, error);
         }
 
         return null;
@@ -770,7 +769,7 @@ export class ShopwareClient {
             );
 
             if (response.ok) {
-                console.log(`Theme assigned to SalesChannel`);
+                logger.info(`Theme assigned to SalesChannel`);
                 return true;
             }
 
@@ -780,10 +779,10 @@ export class ShopwareClient {
                 salesChannelId,
             });
 
-            console.log(`Theme assigned to SalesChannel (via direct entry)`);
+            logger.info(`Theme assigned to SalesChannel (via direct entry)`);
             return true;
         } catch (error) {
-            console.warn("Failed to assign theme to SalesChannel:", error);
+            logger.warn("Failed to assign theme to SalesChannel:", error);
             return false;
         }
     }

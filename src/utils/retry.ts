@@ -2,67 +2,131 @@
  * Retry utilities for handling rate limits and transient failures
  */
 
+import { logger } from "./logger.js";
+
 /** Default maximum retry attempts */
 export const DEFAULT_MAX_RETRIES = 5;
 
 /** Default base delay for exponential backoff (ms) - 10s to handle 10/60s rate limits */
 export const DEFAULT_BASE_DELAY_MS = 10000;
 
+/** Default timeout for operations (ms) - 2 minutes */
+export const DEFAULT_TIMEOUT_MS = 120000;
+
 /** Options for retry behavior */
 export interface RetryOptions {
-    /** Maximum number of retry attempts (default: 3) */
+    /** Maximum number of retry attempts (default: 5) */
     maxRetries?: number;
-    /** Base delay in ms for exponential backoff (default: 2000) */
+    /** Base delay in ms for exponential backoff (default: 10000) */
     baseDelay?: number;
+    /** Timeout in ms for each attempt (default: 120000). Set to 0 to disable. */
+    timeout?: number;
     /** Optional callback when retrying */
     onRetry?: (attempt: number, delay: number, error: Error) => void;
 }
 
 /**
+ * Error thrown when an operation times out
+ */
+export class TimeoutError extends Error {
+    constructor(message: string, public readonly timeoutMs: number) {
+        super(message);
+        this.name = "TimeoutError";
+    }
+}
+
+/**
+ * Execute a function with a timeout using Promise.race pattern
+ *
+ * @param fn - The async function to execute (can optionally accept AbortSignal for cancellation)
+ * @param timeoutMs - Timeout in milliseconds
+ * @returns The result of the function
+ * @throws TimeoutError if the operation times out
+ */
+export async function withTimeout<T>(
+    fn: (signal?: AbortSignal) => Promise<T>,
+    timeoutMs: number
+): Promise<T> {
+    if (timeoutMs <= 0) {
+        return fn();
+    }
+
+    const controller = new AbortController();
+
+    // Create a timeout promise that rejects after the specified time
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        const timeoutId = setTimeout(() => {
+            controller.abort(); // Signal cancellation to the function if it supports it
+            reject(new TimeoutError(`Operation timed out after ${timeoutMs}ms`, timeoutMs));
+        }, timeoutMs);
+
+        // Clean up timeout if the function completes first
+        // We need to store the timeoutId for cleanup, but we can't do it here
+        // Instead, we'll let the timeout be garbage collected
+        controller.signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+    });
+
+    // Race the function against the timeout
+    try {
+        return await Promise.race([fn(controller.signal), timeoutPromise]);
+    } finally {
+        // Cancel the timeout if function completed
+        controller.abort();
+    }
+}
+
+/**
  * Execute a function with retry logic and exponential backoff for rate limits
  *
- * @param fn - The async function to execute
+ * @param fn - The async function to execute (can optionally accept AbortSignal for timeout support)
  * @param options - Retry configuration options
  * @returns The result of the function
  * @throws The last error if all retries are exhausted
  */
 export async function executeWithRetry<T>(
-    fn: () => Promise<T>,
+    fn: ((signal?: AbortSignal) => Promise<T>) | (() => Promise<T>),
     options: RetryOptions = {}
 ): Promise<T> {
     const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
     const baseDelay = options.baseDelay ?? DEFAULT_BASE_DELAY_MS;
+    const timeout = options.timeout ?? 0; // Default: no timeout (0 = disabled)
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
+            // Execute with optional timeout
+            if (timeout > 0) {
+                return await withTimeout(fn, timeout);
+            }
             return await fn();
         } catch (error) {
             lastError = error as Error;
 
-            // Check if it's a rate limit error
-            if (isRateLimitError(error)) {
-                if (attempt < maxRetries) {
-                    // Try to get retry-after from error, otherwise use exponential backoff
-                    const retryAfterMs = getRetryAfterMs(error);
-                    const exponentialDelay = baseDelay * Math.pow(2, attempt);
-                    // Use retry-after if valid, otherwise exponential backoff
-                    const delay = retryAfterMs > 0 ? retryAfterMs : exponentialDelay;
+            // Check if it's a rate limit error or timeout error (retriable)
+            const isRetriable = isRateLimitError(error) || error instanceof TimeoutError;
 
-                    if (options.onRetry) {
-                        options.onRetry(attempt + 1, delay, lastError);
-                    } else {
-                        console.warn(
-                            `Rate limit hit, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`
-                        );
-                    }
+            if (isRetriable && attempt < maxRetries) {
+                // Try to get retry-after from error, otherwise use exponential backoff
+                const retryAfterMs = getRetryAfterMs(error);
+                const exponentialDelay = baseDelay * Math.pow(2, attempt);
+                // Use retry-after if valid, otherwise exponential backoff
+                const delay = retryAfterMs > 0 ? retryAfterMs : exponentialDelay;
 
-                    await sleep(delay);
-                    continue;
+                if (options.onRetry) {
+                    options.onRetry(attempt + 1, delay, lastError);
+                } else {
+                    const reason = error instanceof TimeoutError ? "Timeout" : "Rate limit hit";
+                    logger.cli(
+                        `${reason}, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`,
+                        "warn"
+                    );
                 }
+
+                await sleep(delay);
+                continue;
             }
 
-            // For non-rate-limit errors, don't retry
+            // For non-retriable errors, don't retry
             throw error;
         }
     }

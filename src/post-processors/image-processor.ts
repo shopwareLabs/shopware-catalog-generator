@@ -7,12 +7,6 @@
  * 3. Sets cover image and gallery images
  */
 
-import type {
-    PostProcessor,
-    PostProcessorCleanupResult,
-    PostProcessorContext,
-    PostProcessorResult,
-} from "./index.js";
 
 import {
     apiPost,
@@ -23,6 +17,12 @@ import {
     generateUUID,
     logger,
 } from "../utils/index.js";
+import type {
+    PostProcessor,
+    PostProcessorCleanupResult,
+    PostProcessorContext,
+    PostProcessorResult,
+} from "./index.js";
 
 /**
  * Image Processor implementation
@@ -58,6 +58,7 @@ class ImageProcessorImpl implements PostProcessor {
             missingCount: number;
             cachedCount: number;
             staleCount: number;
+            shouldCleanup: boolean;
         }> = [];
 
         for (const product of products) {
@@ -108,6 +109,7 @@ class ImageProcessorImpl implements PostProcessor {
                         missingCount,
                         cachedCount,
                         staleCount,
+                        shouldCleanup: missingCount > 0 || staleCount > 0,
                     });
                 }
             }
@@ -130,7 +132,7 @@ class ImageProcessorImpl implements PostProcessor {
         const totalImages = totalProductImages + totalCategoryImages;
 
         if (totalImages === 0 && productsNeedingImages.length === 0) {
-            console.log(`    No images to generate or upload`);
+            logger.cli(`    No images to generate or upload`);
             return {
                 name: this.name,
                 processed: 0,
@@ -140,14 +142,14 @@ class ImageProcessorImpl implements PostProcessor {
             };
         }
 
-        console.log(`    Image generation: ${totalImages} images to generate`);
-        console.log(
+        logger.cli(`    Image generation: ${totalImages} images to generate`);
+        logger.cli(
             `      - ${totalProductImages} product images (${productsNeedingImages.length} products)`
         );
         if (totalStaleImages > 0) {
-            console.log(`      - ${totalStaleImages} stale images (product name changed)`);
+            logger.cli(`      - ${totalStaleImages} stale images (product name changed)`);
         }
-        console.log(`      - ${totalCategoryImages} category banners`);
+        logger.cli(`      - ${totalCategoryImages} category banners`);
 
         if (options.dryRun) {
             for (const {
@@ -157,13 +159,13 @@ class ImageProcessorImpl implements PostProcessor {
                 staleCount,
             } of productsNeedingImages) {
                 const staleInfo = staleCount > 0 ? ` (${staleCount} stale)` : "";
-                console.log(
+                logger.cli(
                     `    [DRY RUN] ${product.name}: ${missingCount} to generate${staleInfo}, ${cachedCount} cached`
                 );
                 processed++;
             }
             for (const category of categoriesNeedingImages) {
-                console.log(`    [DRY RUN] Category ${category.name}: banner to generate`);
+                logger.cli(`    [DRY RUN] Category ${category.name}: banner to generate`);
             }
             return {
                 name: this.name,
@@ -220,7 +222,7 @@ class ImageProcessorImpl implements PostProcessor {
 
         // Process all images with concurrency limiting
         if (imageTasks.length > 0) {
-            console.log(
+            logger.cli(
                 `    Generating ${imageTasks.length} images (${maxConcurrency} parallel, ${imageProvider.name})...`
             );
             const taskStartTime = Date.now();
@@ -229,7 +231,7 @@ class ImageProcessorImpl implements PostProcessor {
                 imageTasks.map((task, index) => async () => {
                     const shortName = this.truncateName(task.name);
                     const taskNum = index + 1;
-                    console.log(
+                    logger.cli(
                         `      [${taskNum}/${imageTasks.length}] ${task.type === "category" ? "📁" : "📦"} ${shortName} (${task.view})`
                     );
 
@@ -269,16 +271,16 @@ class ImageProcessorImpl implements PostProcessor {
 
             const successCount = results.filter((r) => r.success).length;
             const elapsed = ((Date.now() - taskStartTime) / 1000).toFixed(1);
-            console.log(
+            logger.cli(
                 `    ✓ Generated ${successCount}/${imageTasks.length} images in ${elapsed}s`
             );
         }
 
         // Now upload product images to Shopware
-        console.log(`    Uploading product images to Shopware...`);
+        logger.cli(`    Uploading product images to Shopware...`);
         let uploadedProducts = 0;
 
-        for (const { product, metadata } of productsNeedingImages) {
+        for (const { product, metadata, shouldCleanup } of productsNeedingImages) {
             try {
                 // Collect all cached images for upload
                 const mediaToUpload: Array<{
@@ -310,7 +312,8 @@ class ImageProcessorImpl implements PostProcessor {
                         context,
                         product.id,
                         product.name,
-                        mediaToUpload
+                        mediaToUpload,
+                        shouldCleanup
                     );
                     uploadedProducts++;
                 }
@@ -323,12 +326,13 @@ class ImageProcessorImpl implements PostProcessor {
             }
         }
 
-        console.log(`    ✓ Uploaded images for ${uploadedProducts} products`);
+        logger.cli(`    ✓ Uploaded images for ${uploadedProducts} products`);
 
         // Now upload category banners to Shopware
         if (categoriesWithImages.length > 0) {
-            console.log(`    Uploading category banners to Shopware...`);
+            logger.cli(`    Uploading category banners to Shopware...`);
             let uploadedCategories = 0;
+            const categoriesToRebuild = new Set(categoriesNeedingImages.map((c) => c.id));
 
             for (const category of categoriesWithImages) {
                 try {
@@ -343,7 +347,8 @@ class ImageProcessorImpl implements PostProcessor {
                             context,
                             category.id,
                             category.name,
-                            cachedImage
+                            cachedImage,
+                            categoriesToRebuild.has(category.id)
                         );
                         if (uploaded) {
                             uploadedCategories++;
@@ -356,7 +361,7 @@ class ImageProcessorImpl implements PostProcessor {
                 }
             }
 
-            console.log(`    ✓ Uploaded banners for ${uploadedCategories} categories`);
+            logger.cli(`    ✓ Uploaded banners for ${uploadedCategories} categories`);
         }
 
         return {
@@ -398,12 +403,16 @@ class ImageProcessorImpl implements PostProcessor {
             productMediaId: string;
             view: string;
             base64Data: string;
-        }>
+        }>,
+        shouldCleanup: boolean
     ): Promise<void> {
         // First check if product already has images in Shopware
         const hasExistingImages = await this.productHasImages(context, productId);
-        if (hasExistingImages) {
-            console.log(`      ⊘ Product already has images in Shopware, skipped`);
+        if (hasExistingImages && shouldCleanup) {
+            await this.cleanupProductImages(context, productId, productName);
+        }
+        if (hasExistingImages && !shouldCleanup) {
+            logger.cli(`      ⊘ Product already has images in Shopware, skipped`);
             return;
         }
 
@@ -516,7 +525,7 @@ class ImageProcessorImpl implements PostProcessor {
             throw new Error(`Failed to link media to product: ${syncResponse.status}`);
         }
 
-        // Upload actual image files for NEW media only
+        // Upload actual image files for NEW media only (with retry for transient failures)
         let uploadedCount = 0;
         let duplicateCount = 0;
         for (const img of newMedia) {
@@ -526,32 +535,44 @@ class ImageProcessorImpl implements PostProcessor {
             // Detect image format from magic bytes
             const format = this.detectImageFormat(imageBuffer);
 
-            const uploadResponse = await apiUpload(
-                context,
-                `_action/media/${img.mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`,
-                imageBuffer,
-                format.mimeType
-            );
+            try {
+                const uploadResponse = await this.uploadImageWithRetry(
+                    context,
+                    img.mediaId,
+                    fileName,
+                    imageBuffer,
+                    format
+                );
 
-            if (!uploadResponse.ok) {
-                const errorText = await uploadResponse.text();
+                if (!uploadResponse.ok) {
+                    const errorText = await uploadResponse.text();
 
-                // Skip if file already exists (not an error)
-                if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
-                    duplicateCount++;
-                    continue;
+                    // Skip if file already exists (not an error)
+                    if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
+                        duplicateCount++;
+                        continue;
+                    }
+
+                    logger.apiError("_action/media/upload", uploadResponse.status, {
+                        mediaId: img.mediaId,
+                        view: img.view,
+                        error: errorText,
+                    });
+                    logger.cli(
+                        `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`,
+                        "error"
+                    );
+                } else {
+                    uploadedCount++;
                 }
-
-                logger.apiError("_action/media/upload", uploadResponse.status, {
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                logger.error(`Failed to upload image after retries`, {
                     mediaId: img.mediaId,
                     view: img.view,
-                    error: errorText,
+                    error: message,
                 });
-                console.error(
-                    `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`
-                );
-            } else {
-                uploadedCount++;
+                logger.cli(`      ✗ ${shortName} (${img.view}) upload failed: ${message}`, "error");
             }
         }
 
@@ -559,11 +580,11 @@ class ImageProcessorImpl implements PostProcessor {
         const reusedMedia = mediaToLink.filter((m) => !m.isNew);
         const reusedCount = reusedMedia.length + duplicateCount;
         if (uploadedCount > 0 && reusedCount > 0) {
-            console.log(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`);
+            logger.cli(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`);
         } else if (uploadedCount > 0) {
-            console.log(`      ✓ ${shortName}: ${uploadedCount} uploaded`);
+            logger.cli(`      ✓ ${shortName}: ${uploadedCount} uploaded`);
         } else if (reusedCount > 0) {
-            console.log(`      ⊘ ${shortName}: ${reusedCount} images reused`);
+            logger.cli(`      ⊘ ${shortName}: ${reusedCount} images reused`);
         }
     }
 
@@ -669,7 +690,7 @@ class ImageProcessorImpl implements PostProcessor {
                 const firstFolder = data.data?.[0];
                 if (firstFolder) {
                     this.productMediaFolderId = firstFolder.id;
-                    console.log(`    Found Product Media folder`);
+                    logger.cli(`    Found Product Media folder`);
                     return this.productMediaFolderId;
                 }
             }
@@ -731,18 +752,19 @@ class ImageProcessorImpl implements PostProcessor {
         return null;
     }
 
-    // Cache for categories with images
-    private categoriesWithImages: Set<string> = new Set();
+    // Cache for category media IDs
+    private categoryMediaIds: Map<string, string> = new Map();
 
     /**
-     * Check if category already has an image in Shopware
+     * Get category media ID (cached)
      */
-    private async categoryHasImage(
+    private async getCategoryMediaId(
         context: PostProcessorContext,
         categoryId: string
-    ): Promise<boolean> {
-        if (this.categoriesWithImages.has(categoryId)) {
-            return true;
+    ): Promise<string | null> {
+        const cached = this.categoryMediaIds.get(categoryId);
+        if (cached) {
+            return cached;
         }
 
         try {
@@ -758,15 +780,15 @@ class ImageProcessorImpl implements PostProcessor {
                 const data = (await response.json()) as CategoryResponse;
                 const category = data.data?.[0];
                 if (category?.mediaId) {
-                    this.categoriesWithImages.add(categoryId);
-                    return true;
+                    this.categoryMediaIds.set(categoryId, category.mediaId);
+                    return category.mediaId;
                 }
             }
         } catch {
             // On error, assume no image
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -776,12 +798,21 @@ class ImageProcessorImpl implements PostProcessor {
         context: PostProcessorContext,
         categoryId: string,
         categoryName: string,
-        base64Data: string
+        base64Data: string,
+        shouldCleanup: boolean
     ): Promise<boolean> {
-        // Check if category already has an image
-        const hasImage = await this.categoryHasImage(context, categoryId);
-        if (hasImage) {
-            console.log(`      ⊘ Category "${categoryName}" already has image, skipped`);
+        // Check if category already has an image and clear it if so
+        const existingCategoryMediaId = await this.getCategoryMediaId(context, categoryId);
+        if (existingCategoryMediaId && shouldCleanup) {
+            await this.clearCategoryImage(
+                context,
+                categoryId,
+                categoryName,
+                existingCategoryMediaId
+            );
+        }
+        if (existingCategoryMediaId && !shouldCleanup) {
+            logger.cli(`      ⊘ Category "${categoryName}" already has image, skipped`);
             return false;
         }
 
@@ -789,13 +820,13 @@ class ImageProcessorImpl implements PostProcessor {
         const fileName = `${sanitizedName}-banner`;
 
         // Check if media with this filename already exists
-        const existingMediaId = await this.findMediaByFileName(context, fileName);
+        const existingFileMediaId = await this.findMediaByFileName(context, fileName);
         let mediaId: string;
 
         let isExistingMedia = false;
-        if (existingMediaId) {
+        if (existingFileMediaId) {
             // Reuse existing media
-            mediaId = existingMediaId;
+            mediaId = existingFileMediaId;
             isExistingMedia = true;
         } else {
             // Create new media entity
@@ -829,15 +860,16 @@ class ImageProcessorImpl implements PostProcessor {
                 throw new Error(`Failed to create media entity: ${createMediaResponse.status}`);
             }
 
-            // Upload the image file
+            // Upload the image file (with retry for transient failures)
             const imageBuffer = Buffer.from(base64Data, "base64");
             const format = this.detectImageFormat(imageBuffer);
 
-            const uploadResponse = await apiUpload(
+            const uploadResponse = await this.uploadImageWithRetry(
                 context,
-                `_action/media/${mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`,
+                mediaId,
+                fileName,
                 imageBuffer,
-                format.mimeType
+                format
             );
 
             if (!uploadResponse.ok) {
@@ -878,11 +910,90 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         if (isExistingMedia) {
-            console.log(`      ⊘ Linked existing banner for "${categoryName}"`);
+            logger.cli(`      ⊘ Linked existing banner for "${categoryName}"`);
         } else {
-            console.log(`      ✓ Uploaded banner for "${categoryName}"`);
+            logger.cli(`      ✓ Uploaded banner for "${categoryName}"`);
         }
         return true;
+    }
+
+    /**
+     * Remove existing product images before re-upload
+     */
+    private async cleanupProductImages(
+        context: PostProcessorContext,
+        productId: string,
+        productName: string
+    ): Promise<void> {
+        if (!context.api) {
+            logger.cli(`      ⊘ ${this.truncateName(productName)}: cleanup skipped (no API)`);
+            return;
+        }
+
+        const productMedia = await context.api.searchEntities<{ id: string; mediaId: string }>(
+            "product-media",
+            [{ type: "equals", field: "productId", value: productId }],
+            { limit: 500 }
+        );
+
+        if (productMedia.length === 0) {
+            return;
+        }
+
+        const productMediaIds = productMedia.map((pm) => pm.id);
+        const mediaIds = productMedia.map((pm) => pm.mediaId);
+
+        await context.api.deleteEntities("product_media", productMediaIds);
+
+        for (const mediaId of mediaIds) {
+            try {
+                await context.api.deleteEntity("media", mediaId);
+            } catch {
+                // Media may still be in use elsewhere
+            }
+        }
+
+        this.productsWithImages.delete(productId);
+        logger.cli(
+            `      ✓ ${this.truncateName(productName)}: cleaned up ${productMediaIds.length} images`
+        );
+    }
+
+    /**
+     * Remove existing category image before re-upload
+     */
+    private async clearCategoryImage(
+        context: PostProcessorContext,
+        categoryId: string,
+        categoryName: string,
+        mediaId: string
+    ): Promise<void> {
+        if (!context.api) {
+            logger.cli(`      ⊘ Category "${categoryName}": cleanup skipped (no API)`);
+            return;
+        }
+
+        await context.api.syncEntities({
+            clearCategoryMedia: {
+                entity: "category",
+                action: "upsert",
+                payload: [
+                    {
+                        id: categoryId,
+                        mediaId: null,
+                    },
+                ],
+            },
+        });
+
+        try {
+            await context.api.deleteEntity("media", mediaId);
+        } catch {
+            // Media may still be in use elsewhere
+        }
+
+        this.categoryMediaIds.delete(categoryId);
+        logger.cli(`      ✓ Cleared existing banner for "${categoryName}"`);
     }
 
     /**
@@ -915,6 +1026,39 @@ class ImageProcessorImpl implements PostProcessor {
     }
 
     /**
+     * Upload image with retry logic for transient failures
+     * Retries on rate limits, timeouts, and 5xx errors
+     */
+    private async uploadImageWithRetry(
+        context: PostProcessorContext,
+        mediaId: string,
+        fileName: string,
+        imageBuffer: Buffer,
+        format: { extension: string; mimeType: string }
+    ): Promise<Response> {
+        const endpoint = `_action/media/${mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`;
+
+        return executeWithRetry(
+            async () => {
+                const response = await apiUpload(context, endpoint, imageBuffer, format.mimeType);
+
+                // Retry on 5xx server errors
+                if (response.status >= 500 && response.status < 600) {
+                    const error = new Error(`Server error: ${response.status}`);
+                    (error as unknown as { status: number }).status = 429; // Trick rate limit detection
+                    throw error;
+                }
+
+                return response;
+            },
+            {
+                maxRetries: 3,
+                baseDelay: 2000, // 2s, 4s, 8s
+            }
+        );
+    }
+
+    /**
      * Truncate name for cleaner log output
      */
     private truncateName(name: string, maxLength = 30): string {
@@ -935,7 +1079,7 @@ class ImageProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            console.log(`    [DRY RUN] Would delete images for products in SalesChannel`);
+            logger.cli(`    [DRY RUN] Would delete images for products in SalesChannel`);
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -959,12 +1103,12 @@ class ImageProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                console.log(`    No products found in SalesChannel`);
+                logger.cli(`    No products found in SalesChannel`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const productIds = products.map((p) => p.id);
-            console.log(`    Found ${productIds.length} products in SalesChannel`);
+            logger.cli(`    Found ${productIds.length} products in SalesChannel`);
 
             // Step 2: Find all product_media entries for these products
             const productMedia = await context.api.searchEntities<{ id: string; mediaId: string }>(
@@ -974,7 +1118,7 @@ class ImageProcessorImpl implements PostProcessor {
             );
 
             if (productMedia.length > 0) {
-                console.log(`    Found ${productMedia.length} product media entries`);
+                logger.cli(`    Found ${productMedia.length} product media entries`);
 
                 // Collect media IDs before deleting product_media
                 const mediaIds = productMedia.map((pm) => pm.mediaId);
@@ -983,7 +1127,7 @@ class ImageProcessorImpl implements PostProcessor {
                 const productMediaIds = productMedia.map((pm) => pm.id);
                 await context.api.deleteEntities("product_media", productMediaIds);
                 deleted += productMediaIds.length;
-                console.log(`    ✓ Deleted ${productMediaIds.length} product_media entries`);
+                logger.cli(`    ✓ Deleted ${productMediaIds.length} product_media entries`);
 
                 // Step 4: Delete the actual media entities (only if not used elsewhere)
                 for (const mediaId of mediaIds) {
@@ -995,7 +1139,7 @@ class ImageProcessorImpl implements PostProcessor {
                     }
                 }
             } else {
-                console.log(`    No product media found`);
+                logger.cli(`    No product media found`);
             }
 
             // Step 5: Get SalesChannel to find root category
@@ -1041,7 +1185,7 @@ class ImageProcessorImpl implements PostProcessor {
                             payload: categoryUpdates,
                         },
                     });
-                    console.log(
+                    logger.cli(
                         `    ✓ Cleared media from ${categoriesWithMedia.length} categories`
                     );
                 }

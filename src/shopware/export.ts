@@ -10,18 +10,16 @@ import type {
     PropertyGroup,
     SalesChannelFull,
 } from "../types/index.js";
-import type { ExistingProperty } from "../utils/index.js";
-
 import { createEmptyValidation, getValidationWarnings } from "../types/index.js";
+import type { ExistingProperty } from "../utils/index.js";
 import {
     countCategories,
     generateCategoryPlaceholder,
     generateProductPlaceholder,
     generatePropertyGroupPlaceholder,
-    getLeafCategories,
+    getLeafCategories,logger,
     normalizeDescription,
-    normalizeString,
-} from "../utils/index.js";
+    normalizeString,} from "../utils/index.js";
 
 import { ShopwareClient } from "./client.js";
 
@@ -54,7 +52,7 @@ export class ShopwareExporter extends ShopwareClient {
      * Validates and normalizes data to match expected schema.
      */
     async exportSalesChannel(salesChannel: SalesChannelFull): Promise<ExportResult> {
-        console.log(`Syncing existing data from SalesChannel "${salesChannel.name}"...`);
+        logger.cli(`Syncing existing data from SalesChannel "${salesChannel.name}"...`);
 
         const validation = createEmptyValidation();
 
@@ -63,7 +61,7 @@ export class ShopwareExporter extends ShopwareClient {
             salesChannel.navigationCategoryId,
             validation
         );
-        console.log(`  Fetched ${countCategories(categories)} categories`);
+        logger.cli(`  Fetched ${countCategories(categories)} categories`);
 
         // Fetch products for each leaf category
         const products = new Map<string, ProductInput[]>();
@@ -84,11 +82,11 @@ export class ShopwareExporter extends ShopwareClient {
                 }
             }
         }
-        console.log(`  Fetched ${productCount} products`);
+        logger.cli(`  Fetched ${productCount} products`);
 
         // Fetch property groups with validation
         const propertyGroups = await this.exportPropertyGroups(validation);
-        console.log(`  Fetched ${propertyGroups.length} property groups`);
+        logger.cli(`  Fetched ${propertyGroups.length} property groups`);
 
         // Log validation warnings
         this.logValidationWarnings(validation);
@@ -342,14 +340,14 @@ export class ShopwareExporter extends ShopwareClient {
         const warnings = getValidationWarnings(validation);
 
         if (warnings.length > 0) {
-            console.log("  ⚠️  Data quality warnings:");
+            logger.cli("  ⚠️  Data quality warnings:");
             for (const warning of warnings) {
-                console.log(`     - ${warning}`);
+                logger.cli(`     - ${warning}`);
             }
         }
 
         if (validation.categoriesWithImages > 0) {
-            console.log(
+            logger.cli(
                 `  ℹ️  ${validation.categoriesWithImages} categories have images (will be preserved)`
             );
         }

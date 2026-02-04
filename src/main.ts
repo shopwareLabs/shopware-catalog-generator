@@ -9,9 +9,6 @@
  */
 
 import type { DataCache } from "./cache.js";
-import type { HydratedBlueprint } from "./types/index.js";
-import type { ExistingProperty } from "./utils/index.js";
-
 import { createCacheFromEnv } from "./cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
@@ -27,6 +24,8 @@ import {
     syncPropertyIdsToBlueprint,
 } from "./shopware/index.js";
 import { createTemplateFetcherFromEnv } from "./templates/index.js";
+import type { HydratedBlueprint } from "./types/index.js";
+import type { ExistingProperty } from "./utils/index.js";
 import {
     countCategories,
     logger,
@@ -34,6 +33,25 @@ import {
     validateBlueprint,
     validateSubdomainName,
 } from "./utils/index.js";
+
+// =============================================================================
+// CLI Error Handling
+// =============================================================================
+
+/**
+ * Structured error class for CLI operations.
+ * Allows clean error propagation with exit codes instead of abrupt process.exit().
+ */
+export class CLIError extends Error {
+    constructor(
+        message: string,
+        public readonly code: string,
+        public readonly exitCode: number = 1
+    ) {
+        super(message);
+        this.name = "CLIError";
+    }
+}
 
 // =============================================================================
 // Shared Helper: Run Post-Processors
@@ -137,15 +155,17 @@ async function executePostProcessors(params: RunProcessorsParams): Promise<Proce
 // =============================================================================
 
 interface CliArgs {
-    command: "blueprint" | "generate" | "process" | "help";
+    command: "blueprint" | "generate" | "process" | "image" | "help";
     subcommand?: "create" | "hydrate" | "fix";
     name?: string;
     description?: string;
     products?: number;
+    product?: string;
     interactive?: boolean;
     only?: string[];
     dryRun?: boolean;
     noTemplate?: boolean;
+    force?: boolean;
 }
 
 function parseCliArgs(): CliArgs {
@@ -175,7 +195,7 @@ function parseCliArgs(): CliArgs {
             if (key) {
                 flags[key] = true;
             }
-        } else if (command === "blueprint" && !flags.subcommand) {
+        } else if ((command === "blueprint" || command === "image") && !flags.subcommand) {
             flags.subcommand = arg;
         }
     }
@@ -186,10 +206,12 @@ function parseCliArgs(): CliArgs {
         name: flags.name as string | undefined,
         description: flags.description as string | undefined,
         products: flags.products ? parseInt(flags.products as string, 10) : undefined,
+        product: flags.product as string | undefined,
         interactive: flags.i === true || flags.interactive === true,
         only: flags.only ? (flags.only as string).split(",") : undefined,
         dryRun: flags["dry-run"] === true,
         noTemplate: flags["no-template"] === true,
+        force: flags.force === true,
     };
 }
 
@@ -206,12 +228,17 @@ Commands:
   blueprint fix      Fix placeholder names in hydrated blueprint
   generate           Full flow: create + hydrate + upload to Shopware
   process            Run post-processors on existing SalesChannel
+  image fix          Regenerate images for a specific product
 
 Options:
   --name=<name>         SalesChannel name (required for most commands)
   --description=<text>  Store description for AI generation
   --products=<n>        Number of products (default: 90)
-  --only=<list>         Post-processors to run (comma-separated)
+  --product=<name>      Product name or ID (for image fix)
+  --only=<list>         Comma-separated list:
+                        - For 'process': processor names (images, manufacturers, etc.)
+                        - For 'blueprint hydrate': categories or properties
+  --force               Force full re-hydration (overwrites existing, changes product names)
   --dry-run             Log actions without executing
   --no-template         Skip checking for pre-generated templates
   -i, --interactive     Run interactive wizard
@@ -219,9 +246,13 @@ Options:
 Examples:
   bun run src/main.ts blueprint create --name=furniture --description="Wood furniture store"
   bun run src/main.ts blueprint hydrate --name=furniture
+  bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
+  bun run src/main.ts blueprint hydrate --name=furniture --only=properties  # Properties only
+  bun run src/main.ts blueprint hydrate --name=furniture --force            # Full re-hydration
   bun run src/main.ts blueprint fix --name=furniture
   bun run src/main.ts generate --name=furniture --description="Wood furniture store"
   bun run src/main.ts process --name=furniture --only=images,manufacturers
+  bun run src/main.ts image fix --name=beauty --product="Eyelash Curler - Silver"
 `);
 }
 
@@ -238,14 +269,12 @@ Examples:
  */
 function requireValidName(args: CliArgs): string {
     if (!args.name) {
-        console.error("Error: --name is required");
-        process.exit(1);
+        throw new CLIError("--name is required", "MISSING_ARG");
     }
 
     const validation = validateSubdomainName(args.name);
     if (!validation.valid) {
-        console.error(`Error: Invalid name: ${validation.error}`);
-        process.exit(1);
+        throw new CLIError(`Invalid name: ${validation.error}`, "INVALID_NAME");
     }
 
     return validation.sanitized;
@@ -262,9 +291,11 @@ function requireValidName(args: CliArgs): string {
 function requireHydratedBlueprint(cache: DataCache, salesChannelName: string): HydratedBlueprint {
     const blueprint = cache.loadHydratedBlueprint(salesChannelName);
     if (!blueprint) {
-        console.error(`Error: No hydrated blueprint found for "${salesChannelName}"`);
-        console.error(`Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`);
-        process.exit(1);
+        throw new CLIError(
+            `No hydrated blueprint found for "${salesChannelName}". ` +
+            `Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`,
+            "BLUEPRINT_NOT_FOUND"
+        );
     }
     return blueprint;
 }
@@ -278,10 +309,16 @@ async function blueprintCreate(args: CliArgs): Promise<void> {
     const description = args.description || `${salesChannelName} webshop`;
     const products = args.products || 90;
 
+    // Products per category can be configured via env (default: 30)
+    const maxProductsPerBranch = parseInt(process.env.PRODUCTS_PER_CATEGORY || "30", 10);
+    const topLevelCategories = Math.max(1, Math.ceil(products / maxProductsPerBranch));
+    // Distribute products evenly across categories
+    const productsPerBranch = Math.ceil(products / topLevelCategories);
+
     console.log(`\n=== Blueprint Create ===`);
     console.log(`Name: ${salesChannelName}`);
     console.log(`Description: ${description}`);
-    console.log(`Products: ${products}`);
+    console.log(`Products: ${products} (${topLevelCategories} categories)`);
     console.log();
 
     // Create cache
@@ -290,7 +327,8 @@ async function blueprintCreate(args: CliArgs): Promise<void> {
     // Generate blueprint
     const generator = new BlueprintGenerator({
         totalProducts: products,
-        productsPerBranch: Math.ceil(products / 3),
+        topLevelCategories,
+        productsPerBranch,
     });
 
     console.log("Generating blueprint...");
@@ -309,21 +347,53 @@ async function blueprintCreate(args: CliArgs): Promise<void> {
 async function blueprintHydrate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
 
+    // Determine hydration mode
+    const hydrateOnly = args.only?.[0] as "categories" | "properties" | undefined;
+    const forceHydration = args.force === true;
+
+    // Validate --only value
+    if (hydrateOnly && hydrateOnly !== "categories" && hydrateOnly !== "properties") {
+        throw new CLIError(
+            `--only must be 'categories' or 'properties' for blueprint hydrate (got: ${hydrateOnly})`,
+            "INVALID_OPTION"
+        );
+    }
+
     // Enable verbose logging for hydration
-    logger.configure({ verboseConsole: true, minLevel: "debug" });
+    logger.configure({ minLevel: "debug" });
     console.log(`\n=== Blueprint Hydrate ===`);
     console.log(`Name: ${salesChannelName}`);
+    if (hydrateOnly) {
+        console.log(`Mode: ${hydrateOnly} only (preserving ${hydrateOnly === "categories" ? "products" : "product names"})`);
+    } else if (forceHydration) {
+        console.log(`Mode: full (--force)`);
+    }
     console.log(`Log file: ${logger.getLogFile()}`);
     console.log();
 
-    // Load blueprint
+    // Load cache
     const cache = createCacheFromEnv();
-    const blueprint = cache.loadBlueprint(salesChannelName);
 
+    // Check if hydrated blueprint exists
+    const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
+
+    if (existingHydratedBlueprint && !hydrateOnly && !forceHydration) {
+        throw new CLIError(
+            `Hydrated blueprint already exists for "${salesChannelName}". ` +
+            `Re-hydrating will change product names and trigger image regeneration. ` +
+            `Use --only=categories, --only=properties, or --force.`,
+            "BLUEPRINT_EXISTS"
+        );
+    }
+
+    // Load base blueprint
+    const blueprint = cache.loadBlueprint(salesChannelName);
     if (!blueprint) {
-        console.error(`Error: No blueprint found for "${salesChannelName}"`);
-        console.error(`Run: bun run src/main.ts blueprint create --name=${salesChannelName}`);
-        process.exit(1);
+        throw new CLIError(
+            `No blueprint found for "${salesChannelName}". ` +
+            `Run: bun run src/main.ts blueprint create --name=${salesChannelName}`,
+            "BLUEPRINT_NOT_FOUND"
+        );
     }
 
     // Create providers
@@ -332,26 +402,41 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
     // Get existing properties from Shopware (if connected)
     let existingProperties: ExistingProperty[] = [];
     try {
-        const hydrator = new DataHydrator();
+        const dataHydrator = new DataHydrator();
         const swEnvUrl = process.env.SW_ENV_URL;
         if (swEnvUrl) {
-            await hydrator.authenticateWithClientCredentials(
+            await dataHydrator.authenticateWithClientCredentials(
                 swEnvUrl,
                 process.env.SW_CLIENT_ID,
                 process.env.SW_CLIENT_SECRET
             );
-            existingProperties = await hydrator.getExistingPropertyGroups();
+            existingProperties = await dataHydrator.getExistingPropertyGroups();
             console.log(`Found ${existingProperties.length} existing property groups in Shopware`);
         }
     } catch {
         console.log("Could not connect to Shopware, proceeding without existing properties");
     }
 
-    // Hydrate blueprint
+    // Create hydrator
     const hydrator = new BlueprintHydrator(textProvider);
-    const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
+    let hydratedBlueprint: HydratedBlueprint;
 
-    // Collect properties
+    // Execute hydration based on mode
+    if (hydrateOnly === "categories" && existingHydratedBlueprint) {
+        // Categories-only mode
+        hydratedBlueprint = await hydrator.hydrateCategoriesOnly(existingHydratedBlueprint);
+    } else if (hydrateOnly === "properties" && existingHydratedBlueprint) {
+        // Properties-only mode
+        hydratedBlueprint = await hydrator.hydratePropertiesOnly(
+            existingHydratedBlueprint,
+            existingProperties
+        );
+    } else {
+        // Full hydration (new or --force)
+        hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
+    }
+
+    // Collect properties (for full and properties-only modes)
     const collector = new PropertyCollector();
     const propertyGroups = collector.collectFromBlueprint(hydratedBlueprint, existingProperties);
     hydratedBlueprint.propertyGroups = propertyGroups;
@@ -360,6 +445,7 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
     cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
 
     console.log(`\nHydrated blueprint saved:`);
+    console.log(`  Mode: ${hydrateOnly || "full"}`);
     console.log(`  Property groups: ${propertyGroups.length}`);
     console.log(`  Manufacturers: ${collector.collectManufacturers(hydratedBlueprint).length}`);
     console.log(`  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`);
@@ -373,7 +459,7 @@ async function blueprintFix(args: CliArgs): Promise<void> {
     console.log();
 
     // Enable verbose logging
-    logger.configure({ verboseConsole: true, minLevel: "debug" });
+    logger.configure({ minLevel: "debug" });
 
     // Create cache
     const cache = createCacheFromEnv();
@@ -497,18 +583,16 @@ async function generate(args: CliArgs): Promise<void> {
     // Load hydrated blueprint
     const blueprint = cache.loadHydratedBlueprint(salesChannelName);
     if (!blueprint) {
-        console.error("Error: Failed to load hydrated blueprint");
-        process.exit(1);
+        throw new CLIError("Failed to load hydrated blueprint", "BLUEPRINT_LOAD_FAILED");
     }
 
     // Validate and auto-fix blueprint issues
     const validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: true });
     if (!validationResult.valid) {
-        console.error("\nBlueprint validation failed:");
-        for (const issue of validationResult.issues) {
-            console.error(`  ${issue.type === "error" ? "✗" : "⚠"} ${issue.message}`);
-        }
-        process.exit(1);
+        const issueMessages = validationResult.issues
+            .map((issue) => `${issue.type === "error" ? "✗" : "⚠"} ${issue.message}`)
+            .join("; ");
+        throw new CLIError(`Blueprint validation failed: ${issueMessages}`, "VALIDATION_FAILED");
     }
     if (validationResult.fixesApplied > 0) {
         // Save the fixed blueprint
@@ -520,8 +604,7 @@ async function generate(args: CliArgs): Promise<void> {
     console.log("\nStep 3: Syncing to Shopware...");
     const swEnvUrl = process.env.SW_ENV_URL;
     if (!swEnvUrl) {
-        console.error("Error: SW_ENV_URL is required");
-        process.exit(1);
+        throw new CLIError("SW_ENV_URL environment variable is required", "MISSING_ENV");
     }
 
     const dataHydrator = new DataHydrator();
@@ -612,8 +695,7 @@ async function processCommand(args: CliArgs): Promise<void> {
     // Get SalesChannel from Shopware
     const swEnvUrl = process.env.SW_ENV_URL;
     if (!swEnvUrl) {
-        console.error("Error: SW_ENV_URL is required");
-        process.exit(1);
+        throw new CLIError("SW_ENV_URL environment variable is required", "MISSING_ENV");
     }
 
     const dataHydrator = new DataHydrator();
@@ -625,31 +707,148 @@ async function processCommand(args: CliArgs): Promise<void> {
 
     const salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
     if (!salesChannel) {
-        console.error(`Error: SalesChannel "${salesChannelName}" not found in Shopware`);
-        console.error(`Run: bun run src/main.ts generate --name=${salesChannelName}`);
-        process.exit(1);
+        throw new CLIError(
+            `SalesChannel "${salesChannelName}" not found in Shopware. ` +
+            `Run: bun run src/main.ts generate --name=${salesChannelName}`,
+            "SALESCHANNEL_NOT_FOUND"
+        );
     }
 
-    try {
-        const { totalProcessed, totalErrors } = await executePostProcessors({
-            salesChannelId: salesChannel.id,
-            salesChannelName,
-            blueprint,
-            cache,
-            swEnvUrl,
-            getAccessToken: () => dataHydrator.getAccessToken(),
-            processors: args.only,
-            dryRun: args.dryRun,
-        });
+    const { totalProcessed, totalErrors } = await executePostProcessors({
+        salesChannelId: salesChannel.id,
+        salesChannelName,
+        blueprint,
+        cache,
+        swEnvUrl,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        processors: args.only,
+        dryRun: args.dryRun,
+    });
 
-        console.log(`\n=== Post-Processing Complete ===`);
-        console.log(`Processed: ${totalProcessed}`);
-        console.log(`Errors: ${totalErrors}`);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`Error: ${message}`);
-        process.exit(1);
+    console.log(`\n=== Post-Processing Complete ===`);
+    console.log(`Processed: ${totalProcessed}`);
+    console.log(`Errors: ${totalErrors}`);
+}
+
+// =============================================================================
+// Image Fix Command
+// =============================================================================
+
+async function imageFixCommand(args: CliArgs): Promise<void> {
+    const salesChannelName = requireValidName(args);
+
+    if (!args.product) {
+        throw new CLIError("--product is required (product name or ID)", "MISSING_ARG");
     }
+
+    console.log(`\n=== Image Fix ===`);
+    console.log(`SalesChannel: ${salesChannelName}`);
+    console.log(`Product: ${args.product}`);
+    console.log();
+
+    // Load hydrated blueprint
+    const cache = createCacheFromEnv();
+    const blueprint = requireHydratedBlueprint(cache, salesChannelName);
+
+    // Find the product in blueprint (by name or ID)
+    const searchTerm = args.product.toLowerCase();
+    const product = blueprint.products.find(
+        (p) => p.id === args.product || p.name.toLowerCase().includes(searchTerm)
+    );
+
+    if (!product) {
+        const availableProducts = blueprint.products
+            .slice(0, 10)
+            .map((p) => p.name)
+            .join(", ");
+        throw new CLIError(
+            `Product "${args.product}" not found in blueprint. Available: ${availableProducts}...`,
+            "PRODUCT_NOT_FOUND"
+        );
+    }
+
+    console.log(`Found product: ${product.name} (${product.id})`);
+
+    const imageDescriptions = product.metadata.imageDescriptions;
+    if (imageDescriptions.length === 0) {
+        throw new CLIError("Product has no image descriptions in metadata", "NO_IMAGE_DESCRIPTIONS");
+    }
+
+    console.log(`Images to generate: ${imageDescriptions.length}`);
+    for (const desc of imageDescriptions) {
+        console.log(`  - ${desc.view}: ${desc.prompt.substring(0, 50)}...`);
+    }
+    console.log();
+
+    if (args.dryRun) {
+        console.log("[DRY RUN] Would generate and upload images");
+        return;
+    }
+
+    // Create providers
+    const { image: imageProvider } = createProvidersFromEnv();
+
+    // Generate and cache images
+    for (const desc of imageDescriptions) {
+        console.log(`Generating ${desc.view} image...`);
+
+        // Delete existing cached image if any
+        cache.deleteImageWithView(salesChannelName, product.id, desc.view);
+
+        const imageData = await imageProvider.generateImage(desc.prompt);
+        if (!imageData) {
+            console.error(`  ✗ Failed to generate ${desc.view} image`);
+            continue;
+        }
+
+        cache.saveImageWithView(salesChannelName, product.id, desc.view, imageData, desc.prompt);
+        console.log(`  ✓ Generated and cached ${desc.view} image`);
+    }
+
+    // Upload to Shopware
+    console.log(`\nUploading to Shopware...`);
+
+    const swEnvUrl = process.env.SW_ENV_URL;
+    if (!swEnvUrl) {
+        throw new CLIError("SW_ENV_URL environment variable is required", "MISSING_ENV");
+    }
+
+    const dataHydrator = new DataHydrator();
+    await dataHydrator.authenticateWithClientCredentials(
+        swEnvUrl,
+        process.env.SW_CLIENT_ID,
+        process.env.SW_CLIENT_SECRET
+    );
+
+    const salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
+    if (!salesChannel) {
+        throw new CLIError(
+            `SalesChannel "${salesChannelName}" not found in Shopware`,
+            "SALESCHANNEL_NOT_FOUND"
+        );
+    }
+
+    // Create a filtered blueprint with just this product for the image processor
+    const filteredBlueprint: HydratedBlueprint = {
+        ...blueprint,
+        products: [product],
+    };
+
+    // Run only the image processor
+    const { totalProcessed, totalErrors } = await executePostProcessors({
+        salesChannelId: salesChannel.id,
+        salesChannelName,
+        blueprint: filteredBlueprint,
+        cache,
+        swEnvUrl,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        processors: ["images"],
+        dryRun: false,
+    });
+
+    console.log(`\n=== Image Fix Complete ===`);
+    console.log(`Product: ${product.name}`);
+    console.log(`Processed: ${totalProcessed}, Errors: ${totalErrors}`);
 }
 
 // =============================================================================
@@ -669,9 +868,11 @@ async function main(): Promise<void> {
                 } else if (args.subcommand === "fix") {
                     await blueprintFix(args);
                 } else {
-                    console.error("Error: blueprint requires subcommand: create, hydrate, or fix");
                     showHelp();
-                    process.exit(1);
+                    throw new CLIError(
+                        "blueprint requires subcommand: create, hydrate, or fix",
+                        "MISSING_SUBCOMMAND"
+                    );
                 }
                 break;
 
@@ -683,11 +884,24 @@ async function main(): Promise<void> {
                 await processCommand(args);
                 break;
 
+            case "image":
+                if (args.subcommand === "fix") {
+                    await imageFixCommand(args);
+                } else {
+                    showHelp();
+                    throw new CLIError("image requires subcommand: fix", "MISSING_SUBCOMMAND");
+                }
+                break;
+
             default:
                 showHelp();
                 break;
         }
     } catch (error) {
+        if (error instanceof CLIError) {
+            console.error(`\nError [${error.code}]: ${error.message}`);
+            process.exit(error.exitCode);
+        }
         console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }

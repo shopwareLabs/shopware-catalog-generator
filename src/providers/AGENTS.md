@@ -12,7 +12,11 @@ Providers abstract AI services for text and image generation. The module support
 
 ```typescript
 interface TextProvider {
-    generateCompletion(messages: ChatMessage[], schema?: z.ZodTypeAny): Promise<string>;
+    generateCompletion(
+        messages: ChatMessage[],
+        schema?: z.ZodTypeAny,
+        schemaName?: string
+    ): Promise<string>;
     readonly isSequential: boolean; // Rate limit handling
     readonly maxConcurrency: number; // Parallel processing limit
     readonly name: string;
@@ -24,7 +28,9 @@ interface TextProvider {
 
 ```typescript
 interface ImageProvider {
-    generateImage(prompt: string, options?: ImageOptions): Promise<Buffer>;
+    generateImage(prompt: string): Promise<string | null>;
+    readonly isSequential: boolean; // Rate limit handling
+    readonly maxConcurrency: number; // Parallel processing limit
     readonly name: string;
 }
 ```
@@ -42,11 +48,12 @@ interface ImageProvider {
 
 ### Image Providers
 
-| Provider     | Name           | Model         | Notes                          |
-| ------------ | -------------- | ------------- | ------------------------------ |
-| OpenAI       | `openai`       | gpt-image-1.5 | Returns URL, fetched to base64 |
-| Pollinations | `pollinations` | flux/turbo    | Direct base64 response         |
-| Noop         | `none`         | -             | Disabled (no images)           |
+| Provider              | Name           | Model         | maxConcurrency | Notes                          |
+| --------------------- | -------------- | ------------- | -------------- | ------------------------------ |
+| OpenAI                | `openai`       | gpt-image-1.5 | 10             | Returns URL, fetched to base64 |
+| Pollinations (sk\_\*) | `pollinations` | flux/turbo    | 5              | Direct base64 response         |
+| Pollinations (free)   | `pollinations` | flux/turbo    | 2              | Limited parallelism            |
+| Noop                  | `none`         | -             | 1              | Disabled (no images)           |
 
 **OpenAI Image Notes:**
 

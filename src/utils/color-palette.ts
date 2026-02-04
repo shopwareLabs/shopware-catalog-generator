@@ -84,6 +84,7 @@ export const COLOR_PALETTE: Record<string, string> = {
     Camel: "#c19a6b",
     Linen: "#faf0e6",
     "Charcoal Gray": "#36454f",
+
 };
 
 /**
@@ -175,16 +176,6 @@ export function findClosestColor(colorName: string): ColorMatch | null {
 export function getColorHex(colorName: string, fallback: string = "#808080"): string {
     const match = findClosestColor(colorName);
     return match?.hex ?? fallback;
-}
-
-/**
- * Check if a property group name suggests it's a color property
- */
-export function isColorGroup(groupName: string): boolean {
-    const name = groupName.toLowerCase();
-    return (
-        name.includes("color") || name.includes("colour") || name === "farbe" || name === "finish"
-    );
 }
 
 /**

@@ -4,14 +4,14 @@
  * Exposes blueprint create, hydrate, and fix commands.
  */
 
-import type { ExistingProperty } from "../../utils/index.js";
 import type { FastMCP } from "fastmcp";
 import { z } from "zod";
-
 import { createCacheFromEnv } from "../../cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "../../generators/index.js";
 import { createProvidersFromEnv } from "../../providers/index.js";
 import { DataHydrator } from "../../shopware/index.js";
+import type { HydratedBlueprint } from "../../types/index.js";
+import type { ExistingProperty } from "../../utils/index.js";
 import {
     countCategories,
     logger,
@@ -46,13 +46,20 @@ export function registerBlueprintTools(server: FastMCP): void {
             const description = args.description || `${salesChannelName} webshop`;
             const products = args.products;
 
+            // Products per category can be configured via env (default: 30)
+            const maxProductsPerBranch = parseInt(process.env.PRODUCTS_PER_CATEGORY || "30", 10);
+            const topLevelCategories = Math.max(1, Math.ceil(products / maxProductsPerBranch));
+            // Distribute products evenly across categories
+            const productsPerBranch = Math.ceil(products / topLevelCategories);
+
             // Create cache
             const cache = createCacheFromEnv();
 
             // Generate blueprint
             const generator = new BlueprintGenerator({
                 totalProducts: products,
-                productsPerBranch: Math.ceil(products / 3),
+                topLevelCategories,
+                productsPerBranch,
             });
 
             const blueprint = generator.generateBlueprint(salesChannelName, description);
@@ -78,9 +85,21 @@ Next step: Run blueprint_hydrate to fill with AI-generated content.`;
     server.addTool({
         name: "blueprint_hydrate",
         description:
-            "Hydrate blueprint with AI-generated content (names, descriptions, properties). Requires existing blueprint.json.",
+            "Hydrate blueprint with AI-generated content. Supports selective modes: 'categories' (update only category names), 'properties' (update only product properties, preserves names for image stability). Use 'force' to re-hydrate everything.",
         parameters: z.object({
             name: z.string().describe("SalesChannel name (must have existing blueprint)"),
+            only: z
+                .enum(["categories", "properties"])
+                .optional()
+                .describe(
+                    "Selective hydration: 'categories' updates only categories, 'properties' updates only product properties (preserves names)"
+                ),
+            force: z
+                .boolean()
+                .default(false)
+                .describe(
+                    "Force full re-hydration even if hydrated blueprint exists. Warning: changes product names, triggering image regeneration."
+                ),
         }),
         execute: async (args) => {
             // Validate name
@@ -91,12 +110,28 @@ Next step: Run blueprint_hydrate to fill with AI-generated content.`;
             const salesChannelName = validation.sanitized;
 
             // Enable logging
-            logger.configure({ verboseConsole: false, minLevel: "info" });
+            logger.configure({ minLevel: "info" });
 
-            // Load blueprint
+            // Load cache
             const cache = createCacheFromEnv();
-            const blueprint = cache.loadBlueprint(salesChannelName);
 
+            // Check if hydrated blueprint exists
+            const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
+
+            // Safety check: require --only or --force if hydrated blueprint exists
+            if (existingHydratedBlueprint && !args.only && !args.force) {
+                return `Error: Hydrated blueprint already exists for "${salesChannelName}"
+
+Re-hydrating will change product names and trigger image regeneration.
+
+Options:
+  only: "categories"   Update only category names/descriptions
+  only: "properties"   Update only product properties (preserves names)
+  force: true          Force full re-hydration (regenerates everything)`;
+            }
+
+            // Load base blueprint
+            const blueprint = cache.loadBlueprint(salesChannelName);
             if (!blueprint) {
                 return `Error: No blueprint found for "${salesChannelName}"
 
@@ -110,23 +145,35 @@ Run blueprint_create first:
             // Get existing properties from Shopware (if connected)
             let existingProperties: ExistingProperty[] = [];
             try {
-                const hydrator = new DataHydrator();
+                const dataHydrator = new DataHydrator();
                 const swEnvUrl = process.env.SW_ENV_URL;
                 if (swEnvUrl) {
-                    await hydrator.authenticateWithClientCredentials(
+                    await dataHydrator.authenticateWithClientCredentials(
                         swEnvUrl,
                         process.env.SW_CLIENT_ID,
                         process.env.SW_CLIENT_SECRET
                     );
-                    existingProperties = await hydrator.getExistingPropertyGroups();
+                    existingProperties = await dataHydrator.getExistingPropertyGroups();
                 }
             } catch {
                 // Proceed without existing properties
             }
 
-            // Hydrate blueprint
+            // Create hydrator
             const hydrator = new BlueprintHydrator(textProvider);
-            const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
+            let hydratedBlueprint: HydratedBlueprint;
+
+            // Execute hydration based on mode
+            if (args.only === "categories" && existingHydratedBlueprint) {
+                hydratedBlueprint = await hydrator.hydrateCategoriesOnly(existingHydratedBlueprint);
+            } else if (args.only === "properties" && existingHydratedBlueprint) {
+                hydratedBlueprint = await hydrator.hydratePropertiesOnly(
+                    existingHydratedBlueprint,
+                    existingProperties
+                );
+            } else {
+                hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
+            }
 
             // Collect properties
             const collector = new PropertyCollector();
@@ -139,9 +186,11 @@ Run blueprint_create first:
             // Save hydrated blueprint
             cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
 
+            const modeText = args.only || "full";
             return `Blueprint hydrated successfully!
 
 SalesChannel: ${salesChannelName}
+Mode: ${modeText}
 Property groups: ${propertyGroups.length}
 Manufacturers: ${collector.collectManufacturers(hydratedBlueprint).length}
 Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json
@@ -167,7 +216,7 @@ Next step: Run generate to upload to Shopware.`;
             const salesChannelName = validation.sanitized;
 
             // Enable logging
-            logger.configure({ verboseConsole: false, minLevel: "info" });
+            logger.configure({ minLevel: "info" });
 
             // Load hydrated blueprint
             const cache = createCacheFromEnv();

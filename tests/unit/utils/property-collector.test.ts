@@ -88,13 +88,14 @@ describe("PropertyCollector", () => {
             expect(groups[0]?.options[0]?.id).toMatch(/^[0-9a-f]{32}$/);
         });
 
-        test("sets displayType to color for color groups", () => {
+        test("sets displayType to color for Color group even without existing", () => {
             const collector = new PropertyCollector();
             const blueprint = createMockBlueprint([
                 { id: "1", properties: [{ group: "Color", value: "Red" }] },
                 { id: "2", properties: [{ group: "Material", value: "Wood" }] },
             ]);
 
+            // Color group is automatically "color" type, others are "text"
             const groups = collector.collectFromBlueprint(blueprint);
             const colorGroup = groups.find((g) => g.name === "Color");
             const materialGroup = groups.find((g) => g.name === "Material");
@@ -103,21 +104,61 @@ describe("PropertyCollector", () => {
             expect(materialGroup?.displayType).toBe("text");
         });
 
-        test("sets colorHexCode for color options", () => {
+        test("inherits displayType color from existing groups", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Color", value: "Red" }] },
+            ]);
+
+            const existingProperties = [
+                {
+                    id: "existing-color",
+                    name: "Color",
+                    displayType: "color" as const,
+                    options: [],
+                },
+            ];
+
+            const groups = collector.collectFromBlueprint(blueprint, existingProperties);
+            const colorGroup = groups.find((g) => g.name === "Color");
+
+            expect(colorGroup?.displayType).toBe("color");
+        });
+
+        test("sets colorHexCode for Color groups even without existing", () => {
             const collector = new PropertyCollector();
             const blueprint = createMockBlueprint([
                 { id: "1", properties: [{ group: "Color", value: "Red" }] },
                 { id: "2", properties: [{ group: "Color", value: "Blue" }] },
             ]);
 
+            // Color groups get hex codes automatically (fresh store scenario)
             const groups = collector.collectFromBlueprint(blueprint);
             const colorGroup = groups.find((g) => g.name === "Color");
+            expect(colorGroup?.options.find((o) => o.name === "Red")?.colorHexCode).toBe("#dc2626");
+            expect(colorGroup?.options.find((o) => o.name === "Blue")?.colorHexCode).toBe("#2563eb");
+        });
 
-            // Using curated color palette values
-            const redOption = colorGroup?.options.find((o) => o.name === "Red");
-            const blueOption = colorGroup?.options.find((o) => o.name === "Blue");
-            expect(redOption?.colorHexCode).toBe("#dc2626");
-            expect(blueOption?.colorHexCode).toBe("#2563eb");
+        test("sets colorHexCode for Color groups with existing properties", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Color", value: "Red" }] },
+                { id: "2", properties: [{ group: "Color", value: "Blue" }] },
+            ]);
+
+            // With existing color group, hex codes are still generated
+            const existingProperties = [
+                {
+                    id: "existing-color",
+                    name: "Color",
+                    displayType: "color" as const,
+                    options: [],
+                },
+            ];
+            const groupsWithExisting = collector.collectFromBlueprint(blueprint, existingProperties);
+            const colorGroupWithExisting = groupsWithExisting.find((g) => g.name === "Color");
+            expect(colorGroupWithExisting?.options.find((o) => o.name === "Red")?.colorHexCode).toBe("#dc2626");
+            expect(colorGroupWithExisting?.options.find((o) => o.name === "Blue")?.colorHexCode).toBe("#2563eb");
         });
 
         test("merges with existing properties", () => {

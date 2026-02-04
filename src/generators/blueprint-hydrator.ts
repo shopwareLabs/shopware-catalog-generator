@@ -13,6 +13,8 @@
  * 2. One call per top-level category branch for products
  */
 
+import { z } from "zod";
+import { PropertyCache } from "../property-cache.js";
 import type {
     Blueprint,
     BlueprintCategory,
@@ -25,9 +27,6 @@ import type {
     VariantConfig,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
-import { z } from "zod";
-
-import { PropertyCache } from "../property-cache.js";
 import {
     ConcurrencyLimiter,
     executeWithRetry,
@@ -80,6 +79,25 @@ const ProductResponseSchema = z.object({
     ),
 });
 
+// Schema for properties-only hydration (preserves names, only updates properties)
+const PropertyOnlyResponseSchema = z.object({
+    products: z.array(
+        z.object({
+            id: z.string(),
+            properties: z.array(
+                z.object({
+                    group: z.string(),
+                    value: z.string(),
+                })
+            ),
+            // For variant products: AI suggests 1-3 property group names
+            suggestedVariantGroups: z.array(z.string()).nullable(),
+        })
+    ),
+});
+
+type PropertyOnlyResponse = z.infer<typeof PropertyOnlyResponseSchema>;
+
 // Schema for AI-generated property options (when cache miss)
 // Note: Using array of objects instead of Record for OpenAI structured outputs compatibility
 const PropertyOptionsResponseSchema = z.object({
@@ -103,17 +121,54 @@ type ProductResponse = z.infer<typeof ProductResponseSchema>;
 // =============================================================================
 
 /**
- * Estimate token count for a payload (rough estimate: 1 token ≈ 4 chars)
+ * Provider-specific characters per token ratios
+ * These account for tokenization differences between providers
  */
-function estimateTokens(payload: unknown): number {
-    return Math.ceil(JSON.stringify(payload).length / 4);
+const CHARS_PER_TOKEN: Record<string, number> = {
+    openai: 4.0, // GPT tokenizer is efficient
+    "github-models": 4.0, // Uses GPT models
+    pollinations: 3.5, // Slightly different tokenization
+    default: 3.5, // Conservative default
+};
+
+/**
+ * JSON overhead multiplier
+ * JSON structure (quotes, brackets, colons) adds ~15-20% to token count
+ */
+const JSON_OVERHEAD_MULTIPLIER = 1.15;
+
+/**
+ * Estimate token count for a payload with provider-specific adjustments
+ *
+ * @param payload - The payload to estimate tokens for
+ * @param providerName - Optional provider name for provider-specific estimation
+ * @returns Estimated token count
+ */
+function estimateTokens(payload: unknown, providerName?: string): number {
+    const json = JSON.stringify(payload);
+    const defaultCharsPerToken = CHARS_PER_TOKEN.default ?? 3.5;
+    const charsPerToken = providerName
+        ? (CHARS_PER_TOKEN[providerName.toLowerCase()] ?? defaultCharsPerToken)
+        : defaultCharsPerToken;
+
+    // Apply overhead multiplier for JSON structural tokens
+    return Math.ceil((json.length / charsPerToken) * JSON_OVERHEAD_MULTIPLIER);
 }
 
 /**
  * Check if payload fits within token limit (using 70% of limit for safety)
+ *
+ * @param payload - The payload to check
+ * @param tokenLimit - The token limit to check against
+ * @param providerName - Optional provider name for provider-specific estimation
+ * @returns True if payload fits within the safe token limit
  */
-function fitsInTokenLimit(payload: unknown, tokenLimit: number): boolean {
-    const estimated = estimateTokens(payload);
+function fitsInTokenLimit(
+    payload: unknown,
+    tokenLimit: number,
+    providerName?: string
+): boolean {
+    const estimated = estimateTokens(payload, providerName);
     return estimated < tokenLimit * 0.7;
 }
 
@@ -150,13 +205,16 @@ export class BlueprintHydrator {
         blueprint: Blueprint,
         existingProperties: ExistingProperty[] = []
     ): Promise<HydratedBlueprint> {
-        console.log("Hydrating blueprint with AI...");
+        logger.cli("Hydrating blueprint with AI...");
         logger.info("Starting blueprint hydration", {
             salesChannel: blueprint.salesChannel.name,
             categories: blueprint.categories.length,
             products: blueprint.products.length,
             existingProperties: existingProperties.length,
         });
+
+        // Clear batch progress state from previous hydrations
+        this.batchCounter.clear();
 
         // Create store-scoped PropertyCache for this sales channel
         const storeSlug = toKebabCase(blueprint.salesChannel.name);
@@ -171,7 +229,7 @@ export class BlueprintHydrator {
         };
 
         // Step 1: Hydrate SalesChannel and categories
-        console.log("  [1/2] Generating category names and descriptions...");
+        logger.cli("  [1/2] Generating category names and descriptions...");
         logger.info("Hydrating categories...");
         const hydratedCategories = await this.hydrateCategories(
             blueprint.salesChannel.name,
@@ -183,11 +241,12 @@ export class BlueprintHydrator {
         });
 
         // Step 2: Hydrate products per top-level branch
-        console.log("  [2/2] Generating product content...");
+        logger.cli("  [2/2] Generating product content...");
         logger.info("Hydrating products...");
         const hydratedProducts = await this.hydrateProducts(
             blueprint.products,
             hydratedCategories.categories,
+            blueprint.categories,
             existingProperties,
             storeContext
         );
@@ -209,9 +268,273 @@ export class BlueprintHydrator {
             hydratedAt: new Date().toISOString(),
         };
 
-        console.log("  Blueprint hydrated successfully");
+        logger.cli("  Blueprint hydrated successfully");
         logger.info("Blueprint hydration complete");
         return hydrated;
+    }
+
+    /**
+     * Hydrate only categories in an existing hydrated blueprint.
+     * Preserves all product data (names, descriptions, properties) unchanged.
+     * Useful for restructuring/renaming categories without triggering image regeneration.
+     */
+    async hydrateCategoriesOnly(
+        existingBlueprint: HydratedBlueprint
+    ): Promise<HydratedBlueprint> {
+        logger.info("Hydrating categories only (preserving product data)...");
+        logger.info("Starting categories-only hydration", {
+            salesChannel: existingBlueprint.salesChannel.name,
+            categories: existingBlueprint.categories.length,
+            products: existingBlueprint.products.length,
+        });
+
+        // Hydrate SalesChannel and categories
+        logger.cli("  Generating category names and descriptions...");
+        const hydratedCategories = await this.hydrateCategories(
+            existingBlueprint.salesChannel.name,
+            existingBlueprint.salesChannel.description,
+            existingBlueprint.categories
+        );
+        logger.info("Categories hydrated", {
+            count: hydratedCategories.categories.length,
+        });
+
+        // Build updated blueprint preserving products
+        const hydrated: HydratedBlueprint = {
+            ...existingBlueprint,
+            salesChannel: {
+                ...existingBlueprint.salesChannel,
+                description: hydratedCategories.salesChannelDescription,
+            },
+            categories: this.applyCategoryHydration(
+                existingBlueprint.categories,
+                hydratedCategories.categories
+            ),
+            // Preserve existing products unchanged
+            products: existingBlueprint.products,
+            propertyGroups: existingBlueprint.propertyGroups,
+            hydratedAt: new Date().toISOString(),
+        };
+
+        logger.cli("  Categories hydrated successfully (products preserved)");
+        logger.info("Categories-only hydration complete");
+        return hydrated;
+    }
+
+    /**
+     * Hydrate only product properties in an existing hydrated blueprint.
+     * Preserves product names, descriptions, image prompts, and category assignments.
+     * Only updates properties and variant suggestions.
+     * Useful for adding/changing product attributes without triggering image regeneration.
+     */
+    async hydratePropertiesOnly(
+        existingBlueprint: HydratedBlueprint,
+        existingProperties: ExistingProperty[] = []
+    ): Promise<HydratedBlueprint> {
+        logger.info("Hydrating properties only (preserving product names)...");
+        logger.info("Starting properties-only hydration", {
+            salesChannel: existingBlueprint.salesChannel.name,
+            products: existingBlueprint.products.length,
+        });
+
+        // Create store-scoped PropertyCache for this sales channel
+        const storeSlug = toKebabCase(existingBlueprint.salesChannel.name);
+        this.propertyCache = PropertyCache.forStore(this.cacheDir, storeSlug);
+        this.propertyCache.ensureDefaults();
+
+        const storeContext: StoreContext = {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        };
+
+        // Group products by primary category (top-level branch)
+        const productsByBranch = new Map<string, BlueprintProduct[]>();
+        for (const product of existingBlueprint.products) {
+            const branch = product.primaryCategoryId;
+            const existing = productsByBranch.get(branch);
+            if (existing) {
+                existing.push(product);
+            } else {
+                productsByBranch.set(branch, [product]);
+            }
+        }
+
+        // Build category name lookup
+        const categoryNameMap = new Map<string, string>();
+        const flattenCats = (cats: BlueprintCategory[]): void => {
+            for (const cat of cats) {
+                categoryNameMap.set(cat.id, cat.name);
+                if (cat.children.length > 0) flattenCats(cat.children);
+            }
+        };
+        flattenCats(existingBlueprint.categories);
+
+        // Process each branch
+        const updatedProducts: BlueprintProduct[] = [];
+        const branches = Array.from(productsByBranch.entries());
+
+        for (const [branchId, branchProducts] of branches) {
+            const branchName = categoryNameMap.get(branchId) || "Unknown";
+            logger.info(`  Processing ${branchName} (${branchProducts.length} products)...`);
+
+            const propertyUpdates = await this.hydratePropertiesForBranch(
+                branchProducts,
+                branchName,
+                existingProperties,
+                storeContext
+            );
+
+            // Merge property updates with existing product data
+            for (const product of branchProducts) {
+                const update = propertyUpdates.get(product.id);
+                if (update) {
+                    // Resolve variant configs if suggestions provided
+                    let variantConfigs = product.metadata.variantConfigs;
+                    if (update.suggestedVariantGroups && update.suggestedVariantGroups.length > 0) {
+                        variantConfigs = await this.resolveVariantConfigs(
+                            update.suggestedVariantGroups,
+                            { name: product.name, category: branchName }
+                        );
+                    }
+
+                    updatedProducts.push({
+                        ...product,
+                        metadata: {
+                            ...product.metadata,
+                            properties: update.properties as ProductProperty[],
+                            variantConfigs:
+                                variantConfigs && variantConfigs.length > 0
+                                    ? variantConfigs
+                                    : undefined,
+                        },
+                    });
+                } else {
+                    updatedProducts.push(product);
+                }
+            }
+        }
+
+        const hydrated: HydratedBlueprint = {
+            ...existingBlueprint,
+            products: updatedProducts,
+            hydratedAt: new Date().toISOString(),
+        };
+
+        logger.cli("  Properties hydrated successfully (names preserved)");
+        logger.info("Properties-only hydration complete");
+        return hydrated;
+    }
+
+    /**
+     * Hydrate properties for a branch of products (properties-only mode)
+     */
+    private async hydratePropertiesForBranch(
+        products: BlueprintProduct[],
+        branchName: string,
+        existingProperties: ExistingProperty[],
+        storeContext: StoreContext
+    ): Promise<Map<string, PropertyOnlyResponse["products"][0]>> {
+        const prompt = this.buildPropertyOnlyPrompt(
+            products,
+            branchName,
+            existingProperties,
+            storeContext
+        );
+
+        const responseText = await executeWithRetry(() =>
+            this.textProvider.generateCompletion(
+                [
+                    {
+                        role: "system",
+                        content:
+                            "You are a product property generator. Generate properties for existing products based on their names. Output ONLY valid JSON.",
+                    },
+                    { role: "user", content: prompt },
+                ],
+                PropertyOnlyResponseSchema,
+                "PropertyOnlyResponse"
+            )
+        );
+
+        // Parse response
+        let jsonStr = responseText.trim();
+        if (jsonStr.startsWith("```")) {
+            const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (match) {
+                jsonStr = match[1]?.trim() || jsonStr;
+            }
+        }
+
+        const parsed = JSON.parse(jsonStr);
+        const validated = PropertyOnlyResponseSchema.parse(parsed);
+
+        return new Map(validated.products.map((p) => [p.id, p]));
+    }
+
+    /**
+     * Build prompt for properties-only hydration
+     */
+    private buildPropertyOnlyPrompt(
+        products: BlueprintProduct[],
+        branchName: string,
+        existingProperties: ExistingProperty[],
+        storeContext: StoreContext
+    ): string {
+        // Include existing product names for context
+        const productList = products.map((p) => ({
+            id: p.id,
+            name: p.name, // Use existing name
+            isVariant: p.metadata.isVariant,
+        }));
+
+        const existingPropsText =
+            existingProperties.length > 0
+                ? `
+Existing properties in Shopware (reuse when applicable):
+${JSON.stringify(existingProperties, null, 2)}
+`
+                : "";
+
+        const cachedGroups = this.propertyCache.listNames();
+        const cachedGroupsText =
+            cachedGroups.length > 0
+                ? `\nALREADY KNOWN property groups (prefer these): ${cachedGroups.join(", ")}`
+                : "";
+
+        return `Generate properties for existing products in the "${branchName}" category.
+
+STORE CONTEXT:
+- Store name: "${storeContext.name}"
+- Store description: "${storeContext.description}"
+
+${existingPropsText}
+${cachedGroupsText}
+
+PROPERTY GUIDELINES:
+- "Color" is the only predefined property group - use it when color is relevant
+- STRONGLY PREFER reusing the ALREADY KNOWN property groups listed above
+- Keep property groups BROAD and REUSABLE: "Size", "Material", "Type", "Style"
+- Maximum 5-6 unique property groups per category
+- Properties should match the EXISTING product name
+
+Products to update (${products.length} total):
+${JSON.stringify(productList, null, 2)}
+
+For each product:
+1. Generate 2-3 properties that MATCH the existing product name
+   Example: "Garden Hose - 20m - Green" → properties: [{ group: "Length", value: "20m" }, { group: "Color", value: "Green" }]
+2. For products with isVariant: true, suggest 1-3 property group names in "suggestedVariantGroups"
+
+Return JSON in this exact format:
+{
+  "products": [
+    {
+      "id": "...",
+      "properties": [{ "group": "PropertyGroup", "value": "Value" }, ...],
+      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"]
+    }
+  ]
+}`;
     }
 
     /**
@@ -333,6 +656,7 @@ Return JSON in this exact format:
     private async hydrateProducts(
         products: BlueprintProduct[],
         hydratedCategories: CategoryResponse["categories"],
+        categoryTree: BlueprintCategory[],
         existingProperties: ExistingProperty[],
         storeContext: StoreContext
     ): Promise<BlueprintProduct[]> {
@@ -357,21 +681,21 @@ Return JSON in this exact format:
             categoryIdByName.set(cat.name.toLowerCase(), cat.id);
         }
 
-        // Build map of branch -> all available subcategory names
+        // Build map of branch -> all available subcategory names from the category tree
         // This helps AI assign products to appropriate subcategories
-        const branchSubcategories = this.buildBranchSubcategoryMap(products, categoryNameMap);
+        const branchSubcategories = this.buildBranchSubcategoryMap(categoryTree, categoryNameMap);
 
         const totalBranches = productsByBranch.size;
         const maxConcurrency = this.textProvider.maxConcurrency;
 
         // Log parallelization strategy
         if (maxConcurrency > 1) {
-            console.log(
+            logger.cli(
                 `    Using parallel processing (max ${maxConcurrency} concurrent branches)`
             );
             logger.info(`Parallel branch processing enabled`, { maxConcurrency, totalBranches });
         } else {
-            console.log(`    Using sequential processing (provider: ${this.textProvider.name})`);
+            logger.cli(`    Using sequential processing (provider: ${this.textProvider.name})`);
             logger.info(`Sequential branch processing`, { provider: this.textProvider.name });
         }
 
@@ -394,7 +718,7 @@ Return JSON in this exact format:
                 const subCatText = subCatPreview
                     ? ` → ${subCatPreview}${availableSubcategories.length > 3 ? "..." : ""}`
                     : "";
-                console.log(
+                logger.cli(
                     `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`
                 );
 
@@ -409,7 +733,7 @@ Return JSON in this exact format:
                 );
 
                 completedBranches++;
-                console.log(
+                logger.cli(
                     `    ✓ ${storeContext.name} > ${branchName} complete (${completedBranches}/${totalBranches} branches)`
                 );
 
@@ -418,44 +742,71 @@ Return JSON in this exact format:
         });
 
         // Execute all branches (with concurrency limiting)
-        const results = await Promise.all(branchTasks);
+        // Use Promise.allSettled for partial success handling - don't discard successful branches on failure
+        const settledResults = await Promise.allSettled(branchTasks);
 
-        // Flatten results
-        return results.flat();
+        // Partition results into fulfilled and rejected
+        const fulfilledProducts: BlueprintProduct[] = [];
+        const failedBranches: { branchIndex: number; error: Error }[] = [];
+
+        for (const [i, result] of settledResults.entries()) {
+            if (result.status === "fulfilled") {
+                fulfilledProducts.push(...result.value);
+            } else {
+                const branchEntry = branches[i];
+                const branchName = branchEntry ? categoryNameMap.get(branchEntry[0]) || `Branch ${i + 1}` : `Branch ${i + 1}`;
+                const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+                failedBranches.push({ branchIndex: i, error });
+                logger.cli(`    ✗ ${storeContext.name} > ${branchName} failed: ${error.message}`, "error");
+                logger.error(`Branch ${branchName} failed`, { error: error.message, branchIndex: i });
+            }
+        }
+
+        // If some branches failed, log summary but return partial results
+        if (failedBranches.length > 0) {
+            const successCount = settledResults.length - failedBranches.length;
+            logger.cli(`\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
+                `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`, "warn");
+            logger.warn(`Partial hydration: ${failedBranches.length} branches failed`, {
+                failedCount: failedBranches.length,
+                successCount,
+                productsHydrated: fulfilledProducts.length,
+            });
+        }
+
+        return fulfilledProducts;
     }
 
     /**
      * Build a map of branch ID -> all available subcategory names within that branch
      * This helps AI assign products to appropriate subcategories
+     *
+     * Uses the category tree structure to find all children of each top-level branch
      */
     private buildBranchSubcategoryMap(
-        products: BlueprintProduct[],
+        categoryTree: BlueprintCategory[],
         categoryNameMap: Map<string, string>
     ): Map<string, string[]> {
-        const branchSubcategories = new Map<string, Set<string>>();
-
-        // Collect all category names used by products in each branch
-        for (const product of products) {
-            const branchId = product.primaryCategoryId;
-            const branchName = categoryNameMap.get(branchId);
-
-            if (!branchSubcategories.has(branchId)) {
-                branchSubcategories.set(branchId, new Set());
-            }
-
-            const subcats = branchSubcategories.get(branchId)!;
-            for (const catId of product.categoryIds) {
-                const catName = categoryNameMap.get(catId);
-                if (catName && catName !== branchName) {
-                    subcats.add(catName);
-                }
-            }
-        }
-
-        // Convert Sets to sorted arrays
         const result = new Map<string, string[]>();
-        for (const [branchId, subcats] of branchSubcategories) {
-            result.set(branchId, Array.from(subcats).sort());
+
+        // Helper to collect all descendant names from a category
+        const collectDescendantNames = (category: BlueprintCategory): string[] => {
+            const names: string[] = [];
+            for (const child of category.children || []) {
+                const childName = categoryNameMap.get(child.id);
+                if (childName) {
+                    names.push(childName);
+                }
+                // Recursively collect grandchildren
+                names.push(...collectDescendantNames(child));
+            }
+            return names;
+        };
+
+        // For each top-level category (branch), collect all subcategory names
+        for (const branch of categoryTree) {
+            const subcatNames = collectDescendantNames(branch);
+            result.set(branch.id, subcatNames.sort());
         }
 
         return result;
@@ -506,7 +857,7 @@ Return JSON in this exact format:
     private shouldSplitBatch(products: BlueprintProduct[], branchName: string): boolean {
         if (products.length > BlueprintHydrator.MAX_BATCH_SIZE) return true;
         const payload = { products: products.map((p) => p.id), branchName };
-        return !fitsInTokenLimit(payload, this.textProvider.tokenLimit);
+        return !fitsInTokenLimit(payload, this.textProvider.tokenLimit, this.textProvider.name);
     }
 
     /**
@@ -594,7 +945,7 @@ Return JSON in this exact format:
         const counter = this.batchCounter.get(branchName);
         if (counter) {
             counter.current++;
-            console.log(
+            logger.cli(
                 `      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`
             );
         }
@@ -690,7 +1041,7 @@ Return JSON in this exact format:
         try {
             const parsed = JSON.parse(response) as ProductResponse;
             const validated = ProductResponseSchema.parse(parsed);
-            console.log(
+            logger.cli(
                 `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`
             );
             logger.debug(`Parsed ${validated.products.length} products for "${branchName}"`);
@@ -1044,83 +1395,114 @@ Return JSON in this exact format:
         const configs: VariantConfig[] = [];
 
         for (const groupName of suggestedGroups) {
-            // Normalize the group name for cache lookup
-            const normalizedName = this.normalizeGroupName(groupName);
-
-            if (this.propertyCache.has(normalizedName)) {
-                // Cache hit - reuse existing options
-                const cached = this.propertyCache.get(normalizedName);
-                if (cached) {
-                    // Select 40-60% of options for this product
-                    const selectedOptions = randomSamplePercent(cached.options, 0.4, 0.6);
-                    // Ensure at least 2 options for meaningful variants
-                    const finalOptions =
-                        selectedOptions.length >= 2
-                            ? selectedOptions
-                            : cached.options.slice(0, Math.min(2, cached.options.length));
-
-                    // Build price modifiers for selected options
-                    const priceModifiers: Record<string, number> = {};
-                    for (const opt of finalOptions) {
-                        priceModifiers[opt] = cached.priceModifiers?.[opt] ?? 1.0;
-                    }
-
-                    configs.push({
-                        group: cached.name,
-                        selectedOptions: finalOptions,
-                        priceModifiers,
-                    });
-
-                    logger.debug(`Property cache hit for "${groupName}" -> "${cached.name}"`, {
-                        options: finalOptions.length,
-                    });
-                }
-            } else {
-                // Never generate Color via AI - it should always come from universal cache
-                if (
-                    normalizedName.toLowerCase() === "color" ||
-                    groupName.toLowerCase() === "color"
-                ) {
-                    logger.warn(
-                        `AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`
-                    );
-                    // Try to get Color from cache one more time with exact name
-                    const colorFromCache = this.propertyCache.get("Color");
-                    if (colorFromCache) {
-                        const selectedOptions = randomSamplePercent(
-                            colorFromCache.options,
-                            0.4,
-                            0.6
-                        );
-                        const finalOptions =
-                            selectedOptions.length >= 2
-                                ? selectedOptions
-                                : colorFromCache.options.slice(
-                                      0,
-                                      Math.min(2, colorFromCache.options.length)
-                                  );
-                        configs.push({
-                            group: colorFromCache.name,
-                            selectedOptions: finalOptions,
-                            priceModifiers: {},
-                        });
-                    }
-                    continue;
-                }
-
-                // Cache miss - ask AI to generate options
-                logger.info(`Property cache miss for "${groupName}", generating options...`);
-                try {
-                    const generated = await this.generatePropertyOptions(groupName, productContext);
-                    configs.push(generated);
-                } catch (error) {
-                    logger.error(`Failed to generate options for "${groupName}"`, error);
-                    // Continue with other groups
-                }
+            const config = await this.resolveSingleVariantConfig(groupName, productContext);
+            if (config) {
+                configs.push(config);
             }
         }
 
         return configs;
+    }
+
+    /**
+     * Resolve a single variant config from a group name.
+     * Returns null if the group cannot be resolved.
+     */
+    private async resolveSingleVariantConfig(
+        groupName: string,
+        productContext: { name: string; category: string }
+    ): Promise<VariantConfig | null> {
+        const normalizedName = this.normalizeGroupName(groupName);
+
+        // Try cache first
+        const cached = this.propertyCache.get(normalizedName);
+        if (cached) {
+            return this.buildVariantConfigFromCache(cached, groupName);
+        }
+
+        // Handle Color specially - should always come from universal cache
+        if (normalizedName.toLowerCase() === "color" || groupName.toLowerCase() === "color") {
+            return this.handleColorFallback();
+        }
+
+        // Cache miss - generate options via AI
+        return this.generateVariantConfigViaAI(groupName, productContext);
+    }
+
+    /**
+     * Build a VariantConfig from cached property data.
+     */
+    private buildVariantConfigFromCache(
+        cached: CachedPropertyGroup,
+        originalName: string
+    ): VariantConfig {
+        // Select 40-60% of options for this product
+        const selectedOptions = randomSamplePercent(cached.options, 0.4, 0.6);
+        // Ensure at least 2 options for meaningful variants
+        const finalOptions =
+            selectedOptions.length >= 2
+                ? selectedOptions
+                : cached.options.slice(0, Math.min(2, cached.options.length));
+
+        // Build price modifiers for selected options
+        const priceModifiers: Record<string, number> = {};
+        for (const opt of finalOptions) {
+            priceModifiers[opt] = cached.priceModifiers?.[opt] ?? 1.0;
+        }
+
+        logger.debug(`Property cache hit for "${originalName}" -> "${cached.name}"`, {
+            options: finalOptions.length,
+        });
+
+        return {
+            group: cached.name,
+            selectedOptions: finalOptions,
+            priceModifiers,
+        };
+    }
+
+    /**
+     * Handle Color when it's suggested but not found via normalized name.
+     * This is a fallback for edge cases.
+     */
+    private handleColorFallback(): VariantConfig | null {
+        logger.warn(
+            `AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`
+        );
+
+        const colorFromCache = this.propertyCache.get("Color");
+        if (!colorFromCache) {
+            return null;
+        }
+
+        const selectedOptions = randomSamplePercent(colorFromCache.options, 0.4, 0.6);
+        const finalOptions =
+            selectedOptions.length >= 2
+                ? selectedOptions
+                : colorFromCache.options.slice(0, Math.min(2, colorFromCache.options.length));
+
+        return {
+            group: colorFromCache.name,
+            selectedOptions: finalOptions,
+            priceModifiers: {},
+        };
+    }
+
+    /**
+     * Generate a VariantConfig via AI for unknown property groups.
+     */
+    private async generateVariantConfigViaAI(
+        groupName: string,
+        productContext: { name: string; category: string }
+    ): Promise<VariantConfig | null> {
+        logger.info(`Property cache miss for "${groupName}", generating options...`);
+
+        try {
+            return await this.generatePropertyOptions(groupName, productContext);
+        } catch (error) {
+            logger.error(`Failed to generate options for "${groupName}"`, error);
+            return null;
+        }
     }
 
     /**
@@ -1454,14 +1836,22 @@ RESPOND ONLY WITH JSON. No explanation, no markdown. Just the JSON object:`;
             batches.push(placeholderProducts.slice(i, i + BATCH_SIZE));
         }
 
-        const allFixedProducts: Array<{ id: string; name: string; description: string }> = [];
+        // Use concurrency limiter for parallel processing (respects provider limits)
+        const maxConcurrency = this.textProvider.isSequential ? 1 : this.textProvider.maxConcurrency;
+        const limiter = new ConcurrencyLimiter(maxConcurrency);
+        const totalBatches = batches.length;
 
-        for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
-            const batch = batches[batchIdx];
-            if (!batch) continue;
+        logger.info(
+            `Processing ${totalBatches} batches with concurrency: ${maxConcurrency} (provider: ${this.textProvider.name})`
+        );
 
+        // Helper to process a single batch
+        const processBatch = async (
+            batch: BlueprintProduct[],
+            batchIdx: number
+        ): Promise<Array<{ id: string; name: string; description: string }>> => {
             logger.info(
-                `Fixing product batch ${batchIdx + 1}/${batches.length} (${batch.length} products)...`
+                `Fixing product batch ${batchIdx + 1}/${totalBatches} (${batch.length} products)...`
             );
 
             const prompt = `Generate product names for this webshop.
@@ -1514,13 +1904,21 @@ RESPOND ONLY WITH JSON:
 
                 const parsed = JSON.parse(jsonStr);
                 const validated = SimpleProductSchema.parse(parsed);
-                allFixedProducts.push(...validated.products);
                 logger.info(`  Batch ${batchIdx + 1}: Fixed ${validated.products.length} products`);
+                return validated.products;
             } catch (error) {
                 logger.error(`Failed to fix product batch ${batchIdx + 1}`, error);
-                // Continue with other batches
+                return []; // Continue with other batches
             }
-        }
+        };
+
+        // Schedule all batches with concurrency limiting
+        const batchTasks = batches.map((batch, batchIdx) =>
+            limiter.schedule(() => processBatch(batch, batchIdx))
+        );
+
+        const batchResults = await Promise.all(batchTasks);
+        const allFixedProducts = batchResults.flat();
 
         logger.info(`Fixed ${allFixedProducts.length} products total`);
 

@@ -1,7 +1,8 @@
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
+import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+import { logger } from "../utils/index.js";
 
 /**
  * OpenAI text generation provider
@@ -47,13 +48,14 @@ export class OpenAITextProvider implements TextProvider {
 /**
  * OpenAI image generation provider (DALL-E)
  * Supports parallel processing with high rate limits
+ * OpenAI Tier 1+ allows 50+ images/min, so 10 concurrent is safe
  */
 export class OpenAIImageProvider implements ImageProvider {
     private readonly client: OpenAI;
     private readonly model: string;
 
     readonly isSequential = false;
-    readonly maxConcurrency = 5;
+    readonly maxConcurrency = 10;
     readonly name = "openai";
 
     constructor(apiKey: string, model: string = "gpt-image-1.5") {
@@ -87,7 +89,7 @@ export class OpenAIImageProvider implements ImageProvider {
 
             return null;
         } catch (error) {
-            console.warn(`OpenAI image generation failed:`, error);
+            logger.warn(`OpenAI image generation failed:`, error);
             return null;
         }
     }

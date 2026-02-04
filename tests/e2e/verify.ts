@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * E2E Verification Script
  *
@@ -9,10 +10,11 @@
  * - Manufacturers exist (if generated)
  */
 
-import type { ShopwareClient } from "../../src/shopware/client.js";
 
+import { createCacheFromEnv } from "../../src/cache.js";
+import type { ShopwareClient } from "../../src/shopware/client.js";
 import { DataHydrator } from "../../src/shopware/index.js";
-import { isPlaceholder } from "../../src/utils/index.js";
+import { countCategories, isPlaceholder } from "../../src/utils/index.js";
 
 interface VerificationResult {
     salesChannel: { found: boolean; id?: string; navigationCategoryId?: string };
@@ -30,11 +32,19 @@ interface SearchResponse {
     data?: Array<{ name?: string; translated?: { name?: string } }>;
 }
 
-async function verifyGeneration(salesChannelName: string): Promise<VerificationResult> {
+interface ExpectedCounts {
+    categories: number;
+    products: number;
+}
+
+async function verifyGeneration(
+    salesChannelName: string,
+    expected: ExpectedCounts
+): Promise<VerificationResult> {
     const result: VerificationResult = {
         salesChannel: { found: false },
-        categories: { count: 0, expected: 3, placeholders: [] },
-        products: { count: 0, expected: 90, placeholders: [] },
+        categories: { count: 0, expected: expected.categories, placeholders: [] },
+        products: { count: 0, expected: expected.products, placeholders: [] },
         propertyGroups: { count: 0, productsWithProperties: 0 },
         manufacturers: { count: 0 },
         images: { productsWithImages: 0, totalProducts: 0 },
@@ -207,15 +217,54 @@ async function verifyGeneration(salesChannelName: string): Promise<VerificationR
     // Verify property groups
     console.log(`Verifying property groups...`);
     try {
-        const propertyResponse = await client.apiClient.post<SearchResponse>(
-            "search/property-group",
-            {
-                limit: 500,
-            }
-        );
+        interface PropertyGroupWithOptions {
+            id: string;
+            name: string;
+            displayType: string;
+            options?: Array<{ id: string; name: string; colorHexCode?: string }>;
+        }
+        const propertyResponse = await client.apiClient.post<{
+            total: number;
+            data: PropertyGroupWithOptions[];
+        }>("search/property-group", {
+            limit: 500,
+            associations: { options: {} },
+        });
 
         result.propertyGroups.count = propertyResponse.data?.total || 0;
         console.log(`  ✓ Property groups: ${result.propertyGroups.count}`);
+
+        // Verify Color property group has correct displayType and hex codes
+        const colorGroup = propertyResponse.data?.data?.find(
+            (g) => g.name.toLowerCase() === "color"
+        );
+        if (colorGroup) {
+            if (colorGroup.displayType !== "color") {
+                result.errors.push(
+                    `Color property group has displayType "${colorGroup.displayType}" instead of "color"`
+                );
+                console.log(`  ✗ Color displayType: ${colorGroup.displayType} (expected: color)`);
+            } else {
+                console.log(`  ✓ Color displayType: color`);
+            }
+
+            // Check hex codes on options
+            const optionsWithoutHex = (colorGroup.options || []).filter(
+                (o) => !o.colorHexCode
+            );
+            if (optionsWithoutHex.length > 0) {
+                result.errors.push(
+                    `Color options missing hex codes: ${optionsWithoutHex.map((o) => o.name).join(", ")}`
+                );
+                console.log(
+                    `  ✗ Color options missing hex: ${optionsWithoutHex.map((o) => o.name).join(", ")}`
+                );
+            } else {
+                console.log(
+                    `  ✓ Color hex codes: ${colorGroup.options?.length || 0} options with hex`
+                );
+            }
+        }
 
         // Check how many products have properties assigned
         interface ProductWithProps {
@@ -299,11 +348,30 @@ async function main(): Promise<void> {
         process.exit(1);
     }
 
+    // Load expected counts from hydrated blueprint
+    const cache = createCacheFromEnv();
+    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
+
+    let expected: ExpectedCounts;
+    if (blueprint) {
+        expected = {
+            categories: countCategories(blueprint.categories),
+            products: blueprint.products.length,
+        };
+        console.log(
+            `Loaded blueprint: ${expected.products} products, ${expected.categories} categories`
+        );
+    } else {
+        // Fallback to defaults if no blueprint found
+        expected = { categories: 3, products: 10 };
+        console.log("No blueprint found, using default expectations");
+    }
+
     console.log("");
     console.log("=== E2E Verification ===");
     console.log("");
 
-    const result = await verifyGeneration(salesChannelName);
+    const result = await verifyGeneration(salesChannelName, expected);
 
     console.log("");
 

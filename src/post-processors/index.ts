@@ -13,6 +13,7 @@
 import type { DataCache } from "../cache.js";
 import type { ShopwareApiHelpers } from "../shopware/api-helpers.js";
 import type { HydratedBlueprint, ImageProvider, TextProvider } from "../types/index.js";
+import { logger } from "../utils/index.js";
 
 // =============================================================================
 // Post-Processor Interface
@@ -302,7 +303,7 @@ export async function runProcessors(
     // Group into parallel batches
     const batches = groupParallelizable(allProcessors, selected);
 
-    console.log(`Running ${selected.length} post-processors in ${batches.length} batch(es)...`);
+    logger.cli(`Running ${selected.length} post-processors in ${batches.length} batch(es)...`);
 
     const allResults: PostProcessorResult[] = [];
 
@@ -311,7 +312,7 @@ export async function runProcessors(
         if (!batch) continue;
 
         const batchNames = batch.map((p) => p.name).join(", ");
-        console.log(`  Batch ${i + 1}/${batches.length}: ${batchNames}`);
+        logger.cli(`  Batch ${i + 1}/${batches.length}: ${batchNames}`);
 
         // Run batch in parallel
         const batchResults = await Promise.all(
@@ -340,12 +341,12 @@ export async function runProcessors(
         // Log batch results
         for (const result of batchResults) {
             const status = result.errors.length === 0 ? "✓" : "✗";
-            console.log(
+            logger.cli(
                 `    ${status} ${result.name}: ${result.processed} processed, ${result.skipped} skipped (${result.durationMs}ms)`
             );
             if (result.errors.length > 0) {
                 for (const error of result.errors) {
-                    console.log(`      Error: ${error}`);
+                    logger.cli(`      Error: ${error}`);
                 }
             }
         }
@@ -375,11 +376,11 @@ export async function cleanupProcessors(
     });
 
     if (cleanableProcessors.length === 0) {
-        console.log("No processors with cleanup support selected.");
+        logger.cli("No processors with cleanup support selected.");
         return [];
     }
 
-    console.log(`Running cleanup for ${cleanableProcessors.length} processor(s)...`);
+    logger.cli(`Running cleanup for ${cleanableProcessors.length} processor(s)...`);
 
     const results: PostProcessorCleanupResult[] = [];
 
@@ -388,7 +389,7 @@ export async function cleanupProcessors(
         if (!processor || !processor.cleanup) continue;
 
         const startTime = Date.now();
-        console.log(`  Cleaning up: ${name}`);
+        logger.cli(`  Cleaning up: ${name}`);
 
         try {
             const result = await processor.cleanup(context);
@@ -398,13 +399,13 @@ export async function cleanupProcessors(
             });
 
             const status = result.errors.length === 0 ? "✓" : "✗";
-            console.log(
+            logger.cli(
                 `    ${status} ${name}: ${result.deleted} deleted (${Date.now() - startTime}ms)`
             );
 
             if (result.errors.length > 0) {
                 for (const error of result.errors) {
-                    console.log(`      Error: ${error}`);
+                    logger.cli(`      Error: ${error}`);
                 }
             }
         } catch (error) {
@@ -415,7 +416,7 @@ export async function cleanupProcessors(
                 durationMs: Date.now() - startTime,
             };
             results.push(errorResult);
-            console.log(`    ✗ ${name}: Error - ${errorResult.errors[0]}`);
+            logger.cli(`    ✗ ${name}: Error - ${errorResult.errors[0]}`);
         }
     }
 

@@ -13,25 +13,15 @@
  * 6. Applies HEX color codes from the color palette
  */
 
+
+import { colorHasImage } from "../fixtures/index.js";
 import type {
     BlueprintPropertyGroup,
     BlueprintPropertyOption,
     HydratedBlueprint,
 } from "../types/index.js";
-
-import { getColorHex, isColorGroup } from "./color-palette.js";
-
-/**
- * Generate a Shopware-compatible UUID (32 hex chars, no dashes)
- */
-function generateUUID(): string {
-    const hex = "0123456789abcdef";
-    let uuid = "";
-    for (let i = 0; i < 32; i++) {
-        uuid += hex[Math.floor(Math.random() * 16)];
-    }
-    return uuid;
-}
+import { getColorHex } from "./color-palette.js";
+import { generateUUID } from "./uuid.js";
 
 /**
  * Existing property option from Shopware
@@ -94,8 +84,13 @@ export class PropertyCollector {
 
         for (const [groupName, values] of propertyMap) {
             const normalizedGroupName = groupName.toLowerCase();
-            const isColor = isColorGroup(groupName);
             const existingGroup = existingGroupByName.get(normalizedGroupName);
+
+            // Color type: inherited from existing groups OR if the group name is "Color"
+            // This ensures fresh stores get color hex codes too
+            const isColorType =
+                existingGroup?.displayType === "color" ||
+                normalizedGroupName === "color";
 
             // Build option ID lookup for this group
             const existingOptionByName = new Map<string, ExistingPropertyOption>();
@@ -112,27 +107,23 @@ export class PropertyCollector {
             // Build options, reusing existing IDs
             const options: BlueprintPropertyOption[] = [...values].map((value: string) => {
                 const existingOption = existingOptionByName.get(value.toLowerCase());
+                // Colors with images (Multicolor, Rainbow, etc.) don't get hex codes
+                const hasImage = isColorType && colorHasImage(value);
                 return {
                     id: existingOption?.id ?? generateUUID(),
                     name: existingOption?.name ?? value, // Prefer existing name casing
-                    colorHexCode:
-                        existingOption?.colorHexCode ?? (isColor ? getColorHex(value) : undefined),
+                    // Only generate hex codes for color-type groups without images
+                    colorHexCode: hasImage
+                        ? undefined
+                        : existingOption?.colorHexCode ??
+                          (isColorType ? getColorHex(value) : undefined),
                 };
             });
-
-            // Determine displayType - prioritize color detection based on group name
-            // If the group name indicates it's a color group (e.g., "Color", "Exterior Color"),
-            // always use "color" displayType regardless of what exists in Shopware
-            let displayType: "text" | "color" = isColor ? "color" : "text";
-            if (!isColor && existingGroup?.displayType === "color") {
-                // Only inherit "color" from existing if we didn't detect it ourselves
-                displayType = "color";
-            }
 
             groups.push({
                 id: existingGroup?.id ?? generateUUID(),
                 name: existingGroup?.name ?? groupName, // Prefer existing name casing
-                displayType,
+                displayType: isColorType ? "color" : "text",
                 options,
             });
         }

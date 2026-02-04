@@ -19,18 +19,7 @@ import type {
 } from "../types/index.js";
 
 import { DEFAULT_BLUEPRINT_CONFIG } from "../types/index.js";
-
-/**
- * Generate a Shopware-compatible UUID (32 hex chars, no dashes)
- */
-function generateUUID(): string {
-    const hex = "0123456789abcdef";
-    let uuid = "";
-    for (let i = 0; i < 32; i++) {
-        uuid += hex[Math.floor(Math.random() * 16)];
-    }
-    return uuid;
-}
+import { generateUUID, randomPick } from "../utils/index.js";
 
 /**
  * Generate a random number in a range
@@ -45,14 +34,6 @@ function randomInRange(min: number, max: number): number {
 function randomPrice(min: number = 9.99, max: number = 299.99): number {
     const price = min + Math.random() * (max - min);
     return Math.round(price * 100) / 100;
-}
-
-/**
- * Pick a random element from an array
- */
-function randomPick<T>(arr: readonly T[]): T {
-    const index = Math.floor(Math.random() * arr.length);
-    return arr[index] as T;
 }
 
 /**
@@ -167,12 +148,17 @@ export class BlueprintGenerator {
     /**
      * Generate products for each top-level branch.
      * AI will assign appropriate subcategories during hydration.
+     * Respects totalProducts as a limit, distributing evenly across categories.
      */
     private generateProducts(topLevelCategories: BlueprintCategory[]): BlueprintProduct[] {
         const products: BlueprintProduct[] = [];
+        let remaining = this.config.totalProducts;
 
         for (const topCategory of topLevelCategories) {
-            products.push(...this.generateBranchProducts(topCategory));
+            if (remaining <= 0) break;
+            const branchProducts = this.generateBranchProducts(topCategory, remaining);
+            products.push(...branchProducts);
+            remaining -= branchProducts.length;
         }
 
         return products;
@@ -181,10 +167,14 @@ export class BlueprintGenerator {
     /**
      * Generate products for a single branch (top-level category)
      */
-    private generateBranchProducts(topCategory: BlueprintCategory): BlueprintProduct[] {
+    private generateBranchProducts(
+        topCategory: BlueprintCategory,
+        maxProducts: number
+    ): BlueprintProduct[] {
         const products: BlueprintProduct[] = [];
+        const count = Math.min(this.config.productsPerBranch, maxProducts);
 
-        for (let i = 0; i < this.config.productsPerBranch; i++) {
+        for (let i = 0; i < count; i++) {
             const product = this.createProduct(i + 1, topCategory);
             products.push(product);
         }

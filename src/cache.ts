@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { logger } from "./utils/logger.js";
 import type {
     Blueprint,
     CacheOptions,
@@ -113,11 +114,12 @@ export class DataCache {
     clearAll(): void {
         if (fs.existsSync(this.cacheDir)) {
             this.moveToTrash(this.cacheDir, "all-cache");
-            console.log("🗑️  Moved all cached data to trash");
-            console.log(`   Trash location: ${this.trashDir}`);
-            console.log("   To permanently delete: rm -rf .trash/");
+            // Use stderr to avoid corrupting MCP stdio transport
+            logger.info("🗑️  Moved all cached data to trash");
+            logger.info(`   Trash location: ${this.trashDir}`);
+            logger.info("   To permanently delete: rm -rf .trash/");
         } else {
-            console.log("No cache found");
+            logger.info("No cache found");
         }
     }
 
@@ -152,17 +154,17 @@ export class DataCache {
     restoreFromTrash(trashItemName: string, targetPath: string): boolean {
         const trashPath = path.join(this.trashDir, trashItemName);
         if (!fs.existsSync(trashPath)) {
-            console.log(`Trash item not found: ${trashItemName}`);
+            logger.info(`Trash item not found: ${trashItemName}`);
             return false;
         }
 
         if (fs.existsSync(targetPath)) {
-            console.log(`Target already exists: ${targetPath}`);
+            logger.info(`Target already exists: ${targetPath}`);
             return false;
         }
 
         fs.cpSync(trashPath, targetPath, { recursive: true });
-        console.log(`Restored ${trashItemName} to ${targetPath}`);
+        logger.info(`Restored ${trashItemName} to ${targetPath}`);
         return true;
     }
 
@@ -172,9 +174,9 @@ export class DataCache {
     emptyTrash(): void {
         if (fs.existsSync(this.trashDir)) {
             fs.rmSync(this.trashDir, { recursive: true });
-            console.log("🗑️  Permanently deleted all trash");
+            logger.info("🗑️  Permanently deleted all trash");
         } else {
-            console.log("Trash is empty");
+            logger.info("Trash is empty");
         }
     }
 
@@ -789,11 +791,11 @@ export class DataCache {
 
         if (fs.existsSync(scDir)) {
             this.moveToTrash(scDir, `sales-channel-${salesChannel}`);
-            console.log(`Moved cache for SalesChannel "${salesChannel}" to trash`);
-            console.log(`   Trash location: ${this.trashDir}`);
-            console.log("   To permanently delete: rm -rf .trash/");
+            logger.info(`Moved cache for SalesChannel "${salesChannel}" to trash`);
+            logger.info(`   Trash location: ${this.trashDir}`);
+            logger.info("   To permanently delete: rm -rf .trash/");
         } else {
-            console.log(`No cache found for SalesChannel "${salesChannel}"`);
+            logger.info(`No cache found for SalesChannel "${salesChannel}"`);
         }
     }
 
@@ -947,6 +949,50 @@ export class DataCache {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
+    }
+
+    /**
+     * Validate the cache directory is usable
+     * Checks: exists/creatable, writable, has sufficient disk space
+     * Logs warnings for issues but doesn't throw (graceful degradation)
+     */
+    validateCacheDirectory(): { valid: boolean; warnings: string[] } {
+        const warnings: string[] = [];
+
+        // Check if directory exists or can be created
+        try {
+            this.ensureDir(this.cacheDir);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            warnings.push(`Cannot create cache directory: ${message}`);
+            return { valid: false, warnings };
+        }
+
+        // Check write permissions by creating a test file
+        const testFile = path.join(this.cacheDir, ".write-test");
+        try {
+            fs.writeFileSync(testFile, "test");
+            fs.unlinkSync(testFile);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            warnings.push(`Cache directory is not writable: ${message}`);
+            return { valid: false, warnings };
+        }
+
+        // Check disk space (warn if < 100MB available)
+        try {
+            const stats = fs.statfsSync(this.cacheDir);
+            const availableBytes = stats.bavail * stats.bsize;
+            const availableMB = Math.floor(availableBytes / (1024 * 1024));
+
+            if (availableMB < 100) {
+                warnings.push(`Low disk space: only ${availableMB}MB available in cache directory`);
+            }
+        } catch {
+            // statfsSync may not be available on all platforms, skip disk check
+        }
+
+        return { valid: warnings.length === 0, warnings };
     }
 }
 

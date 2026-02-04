@@ -2,11 +2,48 @@
  * Unit tests for shopware/sync module
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
+import type { DataHydrator } from "../../../src/shopware/index.js";
 
-import type { BlueprintPropertyGroup, HydratedBlueprint } from "../../../src/types/index.js";
+import {
+    buildPropertyMaps,
+    syncCategories,
+    syncProducts,
+    syncPropertyGroups,
+    syncPropertyIdsToBlueprint,
+} from "../../../src/shopware/sync.js";
+import type {
+    BlueprintPropertyGroup,
+    HydratedBlueprint,
+    SalesChannelFull,
+} from "../../../src/types/index.js";
+import { logger } from "../../../src/utils/index.js";
 
-import { buildPropertyMaps, syncPropertyIdsToBlueprint } from "../../../src/shopware/sync.js";
+// Suppress console output during tests
+const originalCli = logger.cli.bind(logger);
+const mockCli = mock(() => {});
+
+// =============================================================================
+// Mock DataHydrator
+// =============================================================================
+
+function createMockDataHydrator(): DataHydrator {
+    return {
+        createCategoryTree: mock(async () => new Map([["Root / Child", "cat-123"]])),
+        getExistingCategoryMap: mock(async () => new Map()),
+        getExistingPropertyGroups: mock(async () => []),
+        hydrateEnvWithPropertyGroups: mock(async () => {}),
+        hydrateEnvWithProductsDirect: mock(async () => {}),
+    } as unknown as DataHydrator;
+}
+
+function createMockSalesChannel(): SalesChannelFull {
+    return {
+        id: "sc-123",
+        name: "test-store",
+        navigationCategoryId: "nav-cat-123",
+    } as SalesChannelFull;
+}
 
 // =============================================================================
 // Test Fixtures
@@ -247,5 +284,409 @@ describe("syncPropertyIdsToBlueprint", () => {
         const prop = product.metadata.properties[0];
         expect(prop?.groupId).toBe("pg-1");
         expect(prop?.optionId).toBe("opt-1");
+    });
+});
+
+describe("syncCategories", () => {
+    test("creates categories for new SalesChannel", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [
+                {
+                    id: "cat-1",
+                    name: "Electronics",
+                    description: "Electronic products",
+                    level: 1,
+                    hasImage: false,
+                    children: [],
+                },
+            ],
+            products: [],
+            propertyGroups: [],
+        };
+
+        const result = await syncCategories(dataHydrator, blueprint, salesChannel, true);
+
+        expect(dataHydrator.createCategoryTree).toHaveBeenCalled();
+        expect(result.size).toBeGreaterThan(0);
+
+        logger.cli = originalCli;
+    });
+
+    test("syncs existing categories for existing SalesChannel", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        (dataHydrator.getExistingCategoryMap as ReturnType<typeof mock>).mockImplementation(
+            async () =>
+                new Map([
+                    ["Electronics", "existing-cat-id"],
+                    ["Electronics > Phones", "existing-phones-id"],
+                ])
+        );
+
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [
+                {
+                    id: "cat-1",
+                    name: "Electronics",
+                    description: "Electronic products",
+                    level: 1,
+                    hasImage: false,
+                    children: [
+                        {
+                            id: "cat-2",
+                            name: "Phones",
+                            description: "Mobile phones",
+                            level: 2,
+                            hasImage: false,
+                            children: [],
+                        },
+                    ],
+                },
+            ],
+            products: [
+                {
+                    id: "prod-1",
+                    name: "iPhone",
+                    description: "Apple phone",
+                    price: 999,
+                    stock: 10,
+                    primaryCategoryId: "cat-2",
+                    categoryIds: ["cat-2"],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+
+        await syncCategories(dataHydrator, blueprint, salesChannel, false);
+
+        // Should update category IDs to match existing
+        expect(blueprint.categories[0]?.id).toBe("existing-cat-id");
+        expect(blueprint.categories[0]?.children[0]?.id).toBe("existing-phones-id");
+
+        // Should update product category references
+        expect(blueprint.products[0]?.primaryCategoryId).toBe("existing-phones-id");
+        expect(blueprint.products[0]?.categoryIds).toContain("existing-phones-id");
+
+        logger.cli = originalCli;
+    });
+});
+
+describe("syncPropertyGroups", () => {
+    test("creates new property groups", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ],
+        };
+
+        await syncPropertyGroups(dataHydrator, blueprint);
+
+        expect(dataHydrator.hydrateEnvWithPropertyGroups).toHaveBeenCalled();
+
+        logger.cli = originalCli;
+    });
+
+    test("skips existing property groups with no missing options", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
+            async () => [
+                {
+                    id: "existing-pg",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "existing-opt", name: "Red" }],
+                },
+            ]
+        );
+
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red" }],
+                },
+            ],
+        };
+
+        await syncPropertyGroups(dataHydrator, blueprint);
+
+        // Should update blueprint ID to match existing
+        expect(blueprint.propertyGroups[0]?.id).toBe("existing-pg");
+        expect(blueprint.propertyGroups[0]?.options[0]?.id).toBe("existing-opt");
+
+        // Should NOT call hydrateEnvWithPropertyGroups (nothing to sync)
+        expect(dataHydrator.hydrateEnvWithPropertyGroups).not.toHaveBeenCalled();
+
+        logger.cli = originalCli;
+    });
+
+    test("adds missing options to existing property groups", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
+            async () => [
+                {
+                    id: "existing-pg",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "existing-red", name: "Red" }],
+                },
+            ]
+        );
+
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [
+                        { id: "opt-red", name: "Red" },
+                        { id: "opt-blue", name: "Blue" }, // New option
+                    ],
+                },
+            ],
+        };
+
+        await syncPropertyGroups(dataHydrator, blueprint);
+
+        // Should call hydrateEnvWithPropertyGroups with missing options
+        expect(dataHydrator.hydrateEnvWithPropertyGroups).toHaveBeenCalled();
+
+        logger.cli = originalCli;
+    });
+});
+
+describe("syncProducts", () => {
+    test("syncs products to Shopware", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [
+                {
+                    id: "cat-1",
+                    name: "Electronics",
+                    description: "Electronics",
+                    level: 1,
+                    hasImage: false,
+                    children: [],
+                },
+            ],
+            products: [
+                {
+                    id: "prod-1",
+                    name: "Test Product",
+                    description: "A test product",
+                    price: 99.99,
+                    stock: 10,
+                    primaryCategoryId: "cat-1",
+                    categoryIds: ["cat-1"],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [{ group: "Color", value: "Red" }],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                    },
+                },
+            ],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red" }],
+                },
+            ],
+        };
+
+        const categoryIdMap = new Map([["Electronics", "sw-cat-123"]]);
+        const propertyOptionMap = new Map([["color::red", { id: "opt-red", name: "Red" }]]);
+
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            categoryIdMap,
+            propertyOptionMap
+        );
+
+        expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
+
+        logger.cli = originalCli;
+    });
+
+    test("resolves category IDs via paths", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [
+                {
+                    id: "cat-electronics",
+                    name: "Electronics",
+                    description: "Electronics",
+                    level: 1,
+                    hasImage: false,
+                    children: [
+                        {
+                            id: "cat-phones",
+                            name: "Phones",
+                            description: "Phones",
+                            level: 2,
+                            hasImage: false,
+                            children: [],
+                        },
+                    ],
+                },
+            ],
+            products: [
+                {
+                    id: "prod-1",
+                    name: "iPhone",
+                    description: "Apple phone",
+                    price: 999,
+                    stock: 5,
+                    primaryCategoryId: "cat-phones",
+                    categoryIds: ["cat-phones"],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+
+        const categoryIdMap = new Map([
+            ["Electronics", "sw-electronics"],
+            ["Electronics > Phones", "sw-phones"],
+        ]);
+
+        await syncProducts(dataHydrator, blueprint, salesChannel, categoryIdMap, new Map());
+
+        // Verify the product was synced with correct arguments
+        expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "prod-1",
+                    name: "iPhone",
+                    categoryIds: ["sw-phones"],
+                }),
+            ]),
+            salesChannel.id,
+            salesChannel.navigationCategoryId
+        );
+
+        logger.cli = originalCli;
+    });
+
+    test("handles products without properties", async () => {
+        logger.cli = mockCli;
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [
+                {
+                    id: "prod-1",
+                    name: "Simple Product",
+                    description: "No properties",
+                    price: 49.99,
+                    stock: 20,
+                    primaryCategoryId: "cat-1",
+                    categoryIds: ["cat-1"],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+
+        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+
+        expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
+
+        logger.cli = originalCli;
     });
 });

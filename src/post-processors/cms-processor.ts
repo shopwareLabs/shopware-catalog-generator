@@ -7,15 +7,14 @@
  */
 
 import type { CmsPageFixture } from "../fixtures/index.js";
+import { VIDEO_ELEMENTS_PAGE } from "../fixtures/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
-
-import { VIDEO_ELEMENTS_PAGE } from "../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /** Internal result type for cleanup sub-operations */
 interface CleanupSubResult {
@@ -39,9 +38,9 @@ class CmsProcessorImpl implements PostProcessor {
         const errors: string[] = [];
 
         if (options.dryRun) {
-            console.log(`    [DRY RUN] Would create CMS layout "Video Elements"`);
-            console.log(`    [DRY RUN] Would create Landing Page "Video Elements"`);
-            console.log(
+            logger.cli(`    [DRY RUN] Would create CMS layout "Video Elements"`);
+            logger.cli(`    [DRY RUN] Would create Landing Page "Video Elements"`);
+            logger.cli(
                 `    [DRY RUN] Would create category "CMS" > "Video Elements" linked to Landing Page`
             );
             return {
@@ -98,9 +97,9 @@ class CmsProcessorImpl implements PostProcessor {
                     errors.push(`Failed to create CMS category: ${createCmsCategory.status}`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                console.log(`    ✓ Created "CMS" top-level category`);
+                logger.cli(`    ✓ Created "CMS" top-level category`);
             } else {
-                console.log(`    ⊘ "CMS" category already exists`);
+                logger.cli(`    ⊘ "CMS" category already exists`);
             }
 
             // Step 3: Check if CMS page (layout) already exists
@@ -113,9 +112,9 @@ class CmsProcessorImpl implements PostProcessor {
                     errors.push("Failed to create CMS page layout");
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                console.log(`    ✓ Created CMS layout "${VIDEO_ELEMENTS_PAGE.name}"`);
+                logger.cli(`    ✓ Created CMS layout "${VIDEO_ELEMENTS_PAGE.name}"`);
             } else {
-                console.log(`    ⊘ CMS layout "${VIDEO_ELEMENTS_PAGE.name}" already exists`);
+                logger.cli(`    ⊘ CMS layout "${VIDEO_ELEMENTS_PAGE.name}" already exists`);
             }
 
             // Step 4: Check if Landing Page already exists
@@ -132,7 +131,7 @@ class CmsProcessorImpl implements PostProcessor {
                     errors.push("Failed to create Landing Page");
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                console.log(`    ✓ Created Landing Page "${VIDEO_ELEMENTS_PAGE.name}"`);
+                logger.cli(`    ✓ Created Landing Page "${VIDEO_ELEMENTS_PAGE.name}"`);
             } else {
                 // Landing page exists - check if current SalesChannel is associated
                 const landingPageData = await this.getLandingPageWithSalesChannels(
@@ -153,19 +152,19 @@ class CmsProcessorImpl implements PostProcessor {
                             context.salesChannelId
                         );
                         if (added) {
-                            console.log(
+                            logger.cli(
                                 `    ✓ Added SalesChannel to Landing Page "${VIDEO_ELEMENTS_PAGE.name}"`
                             );
                         } else {
                             errors.push("Failed to add SalesChannel to existing Landing Page");
                         }
                     } else {
-                        console.log(
+                        logger.cli(
                             `    ⊘ Landing Page "${VIDEO_ELEMENTS_PAGE.name}" already includes SalesChannel`
                         );
                     }
                 } else {
-                    console.log(`    ⊘ Landing Page "${VIDEO_ELEMENTS_PAGE.name}" already exists`);
+                    logger.cli(`    ⊘ Landing Page "${VIDEO_ELEMENTS_PAGE.name}" already exists`);
                 }
             }
 
@@ -212,9 +211,9 @@ class CmsProcessorImpl implements PostProcessor {
                     );
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                console.log(`    ✓ Created "Video Elements" sub-category linked to Landing Page`);
+                logger.cli(`    ✓ Created "Video Elements" sub-category linked to Landing Page`);
             } else {
-                console.log(`    ⊘ "Video Elements" category already exists`);
+                logger.cli(`    ⊘ "Video Elements" category already exists`);
             }
 
             processed = 1;
@@ -696,10 +695,10 @@ class CmsProcessorImpl implements PostProcessor {
      * Dry run cleanup - just log what would be deleted
      */
     private cleanupDryRun(): PostProcessorCleanupResult {
-        console.log(`    [DRY RUN] Would delete "Video Elements" category`);
-        console.log(`    [DRY RUN] Would delete "CMS" category`);
-        console.log(`    [DRY RUN] Would delete "Video Elements" landing page`);
-        console.log(`    [DRY RUN] Would delete "Video Elements" CMS layout`);
+        logger.cli(`    [DRY RUN] Would delete "Video Elements" category`);
+        logger.cli(`    [DRY RUN] Would delete "CMS" category`);
+        logger.cli(`    [DRY RUN] Would delete "Video Elements" landing page`);
+        logger.cli(`    [DRY RUN] Would delete "Video Elements" CMS layout`);
         return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
     }
 
@@ -712,7 +711,7 @@ class CmsProcessorImpl implements PostProcessor {
     ): Promise<CleanupSubResult> {
         const cmsCategoryId = await this.findCategoryByName(context, "CMS", rootCategoryId);
         if (!cmsCategoryId) {
-            console.log(`    ⊘ "CMS" category not found, skipping`);
+            logger.cli(`    ⊘ "CMS" category not found, skipping`);
             return this.createCleanupResult();
         }
 
@@ -764,7 +763,7 @@ class CmsProcessorImpl implements PostProcessor {
             return this.createCleanupResult(0, [`Failed to delete ${categoryName} category`]);
         }
 
-        console.log(`    ✓ Deleted "${categoryName}" category`);
+        logger.cli(`    ✓ Deleted "${categoryName}" category`);
         return this.createCleanupResult(1);
     }
 
@@ -774,7 +773,7 @@ class CmsProcessorImpl implements PostProcessor {
     private async cleanupLandingPage(context: PostProcessorContext): Promise<CleanupSubResult> {
         const landingPageId = await this.findLandingPageByName(context, VIDEO_ELEMENTS_PAGE.name);
         if (!landingPageId) {
-            console.log(`    ⊘ "${VIDEO_ELEMENTS_PAGE.name}" landing page not found, skipping`);
+            logger.cli(`    ⊘ "${VIDEO_ELEMENTS_PAGE.name}" landing page not found, skipping`);
             return this.createCleanupResult();
         }
 
@@ -785,7 +784,7 @@ class CmsProcessorImpl implements PostProcessor {
 
         const isAssociated = landingPageData.salesChannelIds.includes(context.salesChannelId);
         if (!isAssociated) {
-            console.log(
+            logger.cli(
                 `    ⊘ SalesChannel not associated with "${VIDEO_ELEMENTS_PAGE.name}" landing page`
             );
             return this.createCleanupResult();
@@ -806,7 +805,7 @@ class CmsProcessorImpl implements PostProcessor {
             return this.createCleanupResult(0, ["Failed to delete landing page"]);
         }
 
-        console.log(`    ✓ Deleted "${VIDEO_ELEMENTS_PAGE.name}" landing page`);
+        logger.cli(`    ✓ Deleted "${VIDEO_ELEMENTS_PAGE.name}" landing page`);
         return this.createCleanupResult(1);
     }
 
@@ -827,12 +826,12 @@ class CmsProcessorImpl implements PostProcessor {
             return this.createCleanupResult(0, ["Failed to remove SalesChannel from landing page"]);
         }
 
-        console.log(`    ✓ Removed SalesChannel from "${VIDEO_ELEMENTS_PAGE.name}" landing page`);
+        logger.cli(`    ✓ Removed SalesChannel from "${VIDEO_ELEMENTS_PAGE.name}" landing page`);
 
         const isLastSalesChannel = landingPageData.salesChannelIds.length === 1;
         if (!isLastSalesChannel) {
             const remaining = landingPageData.salesChannelIds.length - 1;
-            console.log(`    ⊘ Landing page still used by ${remaining} other SalesChannel(s)`);
+            logger.cli(`    ⊘ Landing page still used by ${remaining} other SalesChannel(s)`);
             return this.createCleanupResult(1);
         }
 
@@ -853,7 +852,7 @@ class CmsProcessorImpl implements PostProcessor {
         // Delete landing page
         const lpSuccess = await this.deleteEntity(context, "landing-page", landingPageId);
         if (lpSuccess) {
-            console.log(
+            logger.cli(
                 `    ✓ Deleted "${VIDEO_ELEMENTS_PAGE.name}" landing page (no more SalesChannels)`
             );
             deleted++;
@@ -870,7 +869,7 @@ class CmsProcessorImpl implements PostProcessor {
 
         const cmsSuccess = await this.deleteEntity(context, "cms-page", cmsPageId);
         if (cmsSuccess) {
-            console.log(
+            logger.cli(
                 `    ✓ Deleted "${VIDEO_ELEMENTS_PAGE.name}" CMS layout (no more SalesChannels)`
             );
             deleted++;

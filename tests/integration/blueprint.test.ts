@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
-
-import type { HydratedBlueprint } from "../../src/types/index.js";
-
 import { DataCache } from "../../src/cache.js";
 import { BlueprintGenerator } from "../../src/generators/blueprint-generator.js";
+import type { HydratedBlueprint } from "../../src/types/index.js";
 import { PropertyCollector } from "../../src/utils/property-collector.js";
 
 // Test cache directory
@@ -231,11 +229,14 @@ describe("Blueprint Integration", () => {
 
             expect(groups.length).toBe(2);
 
+            // Color group is automatically "color" type with hex codes
             const colorGroup = groups.find((g) => g.name === "Color");
             expect(colorGroup).toBeDefined();
             expect(colorGroup?.options.length).toBe(2);
             expect(colorGroup?.displayType).toBe("color");
+            expect(colorGroup?.options.find((o) => o.name === "Red")?.colorHexCode).toBe("#dc2626");
 
+            // Other groups are "text" type
             const materialGroup = groups.find((g) => g.name === "Material");
             expect(materialGroup).toBeDefined();
             expect(materialGroup?.options.length).toBe(1);

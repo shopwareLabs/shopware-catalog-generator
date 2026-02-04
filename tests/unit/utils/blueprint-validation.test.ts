@@ -21,7 +21,16 @@ function createMockCategory(
         description: "Description",
         level: 0,
         hasImage: false,
-        children: [],
+        children: [
+            {
+                id: "cat-1-sub",
+                name: "Subcategory One",
+                description: "Sub Description",
+                level: 1,
+                hasImage: false,
+                children: [],
+            },
+        ],
         ...overrides,
     };
 }
@@ -35,13 +44,14 @@ function createMockProduct(
         description: "Description",
         price: 99.99,
         stock: 10,
-        primaryCategoryId: "cat-1",
-        categoryIds: ["cat-1"],
+        primaryCategoryId: "cat-1-sub",
+        categoryIds: ["cat-1-sub"],
         metadata: {
             imageCount: 1,
-            imageDescriptions: [],
+            imageDescriptions: [{ view: "front" as const, prompt: "Product image" }],
             isVariant: false,
-            properties: [],
+            properties: [{ group: "Color", value: "Red" }],
+            manufacturerName: "Test Manufacturer",
             reviewCount: 0,
             hasSalesPrice: false,
         },

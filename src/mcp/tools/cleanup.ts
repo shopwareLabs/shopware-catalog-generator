@@ -188,8 +188,9 @@ export function registerCleanupTools(server: FastMCP): void {
                 results.push(`Processor cleanup: ${totalDeleted} deleted, ${totalErrors} errors`);
             }
 
-            // Handle core cleanup (if not just processors or if --full)
-            if (!args.processors || args.full) {
+            // Handle core cleanup (if no processors specified or if --full)
+            // Note: empty array [] should also trigger core cleanup
+            if (!args.processors?.length || args.full) {
                 if (args.dryRun) {
                     results.push(``);
                     results.push(`[DRY RUN] Would delete:`);

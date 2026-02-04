@@ -6,6 +6,7 @@
  */
 
 import type { HydratedBlueprint } from "../types/index.js";
+import { logger } from "./logger.js";
 
 // =============================================================================
 // Types
@@ -162,7 +163,7 @@ function fixDuplicateProductNames(
             if (product) {
                 const newName = `${name} (${i + 1})`;
                 if (logFixes) {
-                    console.log(`  Fixed duplicate: "${name}" → "${newName}"`);
+                    logger.cli(`  Fixed duplicate: "${name}" → "${newName}"`);
                 }
                 product.name = newName;
                 fixCount++;
@@ -194,7 +195,7 @@ function validateProducts(
         if (autoFix) {
             fixesApplied = fixDuplicateProductNames(blueprint, duplicateProducts, logFixes);
             if (logFixes) {
-                console.log(`  ✓ Fixed ${fixesApplied} duplicate product names`);
+                logger.cli(`  ✓ Fixed ${fixesApplied} duplicate product names`);
             }
         } else {
             for (const [name, ids] of duplicateProducts) {
@@ -295,6 +296,213 @@ function validateBlueprintMeta(blueprint: HydratedBlueprint): BlueprintValidatio
 }
 
 // =============================================================================
+// Category Assignment Validation Functions
+// =============================================================================
+
+/**
+ * Build a set of all category IDs in the blueprint
+ */
+function collectAllCategoryIds(categories: HydratedBlueprint["categories"]): Set<string> {
+    const ids = new Set<string>();
+
+    function collect(cats: HydratedBlueprint["categories"]): void {
+        for (const cat of cats) {
+            ids.add(cat.id);
+            if (cat.children && cat.children.length > 0) {
+                collect(cat.children);
+            }
+        }
+    }
+
+    collect(categories);
+    return ids;
+}
+
+/**
+ * Get set of top-level category IDs
+ */
+function getTopLevelCategoryIds(categories: HydratedBlueprint["categories"]): Set<string> {
+    return new Set(categories.map((c) => c.id));
+}
+
+/**
+ * Validate product category assignments
+ *
+ * Checks for:
+ * - Products referencing non-existent categories
+ * - Products only assigned to top-level categories (should have subcategories)
+ * - Products with empty categoryIds
+ */
+function validateCategoryAssignments(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+
+    const allCategoryIds = collectAllCategoryIds(blueprint.categories);
+    const topLevelIds = getTopLevelCategoryIds(blueprint.categories);
+
+    const productsWithInvalidCategories: string[] = [];
+    const productsOnlyInTopLevel: string[] = [];
+    const productsWithNoCategories: string[] = [];
+
+    for (const product of blueprint.products) {
+        // Check for empty categoryIds
+        if (!product.categoryIds || product.categoryIds.length === 0) {
+            productsWithNoCategories.push(product.id);
+            continue;
+        }
+
+        // Check for invalid category references
+        const invalidCats = product.categoryIds.filter((id) => !allCategoryIds.has(id));
+        if (invalidCats.length > 0) {
+            productsWithInvalidCategories.push(product.id);
+        }
+
+        // Check if product is only in top-level categories
+        const hasSubcategory = product.categoryIds.some((id) => !topLevelIds.has(id));
+        if (!hasSubcategory && product.categoryIds.length > 0) {
+            productsOnlyInTopLevel.push(product.id);
+        }
+    }
+
+    if (productsWithNoCategories.length > 0) {
+        issues.push({
+            type: "error",
+            code: "PRODUCTS_NO_CATEGORIES",
+            message: `${productsWithNoCategories.length} products have no category assignments`,
+            field: "products[].categoryIds",
+            affectedIds: productsWithNoCategories,
+        });
+    }
+
+    if (productsWithInvalidCategories.length > 0) {
+        issues.push({
+            type: "error",
+            code: "INVALID_CATEGORY_REFERENCE",
+            message: `${productsWithInvalidCategories.length} products reference non-existent categories`,
+            field: "products[].categoryIds",
+            affectedIds: productsWithInvalidCategories,
+        });
+    }
+
+    if (productsOnlyInTopLevel.length > 0) {
+        issues.push({
+            type: "warning",
+            code: "PRODUCTS_ONLY_TOP_LEVEL",
+            message: `${productsOnlyInTopLevel.length} products only assigned to top-level categories (missing subcategory assignment)`,
+            field: "products[].categoryIds",
+            affectedIds: productsOnlyInTopLevel,
+        });
+    }
+
+    return issues;
+}
+
+// =============================================================================
+// Image Validation Functions
+// =============================================================================
+
+/**
+ * Validate product image metadata
+ *
+ * Checks for:
+ * - Products missing imageDescriptions
+ * - Products with empty image prompts
+ */
+function validateImageDescriptions(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+
+    const productsWithoutImages: string[] = [];
+    const productsWithEmptyPrompts: string[] = [];
+
+    for (const product of blueprint.products) {
+        const imageDescs = product.metadata?.imageDescriptions;
+
+        // Check for missing imageDescriptions
+        if (!imageDescs || imageDescs.length === 0) {
+            productsWithoutImages.push(product.id);
+            continue;
+        }
+
+        // Check for empty prompts
+        const hasEmptyPrompt = imageDescs.some(
+            (desc) => !desc.prompt || desc.prompt.trim() === ""
+        );
+        if (hasEmptyPrompt) {
+            productsWithEmptyPrompts.push(product.id);
+        }
+    }
+
+    if (productsWithoutImages.length > 0) {
+        issues.push({
+            type: "warning",
+            code: "PRODUCTS_NO_IMAGE_DESCRIPTIONS",
+            message: `${productsWithoutImages.length} products have no image descriptions`,
+            field: "products[].metadata.imageDescriptions",
+            affectedIds: productsWithoutImages,
+        });
+    }
+
+    if (productsWithEmptyPrompts.length > 0) {
+        issues.push({
+            type: "warning",
+            code: "PRODUCTS_EMPTY_IMAGE_PROMPTS",
+            message: `${productsWithEmptyPrompts.length} products have empty image prompts`,
+            field: "products[].metadata.imageDescriptions[].prompt",
+            affectedIds: productsWithEmptyPrompts,
+        });
+    }
+
+    return issues;
+}
+
+/**
+ * Validate product metadata completeness
+ *
+ * Checks for:
+ * - Products missing properties
+ * - Products missing manufacturer
+ */
+function validateProductMetadata(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+
+    const productsWithoutProperties: string[] = [];
+    const productsWithoutManufacturer: string[] = [];
+
+    for (const product of blueprint.products) {
+        // Check for missing properties
+        if (!product.metadata?.properties || product.metadata.properties.length === 0) {
+            productsWithoutProperties.push(product.id);
+        }
+
+        // Check for missing manufacturer
+        if (!product.metadata?.manufacturerName) {
+            productsWithoutManufacturer.push(product.id);
+        }
+    }
+
+    if (productsWithoutProperties.length > 0) {
+        issues.push({
+            type: "warning",
+            code: "PRODUCTS_NO_PROPERTIES",
+            message: `${productsWithoutProperties.length} products have no properties defined`,
+            field: "products[].metadata.properties",
+            affectedIds: productsWithoutProperties,
+        });
+    }
+
+    if (productsWithoutManufacturer.length > 0) {
+        issues.push({
+            type: "warning",
+            code: "PRODUCTS_NO_MANUFACTURER",
+            message: `${productsWithoutManufacturer.length} products have no manufacturer assigned`,
+            field: "products[].metadata.manufacturerName",
+            affectedIds: productsWithoutManufacturer,
+        });
+    }
+
+    return issues;
+}
+
+// =============================================================================
 // Property Validation Functions
 // =============================================================================
 
@@ -383,12 +591,15 @@ function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidati
  * Validate a hydrated blueprint before syncing to Shopware.
  *
  * Checks for:
- * - Duplicate product names
+ * - Duplicate product names (auto-fixable)
  * - Duplicate category names (at same level)
  * - Placeholder names (not hydrated)
  * - Missing required fields
  * - Property group validation (names, options, hex codes)
  * - Orphan property references
+ * - Category assignment issues (no categories, invalid refs, top-level only)
+ * - Image description issues (missing or empty prompts)
+ * - Product metadata completeness (properties, manufacturer)
  *
  * @param blueprint - The hydrated blueprint to validate
  * @param options - Validation options
@@ -401,7 +612,7 @@ export function validateBlueprint(
     const { autoFix = false, logFixes = true } = options;
 
     if (logFixes && autoFix) {
-        console.log("Validating blueprint...");
+        logger.cli("Validating blueprint...");
     }
 
     // Run all validations
@@ -409,6 +620,9 @@ export function validateBlueprint(
     const categoryIssues = validateCategories(blueprint);
     const metaIssues = validateBlueprintMeta(blueprint);
     const propertyIssues = validatePropertyGroups(blueprint);
+    const categoryAssignmentIssues = validateCategoryAssignments(blueprint);
+    const imageIssues = validateImageDescriptions(blueprint);
+    const metadataIssues = validateProductMetadata(blueprint);
 
     // Collect all issues
     const allIssues = [
@@ -416,6 +630,9 @@ export function validateBlueprint(
         ...categoryIssues,
         ...metaIssues,
         ...propertyIssues,
+        ...categoryAssignmentIssues,
+        ...imageIssues,
+        ...metadataIssues,
     ];
 
     // Filter out issues that were fixed

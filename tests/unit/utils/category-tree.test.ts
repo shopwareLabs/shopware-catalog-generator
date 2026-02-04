@@ -6,7 +6,6 @@ import {
     buildBlueprintCategoryPathMap,
     buildCategoryPath,
     CATEGORY_PATH_SEPARATOR,
-    collectCategoryIds,
     collectCategoryIdsByPath,
     convertBlueprintCategories,
     countCategories,
@@ -201,37 +200,6 @@ describe("category tree utilities", () => {
             const names = flat.map((c) => c.name);
 
             expect(names).toEqual(["Furniture", "Beds", "Tables", "Dining Tables", "Electronics"]);
-        });
-    });
-
-    describe("collectCategoryIds", () => {
-        test("collects all IDs into a map", () => {
-            const tree = createTestTree();
-            const ids = collectCategoryIds(tree);
-
-            expect(ids.size).toBe(5);
-            expect(ids.get("Furniture")).toBe("cat-1");
-            expect(ids.get("Beds")).toBe("cat-1-1");
-            expect(ids.get("Dining Tables")).toBe("cat-1-2-1");
-        });
-
-        test("skips categories without IDs", () => {
-            const tree: CategoryNode[] = [
-                {
-                    name: "NoId",
-                    description: "",
-                    children: [],
-                    productCount: 0,
-                    hasImage: false,
-                },
-            ];
-            const ids = collectCategoryIds(tree);
-
-            expect(ids.size).toBe(0);
-        });
-
-        test("returns empty map for empty input", () => {
-            expect(collectCategoryIds([]).size).toBe(0);
         });
     });
 

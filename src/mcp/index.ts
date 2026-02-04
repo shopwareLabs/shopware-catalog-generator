@@ -11,12 +11,16 @@
 
 import { FastMCP } from "fastmcp";
 
+import { logger } from "../utils/index.js";
 import {
     registerBlueprintTools,
     registerCacheTools,
     registerCleanupTools,
     registerGenerateTools,
 } from "./tools/index.js";
+
+// Enable MCP mode to suppress console output (prevents stdout pollution)
+logger.setMcpMode(true);
 
 /**
  * Create and configure the MCP server.

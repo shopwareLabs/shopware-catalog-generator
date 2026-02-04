@@ -7,14 +7,14 @@
  * 4. Assigns manufacturers to products
  */
 
+
+import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
-
-import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 /**
  * Manufacturer Processor implementation
@@ -59,9 +59,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
         const errors: string[] = [];
 
         if (options.dryRun) {
-            console.log(`    [DRY RUN] Would create ${newManufacturers.length} manufacturers`);
+            logger.cli(`    [DRY RUN] Would create ${newManufacturers.length} manufacturers`);
             for (const name of newManufacturers) {
-                console.log(`      - ${name}`);
+                logger.cli(`      - ${name}`);
             }
             return {
                 name: this.name,
@@ -231,7 +231,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            console.log(
+            logger.cli(
                 `    [DRY RUN] Would unassign and delete manufacturers for products in SalesChannel`
             );
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
@@ -260,7 +260,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                console.log(`    No products found in SalesChannel`);
+                logger.cli(`    No products found in SalesChannel`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
@@ -273,11 +273,11 @@ class ManufacturerProcessorImpl implements PostProcessor {
             }
 
             if (manufacturerIds.size === 0) {
-                console.log(`    No manufacturers assigned to products`);
+                logger.cli(`    No manufacturers assigned to products`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            console.log(
+            logger.cli(
                 `    Found ${manufacturerIds.size} unique manufacturers assigned to ${products.length} products`
             );
 
@@ -294,7 +294,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                         payload: productUpdates,
                     },
                 });
-                console.log(
+                logger.cli(
                     `    ✓ Unassigned manufacturers from ${productUpdates.length} products`
                 );
             }
@@ -319,9 +319,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
             if (manufacturersToDelete.length > 0) {
                 await context.api.deleteEntities("product_manufacturer", manufacturersToDelete);
                 deleted = manufacturersToDelete.length;
-                console.log(`    ✓ Deleted ${deleted} orphaned manufacturers`);
+                logger.cli(`    ✓ Deleted ${deleted} orphaned manufacturers`);
             } else {
-                console.log(
+                logger.cli(
                     `    No orphaned manufacturers to delete (all still have products in other SalesChannels)`
                 );
             }

@@ -7,6 +7,7 @@ import type {
 } from "../types/index.js";
 
 import { PROVIDER_DEFAULTS } from "../types/index.js";
+import { logger } from "../utils/index.js";
 
 import { GitHubModelsTextProvider } from "./github-models-provider.js";
 import { NoOpImageProvider } from "./noop-provider.js";
@@ -46,8 +47,8 @@ export function createProviders(config: ProviderConfig): {
     const textProvider = createTextProvider(config);
     const imageProvider = createImageProvider(config);
 
-    console.log(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`);
-    console.log(
+    logger.cli(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`);
+    logger.cli(
         `Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`
     );
 
@@ -111,7 +112,7 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
             // For OpenAI images, we need an API key
             const apiKey = config.imageApiKey || config.apiKey;
             if (!apiKey) {
-                console.warn(
+                logger.warn(
                     "No API key for OpenAI image generation. Falling back to Pollinations."
                 );
                 return new PollinationsImageProvider();

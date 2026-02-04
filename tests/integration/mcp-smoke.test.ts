@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * MCP Server Smoke Test
  *
@@ -7,26 +6,27 @@
  *
  * Usage:
  *   bun test tests/integration/mcp-smoke.test.ts
+ *   MCP_SMOKE_VERBOSE=1 bun test tests/integration/mcp-smoke.test.ts  # show full output
  */
 
+import { describe, expect, test } from "bun:test";
 import { spawn } from "bun";
 
-async function main(): Promise<void> {
-    console.log("=== MCP Server Smoke Test ===\n");
+const VERBOSE = process.env.MCP_SMOKE_VERBOSE === "1";
 
-    // Start the MCP server
-    console.log("Starting MCP server...");
+async function runMcpSmokeTest(): Promise<{
+    ok: boolean;
+    response: string;
+    stderr: string;
+    error?: string;
+}> {
     const proc = spawn(["bun", "run", "src/mcp/index.ts"], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
     });
 
-    // Give it a moment to start
     await new Promise((resolve) => setTimeout(resolve, 500));
-
-    // Send MCP initialization request
-    console.log("Sending initialize request...\n");
 
     const initRequest = JSON.stringify({
         jsonrpc: "2.0",
@@ -35,105 +35,77 @@ async function main(): Promise<void> {
         params: {
             protocolVersion: "2024-11-05",
             capabilities: {},
-            clientInfo: {
-                name: "smoke-test",
-                version: "1.0.0",
-            },
+            clientInfo: { name: "smoke-test", version: "1.0.0" },
         },
     });
 
-    // Write to stdin with content-length header (MCP uses JSON-RPC over stdio)
-    const header = `Content-Length: ${Buffer.byteLength(initRequest)}\r\n\r\n`;
-    proc.stdin.write(header + initRequest);
+    proc.stdin.write(`${initRequest}\n`);
     proc.stdin.flush();
 
-    // Read response with timeout
     const timeout = 5000;
     const startTime = Date.now();
-
     let response = "";
     const decoder = new TextDecoder();
 
     try {
         const reader = proc.stdout.getReader();
-
         while (Date.now() - startTime < timeout) {
             const readPromise = reader.read();
             const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) =>
                 setTimeout(() => resolve({ done: true, value: undefined }), 1000)
             );
-
             const result = await Promise.race([readPromise, timeoutPromise]);
-
             if (result.value) {
                 response += decoder.decode(result.value);
-
-                // Check if we have a complete response
-                if (response.includes('"result"') || response.includes('"error"')) {
-                    break;
-                }
+                if (response.includes('"result"') || response.includes('"error"')) break;
             }
-
             if (result.done) break;
         }
-
         reader.releaseLock();
     } catch (error) {
-        console.error("Error reading response:", error);
+        proc.kill();
+        return {
+            ok: false,
+            response,
+            stderr: "",
+            error: error instanceof Error ? error.message : String(error),
+        };
     }
 
-    // Parse and display response
-    if (response) {
-        console.log("Raw response:");
-        console.log(response);
-        console.log();
-
-        // Try to extract JSON from response
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                const parsed = JSON.parse(jsonMatch[0]);
-                console.log("Parsed response:");
-                console.log(JSON.stringify(parsed, null, 2));
-                console.log();
-
-                if (parsed.result?.serverInfo) {
-                    console.log("✓ Server initialized successfully!");
-                    console.log(`  Name: ${parsed.result.serverInfo.name}`);
-                    console.log(`  Version: ${parsed.result.serverInfo.version}`);
-
-                    if (parsed.result.capabilities?.tools) {
-                        console.log("  Tools capability: enabled");
-                    }
-                } else if (parsed.error) {
-                    console.log("✗ Server returned error:");
-                    console.log(`  Code: ${parsed.error.code}`);
-                    console.log(`  Message: ${parsed.error.message}`);
-                }
-            } catch {
-                console.log("Could not parse JSON response");
-            }
-        }
-    } else {
-        console.log("No response received within timeout");
-    }
-
-    // Clean up
     proc.kill();
 
-    // Read any stderr output
+    let stderr = "";
     const stderrReader = proc.stderr.getReader();
     const { value: stderrValue } = await stderrReader.read();
-    if (stderrValue) {
-        const stderr = decoder.decode(stderrValue);
-        if (stderr.trim()) {
-            console.log("\nStderr output:");
-            console.log(stderr);
-        }
-    }
+    if (stderrValue) stderr = decoder.decode(stderrValue);
     stderrReader.releaseLock();
 
-    console.log("\n=== Test Complete ===");
+    return { ok: !!response, response, stderr };
 }
 
-main().catch(console.error);
+describe("MCP Server Smoke Test", () => {
+    test("server starts and responds to initialize", async () => {
+        const { ok, response, stderr, error } = await runMcpSmokeTest();
+
+        if (!ok || !response) {
+            if (VERBOSE || process.env.CI) {
+                console.error("MCP smoke test failed.");
+                if (error) console.error("Error:", error);
+                if (response) console.error("Response:", response);
+                if (stderr) console.error("Stderr:", stderr);
+            }
+            expect(response).toBeTruthy();
+        }
+
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        expect(jsonMatch).toBeTruthy();
+
+        const jsonStr = jsonMatch?.[0];
+        if (jsonStr === undefined) throw new Error("Expected JSON body in response");
+        const parsed = JSON.parse(jsonStr);
+        expect(parsed.result?.serverInfo).toBeDefined();
+        expect(parsed.result.serverInfo.name).toBe("catalog-generator");
+        expect(parsed.result.serverInfo.version).toBe("1.0.0");
+        expect(parsed.result.capabilities?.tools).toBeDefined();
+    });
+});

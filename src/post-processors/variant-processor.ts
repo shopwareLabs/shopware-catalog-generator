@@ -8,16 +8,16 @@
  * - Applies price modifiers per variant
  */
 
+
+import { PropertyCache } from "../property-cache.js";
 import type { CachedPropertyGroup, VariantConfig } from "../types/index.js";
+import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
-
-import { PropertyCache } from "../property-cache.js";
-import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 interface PropertyOption {
     id: string;
@@ -73,7 +73,7 @@ class VariantProcessorImpl implements PostProcessor {
             };
         }
 
-        console.log(`    Creating variants for ${variantProducts.length} products...`);
+        logger.cli(`    Creating variants for ${variantProducts.length} products...`);
 
         for (const product of variantProducts) {
             const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
@@ -88,7 +88,7 @@ class VariantProcessorImpl implements PostProcessor {
 
             if (options.dryRun) {
                 const groupNames = variantConfigs.map((c) => c.group).join(" + ");
-                console.log(`      [DRY RUN] ${product.name} -> ${groupNames} variants`);
+                logger.cli(`      [DRY RUN] ${product.name} -> ${groupNames} variants`);
                 processed++;
                 continue;
             }
@@ -98,7 +98,7 @@ class VariantProcessorImpl implements PostProcessor {
                 const resolvedGroups = await this.resolvePropertyGroups(context, variantConfigs);
 
                 if (resolvedGroups.length === 0) {
-                    console.log(`      ⊘ ${product.name}: No suitable property groups found`);
+                    logger.cli(`      ⊘ ${product.name}: No suitable property groups found`);
                     skipped++;
                     continue;
                 }
@@ -106,7 +106,7 @@ class VariantProcessorImpl implements PostProcessor {
                 // Check if product already has variants or configurator settings
                 const hasVariants = await this.productHasVariants(context, product.id);
                 if (hasVariants) {
-                    console.log(`      ⊘ ${product.name}: Already configured as variant product`);
+                    logger.cli(`      ⊘ ${product.name}: Already configured as variant product`);
                     skipped++;
                     continue;
                 }
@@ -120,7 +120,7 @@ class VariantProcessorImpl implements PostProcessor {
 
                 if (variantCount > 0) {
                     const groupNames = resolvedGroups.map((g) => g.group.name).join(" + ");
-                    console.log(
+                    logger.cli(
                         `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`
                     );
                     processed++;
@@ -274,7 +274,7 @@ class VariantProcessorImpl implements PostProcessor {
             return existingGroup;
         }
 
-        console.log(
+        logger.cli(
             `      Creating variant property group "${groupName}" with ${cachedGroup.options.length} options...`
         );
 
@@ -555,7 +555,7 @@ class VariantProcessorImpl implements PostProcessor {
             const errorText = await updateParentResponse.text();
 
             if (errorText.includes("Duplicate entry") || errorText.includes("1062")) {
-                console.log(`      ⊘ ${product.name}: Configurator settings already exist`);
+                logger.cli(`      ⊘ ${product.name}: Configurator settings already exist`);
                 return 0;
             }
 
@@ -665,7 +665,7 @@ class VariantProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            console.log(`    [DRY RUN] Would delete variants for products in SalesChannel`);
+            logger.cli(`    [DRY RUN] Would delete variants for products in SalesChannel`);
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -689,12 +689,12 @@ class VariantProcessorImpl implements PostProcessor {
             );
 
             if (parentProducts.length === 0) {
-                console.log(`    No products found in SalesChannel`);
+                logger.cli(`    No products found in SalesChannel`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const parentIds = parentProducts.map((p) => p.id);
-            console.log(`    Found ${parentIds.length} parent products in SalesChannel`);
+            logger.cli(`    Found ${parentIds.length} parent products in SalesChannel`);
 
             // Step 2: Find all child products (variants) with these parentIds
             const variants = await context.api.searchEntities<{ id: string }>(
@@ -704,15 +704,15 @@ class VariantProcessorImpl implements PostProcessor {
             );
 
             if (variants.length > 0) {
-                console.log(`    Found ${variants.length} variant products`);
+                logger.cli(`    Found ${variants.length} variant products`);
 
                 // Step 3: Delete child products
                 const variantIds = variants.map((v) => v.id);
                 await context.api.deleteEntities("product", variantIds);
                 deleted = variantIds.length;
-                console.log(`    ✓ Deleted ${deleted} variant products`);
+                logger.cli(`    ✓ Deleted ${deleted} variant products`);
             } else {
-                console.log(`    No variant products found`);
+                logger.cli(`    No variant products found`);
             }
 
             // Step 4: Clear configuratorSettings from parent products
@@ -750,7 +750,7 @@ class VariantProcessorImpl implements PostProcessor {
                         // Settings might not exist, skip
                     }
                 }
-                console.log(
+                logger.cli(
                     `    ✓ Cleared configurator settings from ${parentsToUpdate.length} parent products`
                 );
             }

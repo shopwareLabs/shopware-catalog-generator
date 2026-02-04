@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 import type {
     CategoryNode,
     ProductInput,
@@ -11,8 +13,8 @@ import type {
 
 import {
     buildCategoryPath,
-    capitalizeString,
     CATEGORY_PATH_SEPARATOR,
+    capitalizeString,
     generateSubdomainUrl,
     generateUUID,
     logger,
@@ -170,23 +172,74 @@ export class ShopwareHydrator extends ShopwareClient {
     }
 
     /**
-     * Create property groups with options
+     * Search for existing property groups by name to enable idempotent creation.
+     * Returns a map of lowercase group name -> { id, options: Map<lowercase name, id> }
+     */
+    private async findExistingPropertyGroups(): Promise<
+        Map<string, { id: string; options: Map<string, string> }>
+    > {
+        const result = new Map<string, { id: string; options: Map<string, string> }>();
+
+        try {
+            const response = await this.apiClient.post<
+                SearchResponse<{
+                    id: string;
+                    name: string;
+                    options: Array<{ id: string; name: string }>;
+                }>
+            >("search/property-group", {
+                limit: 100,
+                associations: {
+                    options: { sort: [{ field: "position", order: "ASC" }] },
+                },
+            });
+
+            if (!response.ok || !response.data?.data) {
+                return result;
+            }
+
+            for (const group of response.data.data) {
+                const optionMap = new Map<string, string>();
+                for (const opt of group.options || []) {
+                    optionMap.set(opt.name.toLowerCase(), opt.id);
+                }
+                result.set(group.name.toLowerCase(), { id: group.id, options: optionMap });
+            }
+        } catch (error) {
+            logger.warn("Failed to fetch existing property groups for idempotency check", error);
+        }
+
+        return result;
+    }
+
+    /**
+     * Create property groups with options (idempotent).
+     *
+     * This method queries existing property groups and reuses their IDs
+     * to prevent duplicate creation on repeated runs.
      */
     async hydrateEnvWithPropertyGroups(propertyGroups: PropertyGroup[]): Promise<PropertyGroup[]> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return [];
         }
 
+        // Fetch existing groups to reuse IDs (idempotency)
+        const existingGroups = await this.findExistingPropertyGroups();
+
         const propertyGroupsPayload = propertyGroups.map((group) => {
+            const existing = existingGroups.get(group.name.toLowerCase());
+            const groupId = group.id || existing?.id || generateUUID();
+
             return {
-                id: group.id || generateUUID(),
+                id: groupId,
                 name: group.name,
                 description: group.description,
                 displayType: group.displayType,
                 options: group.options.map((option: PropertyOption) => {
+                    // Reuse existing option ID if available
+                    const existingOptionId = existing?.options.get(option.name.toLowerCase());
                     return {
-                        id: option.id || generateUUID(),
+                        id: option.id || existingOptionId || generateUUID(),
                         name: option.name,
                         colorHexCode: option.colorHexCode,
                     };
@@ -211,6 +264,7 @@ export class ShopwareHydrator extends ShopwareClient {
         } else {
             logger.debug("Property groups sync successful", {
                 status: propertyGroupResponse.status,
+                reusedExisting: existingGroups.size,
             });
         }
 
@@ -235,7 +289,6 @@ export class ShopwareHydrator extends ShopwareClient {
         navigationCategoryId: string
     ): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
@@ -325,7 +378,6 @@ export class ShopwareHydrator extends ShopwareClient {
         salesChannelName: string = "Storefront"
     ): Promise<number | false> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return false;
         }
 
@@ -492,13 +544,13 @@ export class ShopwareHydrator extends ShopwareClient {
 
         const sanitizedName = validation.sanitized;
         if (validation.warning) {
-            console.warn(validation.warning);
+            logger.warn(validation.warning);
         }
 
         // Check if SalesChannel already exists
         const existing = await this.findSalesChannelByName(sanitizedName);
         if (existing) {
-            console.log(`Using existing SalesChannel "${existing.name}" (ID: ${existing.id})`);
+            logger.cli(`Using existing SalesChannel "${existing.name}" (ID: ${existing.id})`);
             return { ...existing, isNew: false };
         }
 
@@ -512,7 +564,7 @@ export class ShopwareHydrator extends ShopwareClient {
         if (!rootCategory.isNew) {
             const deletedCount = await this.deleteChildCategories(rootCategory.id);
             if (deletedCount > 0) {
-                console.log(`Cleaned up ${deletedCount} old categories from existing root`);
+                logger.info(`Cleaned up ${deletedCount} old categories from existing root`);
             }
         }
 
@@ -562,14 +614,14 @@ export class ShopwareHydrator extends ShopwareClient {
 
         await this.apiClient.post<{ data: SalesChannelFull }>("sales-channel?_response", payload);
 
-        console.log(`Created SalesChannel "${sanitizedName}" with URL: ${baseUrl}`);
+        logger.cli(`Created SalesChannel "${sanitizedName}" with URL: ${baseUrl}`);
 
         // Assign the same theme as Storefront
         const storefrontThemeId = await this.getThemeForSalesChannel(storefront.id);
         if (storefrontThemeId) {
             await this.assignThemeToSalesChannel(salesChannelId, storefrontThemeId);
         } else {
-            console.warn(
+            logger.warn(
                 "No theme found for Storefront - new SalesChannel may not display correctly"
             );
         }
@@ -637,7 +689,7 @@ export class ShopwareHydrator extends ShopwareClient {
 
         if (existingResponse.ok && existingResponse.data?.data?.[0]) {
             const existingCategory = existingResponse.data.data[0];
-            console.log(
+            logger.info(
                 `Reusing existing root category: ${categoryName} (ID: ${existingCategory.id})`
             );
             return { ...existingCategory, name: categoryName, isNew: false };
@@ -655,7 +707,7 @@ export class ShopwareHydrator extends ShopwareClient {
             active: true,
         });
 
-        console.log(`Created root category: ${categoryName}`);
+        logger.cli(`Created root category: ${categoryName}`);
         return { ...categoryResponse.data.data, isNew: true };
     }
 
@@ -686,19 +738,22 @@ export class ShopwareHydrator extends ShopwareClient {
 
         // Delete all child categories
         const deletePayload = children.map((c) => ({ id: c.id }));
-        await this.apiClient.post("_action/sync", [
-            {
-                action: "delete",
+        await this.apiClient.post("_action/sync", {
+            deleteChildCategories: {
                 entity: "category",
+                action: "delete",
                 payload: deletePayload,
             },
-        ]);
+        });
 
         return children.length;
     }
 
     /**
-     * Create a category tree in Shopware.
+     * Create a category tree in Shopware (idempotent).
+     *
+     * This method first checks for existing categories with matching names/paths
+     * and reuses their IDs to prevent duplicate creation on repeated runs.
      *
      * @param tree - The category tree structure
      * @param parentId - Parent category ID (typically the SalesChannel's navigationCategoryId)
@@ -712,6 +767,13 @@ export class ShopwareHydrator extends ShopwareClient {
     ): Promise<Map<string, string>> {
         if (!this.isAuthenticated()) {
             throw new Error("Client is not authenticated");
+        }
+
+        // Check for existing categories and reuse their IDs (idempotency)
+        // This modifies tree nodes in-place by setting node.id for matches
+        const existingMap = await this.getExistingCategoryMap(parentId, tree);
+        if (existingMap.size > 0) {
+            logger.debug("Found existing categories for reuse", { count: existingMap.size });
         }
 
         const categoryIdMap = new Map<string, string>();
@@ -751,7 +813,7 @@ export class ShopwareHydrator extends ShopwareClient {
             },
         });
 
-        console.log(`Created ${categoryPayload.length} categories (status: ${response.status})`);
+        logger.cli(`Created ${categoryPayload.length} categories (status: ${response.status})`);
 
         // Upload category images
         await this.uploadCategoryImages(flatCategories.map((f) => f.category));
@@ -875,21 +937,14 @@ export class ShopwareHydrator extends ShopwareClient {
     /**
      * Generate a deterministic visibility ID from product and sales channel IDs.
      * This ensures idempotent upserts - re-running won't create duplicate visibilities.
+     *
+     * Uses SHA256 hash for collision resistance (XOR is not collision-resistant).
      */
     private generateVisibilityId(productId: string, salesChannelId: string): string {
-        // XOR the two UUIDs to create a deterministic result
-        // Both IDs are 32 hex chars (without dashes), XOR each pair
-        const p = productId.replace(/-/g, "");
-        const s = salesChannelId.replace(/-/g, "");
-        let result = "";
-        for (let i = 0; i < 32; i++) {
-            const pChar = p.charAt(i);
-            const sChar = s.charAt(i);
-            const pVal = parseInt(pChar || "0", 16);
-            const sVal = parseInt(sChar || "0", 16);
-            result += (pVal ^ sVal).toString(16);
-        }
-        return result;
+        const hash = createHash("sha256")
+            .update(`${productId}:${salesChannelId}`)
+            .digest("hex");
+        return hash.slice(0, 32); // Shopware UUID format (32 hex chars)
     }
 
     /**
@@ -902,7 +957,7 @@ export class ShopwareHydrator extends ShopwareClient {
             return;
         }
 
-        console.log(`Uploading ${categoriesWithImages.length} category images...`);
+        logger.info(`Uploading ${categoriesWithImages.length} category images...`);
 
         const productMediaFolderId = await this.getProductMediaFolderId();
 
@@ -939,7 +994,150 @@ export class ShopwareHydrator extends ShopwareClient {
                 mediaId,
             });
 
-            console.log(`Uploaded image for category "${category.name}"`);
+            logger.cli(`Uploaded image for category "${category.name}"`);
+        }
+    }
+
+    // =========================================================================
+    // Property Option Media Helpers
+    // =========================================================================
+
+    /**
+     * Get or create a media folder by name
+     */
+    async getOrCreateMediaFolder(folderName: string): Promise<string | null> {
+        if (!this.isAuthenticated()) return null;
+
+        try {
+            // Search for existing folder
+            const response = await this.apiClient.post<{
+                data?: Array<{ id: string; name: string }>;
+            }>("search/media-folder", {
+                filter: [{ type: "equals", field: "name", value: folderName }],
+                limit: 1,
+            });
+
+            const existing = response.data?.data?.[0];
+            if (existing) {
+                return existing.id;
+            }
+
+            // Get default configuration to use for the folder
+            const configResponse = await this.apiClient.post<{
+                data?: Array<{ id: string }>;
+            }>("search/media-default-folder", {
+                filter: [{ type: "equals", field: "entity", value: "product" }],
+                limit: 1,
+            });
+            const defaultConfig = configResponse.data?.data?.[0];
+
+            // Create new folder
+            const folderId = generateUUID();
+            await this.apiClient.post("_action/sync", {
+                createMediaFolder: {
+                    entity: "media_folder",
+                    action: "upsert",
+                    payload: [
+                        {
+                            id: folderId,
+                            name: folderName,
+                            useParentConfiguration: true,
+                            ...(defaultConfig && {
+                                configurationId: defaultConfig.id,
+                            }),
+                        },
+                    ],
+                },
+            });
+
+            return folderId;
+        } catch (error) {
+            logger.warn(
+                `Failed to get/create media folder: ${error instanceof Error ? error.message : String(error)}`
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Create a media entity in a folder
+     */
+    async createMedia(folderId: string, _fileName: string): Promise<string | null> {
+        if (!this.isAuthenticated()) return null;
+
+        try {
+            const mediaId = generateUUID();
+            await this.apiClient.post("_action/sync", {
+                createMedia: {
+                    entity: "media",
+                    action: "upsert",
+                    payload: [
+                        {
+                            id: mediaId,
+                            private: false,
+                            mediaFolderId: folderId,
+                        },
+                    ],
+                },
+            });
+            return mediaId;
+        } catch (error) {
+            logger.warn(
+                `Failed to create media: ${error instanceof Error ? error.message : String(error)}`
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Upload a file to an existing media entity
+     */
+    async uploadMediaFile(
+        mediaId: string,
+        buffer: Buffer,
+        extension: string
+    ): Promise<boolean> {
+        if (!this.isAuthenticated()) return false;
+
+        try {
+            const contentType =
+                extension === "svg" ? "image/svg+xml" : `image/${extension}`;
+
+            await this.apiClient.post(
+                `_action/media/${mediaId}/upload?extension=${extension}&fileName=color-option-${mediaId}`,
+                buffer,
+                { headers: { "Content-Type": contentType } }
+            );
+            return true;
+        } catch (error) {
+            logger.warn(
+                `Failed to upload media file: ${error instanceof Error ? error.message : String(error)}`
+            );
+            return false;
+        }
+    }
+
+    /**
+     * Update a property option with a media ID (and clear hex code)
+     */
+    async updatePropertyOptionMedia(
+        optionId: string,
+        mediaId: string
+    ): Promise<boolean> {
+        if (!this.isAuthenticated()) return false;
+
+        try {
+            // Set mediaId AND clear colorHexCode - Shopware shows hex over image if both set
+            await this.apiClient.patch(`property-group-option/${optionId}`, {
+                mediaId,
+                colorHexCode: null,
+            });
+            return true;
+        } catch (error) {
+            logger.warn(
+                `Failed to update property option media: ${error instanceof Error ? error.message : String(error)}`
+            );
+            return false;
         }
     }
 }

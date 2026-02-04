@@ -1,3 +1,4 @@
+import { logger } from "../utils/index.js";
 import { ShopwareClient } from "./client.js";
 
 /** Common Shopware search response structure */
@@ -16,7 +17,6 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteProductsByCategory(categoryName: string): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
@@ -37,7 +37,7 @@ export class ShopwareCleanup extends ShopwareClient {
 
         const category = categoryResponse.data.data[0];
         if (categoryResponse.data.total === 0 || !category) {
-            console.log(`Category "${categoryName}" not found.`);
+            logger.info(`Category "${categoryName}" not found.`);
             return 0;
         }
 
@@ -54,11 +54,11 @@ export class ShopwareCleanup extends ShopwareClient {
         const products = productsResponse.data.data;
 
         if (products.length === 0) {
-            console.log(`No products found in category "${categoryName}".`);
+            logger.info(`No products found in category "${categoryName}".`);
             return 0;
         }
 
-        console.log(`Deleting ${products.length} products from "${categoryName}"...`);
+        logger.info(`Deleting ${products.length} products from "${categoryName}"...`);
 
         // Delete products using sync API
         const deletePayload = products.map((p) => ({ id: p.id }));
@@ -71,7 +71,7 @@ export class ShopwareCleanup extends ShopwareClient {
             },
         });
 
-        console.log(`Deleted ${products.length} products.`);
+        logger.info(`Deleted ${products.length} products.`);
         return products.length;
     }
 
@@ -81,7 +81,6 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteCategory(categoryName: string): Promise<boolean> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return false;
         }
 
@@ -101,14 +100,14 @@ export class ShopwareCleanup extends ShopwareClient {
 
         const category = categoryResponse.data.data[0];
         if (categoryResponse.data.total === 0 || !category) {
-            console.log(`Category "${categoryName}" not found.`);
+            logger.info(`Category "${categoryName}" not found.`);
             return false;
         }
 
         const categoryId = category.id;
 
         await this.apiClient.delete(`category/${categoryId}`);
-        console.log(`Deleted category "${categoryName}".`);
+        logger.info(`Deleted category "${categoryName}".`);
         return true;
     }
 
@@ -118,7 +117,6 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deletePropertyGroups(groupNames: string[]): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
@@ -147,7 +145,7 @@ export class ShopwareCleanup extends ShopwareClient {
                 });
 
                 deletedCount += groups.length;
-                console.log(`Deleted ${groups.length} property group(s) named "${name}".`);
+                logger.info(`Deleted ${groups.length} property group(s) named "${name}".`);
             }
         }
 
@@ -160,7 +158,6 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteAllPropertyGroups(): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
@@ -173,11 +170,11 @@ export class ShopwareCleanup extends ShopwareClient {
         const groups = groupResponse.data.data;
 
         if (groups.length === 0) {
-            console.log("No property groups found.");
+            logger.info("No property groups found.");
             return 0;
         }
 
-        console.log(`Deleting ${groups.length} property groups...`);
+        logger.info(`Deleting ${groups.length} property groups...`);
 
         const deletePayload = groups.map((g) => ({ id: g.id }));
 
@@ -189,7 +186,7 @@ export class ShopwareCleanup extends ShopwareClient {
             },
         });
 
-        console.log(`Deleted ${groups.length} property groups.`);
+        logger.info(`Deleted ${groups.length} property groups.`);
         return groups.length;
     }
 
@@ -226,14 +223,13 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteOrphanedProductMedia(dryRun = false): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
         // Get the Product Media folder
         const productMediaFolderId = await this.getProductMediaFolderId();
 
-        console.log("Searching for orphaned product media...");
+        logger.info("Searching for orphaned product media...");
 
         // Build filter: media in Product Media folder OR media with no folder
         const filters: Record<string, unknown>[] = [];
@@ -264,7 +260,7 @@ export class ShopwareCleanup extends ShopwareClient {
             },
         });
 
-        console.log(`Found ${allMedia.length} media files (in Product Media folder or no folder)`);
+        logger.info(`Found ${allMedia.length} media files (in Product Media folder or no folder)`);
 
         // Filter to media that have NO productMedia associations (orphaned)
         const orphanedMedia = allMedia.filter(
@@ -272,27 +268,27 @@ export class ShopwareCleanup extends ShopwareClient {
         );
 
         const usedCount = allMedia.length - orphanedMedia.length;
-        console.log(`${usedCount} media files are linked to products (keeping)`);
-        console.log(`${orphanedMedia.length} media files are orphaned (no product link)`);
+        logger.info(`${usedCount} media files are linked to products (keeping)`);
+        logger.info(`${orphanedMedia.length} media files are orphaned (no product link)`);
 
         if (orphanedMedia.length === 0) {
-            console.log("No orphaned media to delete.");
+            logger.info("No orphaned media to delete.");
             return 0;
         }
 
         if (dryRun) {
-            console.log(`[DRY RUN] Would delete ${orphanedMedia.length} orphaned media files:`);
+            logger.info(`[DRY RUN] Would delete ${orphanedMedia.length} orphaned media files:`);
             for (const media of orphanedMedia.slice(0, 20)) {
                 const folder = media.mediaFolderId ? "Product Media" : "no folder";
-                console.log(`  - ${media.fileName} (${folder})`);
+                logger.info(`  - ${media.fileName} (${folder})`);
             }
             if (orphanedMedia.length > 20) {
-                console.log(`  ... and ${orphanedMedia.length - 20} more`);
+                logger.info(`  ... and ${orphanedMedia.length - 20} more`);
             }
             return orphanedMedia.length;
         }
 
-        console.log(`Deleting ${orphanedMedia.length} orphaned media files...`);
+        logger.info(`Deleting ${orphanedMedia.length} orphaned media files...`);
 
         // Delete one by one to handle errors gracefully
         let deleted = 0;
@@ -301,18 +297,18 @@ export class ShopwareCleanup extends ShopwareClient {
                 await this.apiClient.delete(`media/${media.id}`);
                 deleted++;
                 const folder = media.mediaFolderId ? "Product Media" : "no folder";
-                console.log(`  Deleted: ${media.fileName} (${folder})`);
+                logger.info(`  Deleted: ${media.fileName} (${folder})`);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 if (message.includes("409") || message.includes("in use")) {
-                    console.log(`  Skipped (still in use elsewhere): ${media.fileName}`);
+                    logger.info(`  Skipped (still in use elsewhere): ${media.fileName}`);
                 } else {
-                    console.log(`  Failed: ${media.fileName} - ${message}`);
+                    logger.info(`  Failed: ${media.fileName} - ${message}`);
                 }
             }
         }
 
-        console.log(`Deleted ${deleted}/${orphanedMedia.length} orphaned media files.`);
+        logger.info(`Deleted ${deleted}/${orphanedMedia.length} orphaned media files.`);
         return deleted;
     }
 
@@ -340,7 +336,6 @@ export class ShopwareCleanup extends ShopwareClient {
         name: string
     ): Promise<{ id: string; navigationCategoryId: string } | null> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return null;
         }
 
@@ -378,11 +373,10 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteProductsInSalesChannel(salesChannelId: string): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
-        console.log(`Finding products in SalesChannel...`);
+        logger.info(`Finding products in SalesChannel...`);
 
         // Find all products with visibility in this SalesChannel
         const productsResponse = await this.apiClient.post<
@@ -397,11 +391,11 @@ export class ShopwareCleanup extends ShopwareClient {
         const products = productsResponse.data.data;
 
         if (products.length === 0) {
-            console.log(`No products found in SalesChannel.`);
+            logger.info(`No products found in SalesChannel.`);
             return 0;
         }
 
-        console.log(`Deleting ${products.length} products from SalesChannel...`);
+        logger.info(`Deleting ${products.length} products from SalesChannel...`);
 
         // Delete products using sync API
         const deletePayload = products.map((p) => ({ id: p.id }));
@@ -414,7 +408,7 @@ export class ShopwareCleanup extends ShopwareClient {
             },
         });
 
-        console.log(`Deleted ${products.length} products.`);
+        logger.info(`Deleted ${products.length} products.`);
         return products.length;
     }
 
@@ -425,11 +419,10 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteCategoriesUnderRoot(rootCategoryId: string): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
-        console.log(`Finding categories under root category...`);
+        logger.info(`Finding categories under root category...`);
 
         // Find all child categories (direct and nested)
         const categoriesResponse = await this.apiClient.post<
@@ -451,11 +444,11 @@ export class ShopwareCleanup extends ShopwareClient {
         const categories = categoriesResponse.data.data;
 
         if (categories.length === 0) {
-            console.log(`No child categories found.`);
+            logger.info(`No child categories found.`);
             return 0;
         }
 
-        console.log(`Deleting ${categories.length} categories...`);
+        logger.info(`Deleting ${categories.length} categories...`);
 
         // Delete categories using sync API (deepest first would be ideal, but sync handles it)
         const deletePayload = categories.map((c) => ({ id: c.id }));
@@ -468,7 +461,7 @@ export class ShopwareCleanup extends ShopwareClient {
             },
         });
 
-        console.log(`Deleted ${categories.length} categories.`);
+        logger.info(`Deleted ${categories.length} categories.`);
         return categories.length;
     }
 
@@ -479,17 +472,16 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteSalesChannel(salesChannelId: string): Promise<boolean> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return false;
         }
 
         try {
             await this.apiClient.delete(`sales-channel/${salesChannelId}`);
-            console.log(`Deleted SalesChannel.`);
+            logger.info(`Deleted SalesChannel.`);
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            console.error(`Failed to delete SalesChannel: ${message}`);
+            logger.error(`Failed to delete SalesChannel: ${message}`);
             return false;
         }
     }
@@ -501,17 +493,16 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteRootCategory(categoryId: string): Promise<boolean> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return false;
         }
 
         try {
             await this.apiClient.delete(`category/${categoryId}`);
-            console.log(`Deleted root category.`);
+            logger.info(`Deleted root category.`);
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            console.error(`Failed to delete root category: ${message}`);
+            logger.error(`Failed to delete root category: ${message}`);
             return false;
         }
     }
@@ -536,7 +527,7 @@ export class ShopwareCleanup extends ShopwareClient {
         let page = 1;
         let hasMore = true;
 
-        console.log(`  [Pagination] Starting fetch from ${endpoint}...`);
+        logger.info(`  [Pagination] Starting fetch from ${endpoint}...`);
 
         while (hasMore) {
             const requestBody = {
@@ -548,14 +539,14 @@ export class ShopwareCleanup extends ShopwareClient {
                 "total-count-mode": 1,
             };
 
-            console.log(`  [Pagination] Requesting page ${page} (limit: ${pageSize})...`);
+            logger.info(`  [Pagination] Requesting page ${page} (limit: ${pageSize})...`);
 
             const response = await this.apiClient.post<SearchResponse<T>>(endpoint, requestBody);
 
             const items = response.data.data;
             const total = response.data.total;
 
-            console.log(
+            logger.info(
                 `  [Pagination] Page ${page}: received ${items.length} items, total reported: ${total}`
             );
 
@@ -565,19 +556,19 @@ export class ShopwareCleanup extends ShopwareClient {
             hasMore = allItems.length < total && items.length > 0;
 
             if (hasMore) {
-                console.log(`  [Pagination] Fetched ${allItems.length}/${total}, continuing...`);
+                logger.info(`  [Pagination] Fetched ${allItems.length}/${total}, continuing...`);
             }
 
             page++;
 
             // Safety: prevent infinite loops
             if (page > 100) {
-                console.warn(`  [Pagination] Safety limit reached at page 100, stopping.`);
+                logger.warn(`  [Pagination] Safety limit reached at page 100, stopping.`);
                 break;
             }
         }
 
-        console.log(`  [Pagination] Complete: ${allItems.length} total items fetched.`);
+        logger.info(`  [Pagination] Complete: ${allItems.length} total items fetched.`);
         return allItems;
     }
 
@@ -592,7 +583,7 @@ export class ShopwareCleanup extends ShopwareClient {
             options?: Array<{ id: string }>;
         }
 
-        console.log("  Collecting used property options from products...");
+        logger.info("  Collecting used property options from products...");
         const allProducts = await this.fetchAllPages<ProductWithPropertiesAndOptions>(
             "search/product",
             {
@@ -628,10 +619,10 @@ export class ShopwareCleanup extends ShopwareClient {
             }
         }
 
-        console.log(
+        logger.info(
             `  Found ${usedOptionIds.size} property options used by ${allProducts.length} products`
         );
-        console.log(
+        logger.info(
             `    (${propertiesCount} from properties, ${optionsCount} from variant options)`
         );
         return usedOptionIds;
@@ -644,11 +635,10 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteUnusedPropertyGroups(dryRun = false): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
-        console.log("Searching for unused property groups...");
+        logger.info("Searching for unused property groups...");
 
         // Step 1: Get ALL property groups with their options (paginated)
         interface PropertyGroupItem {
@@ -660,10 +650,10 @@ export class ShopwareCleanup extends ShopwareClient {
         const allGroups = await this.fetchAllPages<PropertyGroupItem>("search/property-group", {
             associations: { options: {} },
         });
-        console.log(`Found ${allGroups.length} property groups`);
+        logger.info(`Found ${allGroups.length} property groups`);
 
         if (allGroups.length === 0) {
-            console.log("No property groups found.");
+            logger.info("No property groups found.");
             return 0;
         }
 
@@ -680,27 +670,27 @@ export class ShopwareCleanup extends ShopwareClient {
             return !hasUsedOption;
         });
 
-        console.log(
+        logger.info(
             `${unusedGroups.length} property groups are unused (no options linked to products)`
         );
 
         if (unusedGroups.length === 0) {
-            console.log("No unused property groups to delete.");
+            logger.info("No unused property groups to delete.");
             return 0;
         }
 
         // Log which groups will be deleted
         for (const group of unusedGroups) {
             const optCount = group.options?.length ?? 0;
-            console.log(`  - ${group.name} (${optCount} options)`);
+            logger.info(`  - ${group.name} (${optCount} options)`);
         }
 
         if (dryRun) {
-            console.log(`[DRY RUN] Would delete ${unusedGroups.length} unused property groups`);
+            logger.info(`[DRY RUN] Would delete ${unusedGroups.length} unused property groups`);
             return unusedGroups.length;
         }
 
-        console.log(`Deleting ${unusedGroups.length} unused property groups...`);
+        logger.info(`Deleting ${unusedGroups.length} unused property groups...`);
 
         // Delete in batches
         const deleteBatchSize = 50;
@@ -720,11 +710,11 @@ export class ShopwareCleanup extends ShopwareClient {
 
             deleted += batch.length;
             if (unusedGroups.length > deleteBatchSize) {
-                console.log(`  Deleted ${deleted}/${unusedGroups.length}...`);
+                logger.info(`  Deleted ${deleted}/${unusedGroups.length}...`);
             }
         }
 
-        console.log(`Deleted ${unusedGroups.length} unused property groups.`);
+        logger.info(`Deleted ${unusedGroups.length} unused property groups.`);
         return unusedGroups.length;
     }
 
@@ -736,11 +726,10 @@ export class ShopwareCleanup extends ShopwareClient {
      */
     async deleteUnusedPropertyOptions(dryRun = false): Promise<number> {
         if (!this.isAuthenticated()) {
-            console.error("Client is not authenticated.");
             return 0;
         }
 
-        console.log("Searching for unused property options...");
+        logger.info("Searching for unused property options...");
 
         // Step 1: Get ALL property options (paginated)
         interface PropertyOptionItem {
@@ -753,10 +742,10 @@ export class ShopwareCleanup extends ShopwareClient {
             "search/property-group-option",
             { associations: { group: {} } }
         );
-        console.log(`Found ${allOptions.length} total property options`);
+        logger.info(`Found ${allOptions.length} total property options`);
 
         if (allOptions.length === 0) {
-            console.log("No property options found.");
+            logger.info("No property options found.");
             return 0;
         }
 
@@ -766,10 +755,10 @@ export class ShopwareCleanup extends ShopwareClient {
         // Step 3: Find unused options
         const unusedOptions = allOptions.filter((opt) => !usedOptionIds.has(opt.id));
 
-        console.log(`${unusedOptions.length} property options are unused`);
+        logger.info(`${unusedOptions.length} property options are unused`);
 
         if (unusedOptions.length === 0) {
-            console.log("No unused property options to delete.");
+            logger.info("No unused property options to delete.");
             return 0;
         }
 
@@ -783,15 +772,15 @@ export class ShopwareCleanup extends ShopwareClient {
         }
 
         for (const [groupName, options] of byGroup) {
-            console.log(`  - ${groupName}: ${options.length} unused options`);
+            logger.info(`  - ${groupName}: ${options.length} unused options`);
         }
 
         if (dryRun) {
-            console.log(`[DRY RUN] Would delete ${unusedOptions.length} unused property options`);
+            logger.info(`[DRY RUN] Would delete ${unusedOptions.length} unused property options`);
             return unusedOptions.length;
         }
 
-        console.log(`Deleting ${unusedOptions.length} unused property options...`);
+        logger.info(`Deleting ${unusedOptions.length} unused property options...`);
 
         // Delete in batches
         const deleteBatchSize = 100;
@@ -811,11 +800,11 @@ export class ShopwareCleanup extends ShopwareClient {
 
             deleted += batch.length;
             if (unusedOptions.length > deleteBatchSize) {
-                console.log(`  Deleted ${deleted}/${unusedOptions.length}...`);
+                logger.info(`  Deleted ${deleted}/${unusedOptions.length}...`);
             }
         }
 
-        console.log(`Deleted ${unusedOptions.length} unused property options.`);
+        logger.info(`Deleted ${unusedOptions.length} unused property options.`);
         return unusedOptions.length;
     }
 
@@ -855,11 +844,11 @@ export class ShopwareCleanup extends ShopwareClient {
         // Find the SalesChannel
         const salesChannel = await this.getSalesChannelByName(salesChannelName);
         if (!salesChannel) {
-            console.log(`SalesChannel "${salesChannelName}" not found.`);
+            logger.info(`SalesChannel "${salesChannelName}" not found.`);
             return result;
         }
 
-        console.log(`Found SalesChannel "${salesChannelName}" (ID: ${salesChannel.id})`);
+        logger.info(`Found SalesChannel "${salesChannelName}" (ID: ${salesChannel.id})`);
 
         // Delete all products in this SalesChannel
         result.products = await this.deleteProductsInSalesChannel(salesChannel.id);
@@ -875,7 +864,7 @@ export class ShopwareCleanup extends ShopwareClient {
         // Manufacturer cleanup is now handled by ManufacturerProcessor
         // Use --processors=manufacturers for SalesChannel-scoped manufacturer cleanup
         if (options.deleteManufacturers) {
-            console.log(
+            logger.info(
                 "Note: Manufacturer cleanup should be done via --processors=manufacturers for proper SalesChannel scoping."
             );
         }

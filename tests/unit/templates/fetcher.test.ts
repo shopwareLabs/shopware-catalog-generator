@@ -1,9 +1,14 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
 import { DataCache } from "../../../src/cache.js";
-import { TemplateFetcher } from "../../../src/templates/index.js";
+import { createTemplateFetcherFromEnv, TemplateFetcher } from "../../../src/templates/index.js";
+import { logger } from "../../../src/utils/index.js";
+
+// Suppress console output during tests
+const originalCli = logger.cli.bind(logger);
+const mockCli = mock(() => {});
 
 const TEST_BASE_DIR = "./test-template-temp";
 const TEST_CACHE_DIR = `${TEST_BASE_DIR}/cache`;
@@ -268,6 +273,152 @@ describe("TemplateFetcher", () => {
             });
             expect(noAutoUpdateFetcher).toBeDefined();
         });
+    });
+
+    describe("copyPropertiesToCache", () => {
+        test("returns false when properties folder does not exist", () => {
+            logger.cli = mockCli;
+
+            // Create empty template directory (no properties folder)
+            fs.mkdirSync(path.join(TEST_TEMPLATE_DIR, "generated"), { recursive: true });
+
+            const success = fetcher.copyPropertiesToCache(cache);
+            expect(success).toBe(false);
+
+            logger.cli = originalCli;
+        });
+
+        test("copies properties folder to cache", () => {
+            logger.cli = mockCli;
+
+            // Create properties folder in template
+            const propertiesDir = path.join(TEST_TEMPLATE_DIR, "generated", "properties");
+            fs.mkdirSync(propertiesDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(propertiesDir, "color.json"),
+                JSON.stringify({ name: "Color", options: [] })
+            );
+            fs.writeFileSync(
+                path.join(propertiesDir, "index.json"),
+                JSON.stringify(["color"])
+            );
+
+            const success = fetcher.copyPropertiesToCache(cache);
+            expect(success).toBe(true);
+
+            // Verify files were copied
+            const targetPropertiesDir = path.join(cache.getCacheDir(), "properties");
+            expect(fs.existsSync(path.join(targetPropertiesDir, "color.json"))).toBe(true);
+            expect(fs.existsSync(path.join(targetPropertiesDir, "index.json"))).toBe(true);
+
+            logger.cli = originalCli;
+        });
+
+        test("handles copy errors gracefully", () => {
+            logger.cli = mockCli;
+
+            // Create properties folder
+            const propertiesDir = path.join(TEST_TEMPLATE_DIR, "generated", "properties");
+            fs.mkdirSync(propertiesDir, { recursive: true });
+            fs.writeFileSync(path.join(propertiesDir, "test.json"), "{}");
+
+            // Make cache directory read-only to cause copy failure
+            const cacheDir = cache.getCacheDir();
+            const originalMode = fs.statSync(cacheDir).mode;
+            fs.chmodSync(cacheDir, 0o444);
+
+            const success = fetcher.copyPropertiesToCache(cache);
+            expect(success).toBe(false);
+
+            // Restore permissions
+            fs.chmodSync(cacheDir, originalMode);
+            logger.cli = originalCli;
+        });
+    });
+
+    describe("copyToCache error handling", () => {
+        test("handles copy errors gracefully", () => {
+            logger.cli = mockCli;
+
+            // Create template with files
+            const templateDir = path.join(
+                TEST_TEMPLATE_DIR,
+                "generated",
+                "sales-channels",
+                "error-test"
+            );
+            fs.mkdirSync(templateDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(templateDir, "hydrated-blueprint.json"),
+                JSON.stringify({ version: "1.0" })
+            );
+
+            // Make cache directory read-only to cause copy failure
+            const cacheDir = cache.getCacheDir();
+            const originalMode = fs.statSync(cacheDir).mode;
+            fs.chmodSync(cacheDir, 0o444);
+
+            const success = fetcher.copyToCache("error-test", cache);
+            expect(success).toBe(false);
+
+            // Restore permissions
+            fs.chmodSync(cacheDir, originalMode);
+            logger.cli = originalCli;
+        });
+    });
+});
+
+describe("createTemplateFetcherFromEnv", () => {
+    test("creates fetcher with default values", () => {
+        // Save original env vars
+        const origRepoUrl = process.env.TEMPLATE_REPO_URL;
+        const origCacheDir = process.env.TEMPLATE_CACHE_DIR;
+        const origAutoUpdate = process.env.TEMPLATE_AUTO_UPDATE;
+
+        // Clear env vars to test defaults
+        delete process.env.TEMPLATE_REPO_URL;
+        delete process.env.TEMPLATE_CACHE_DIR;
+        delete process.env.TEMPLATE_AUTO_UPDATE;
+
+        const fetcher = createTemplateFetcherFromEnv();
+        expect(fetcher).toBeDefined();
+
+        // Restore original env vars
+        if (origRepoUrl !== undefined) process.env.TEMPLATE_REPO_URL = origRepoUrl;
+        if (origCacheDir !== undefined) process.env.TEMPLATE_CACHE_DIR = origCacheDir;
+        if (origAutoUpdate !== undefined) process.env.TEMPLATE_AUTO_UPDATE = origAutoUpdate;
+    });
+
+    test("uses environment variables when set", () => {
+        // Save original env vars
+        const origRepoUrl = process.env.TEMPLATE_REPO_URL;
+        const origCacheDir = process.env.TEMPLATE_CACHE_DIR;
+        const origAutoUpdate = process.env.TEMPLATE_AUTO_UPDATE;
+
+        // Set custom env vars
+        process.env.TEMPLATE_REPO_URL = "https://github.com/custom/repo.git";
+        process.env.TEMPLATE_CACHE_DIR = "/custom/cache/dir";
+        process.env.TEMPLATE_AUTO_UPDATE = "false";
+
+        const fetcher = createTemplateFetcherFromEnv();
+        expect(fetcher).toBeDefined();
+
+        // Restore original env vars
+        if (origRepoUrl !== undefined) {
+            process.env.TEMPLATE_REPO_URL = origRepoUrl;
+        } else {
+            delete process.env.TEMPLATE_REPO_URL;
+        }
+        if (origCacheDir !== undefined) {
+            process.env.TEMPLATE_CACHE_DIR = origCacheDir;
+        } else {
+            delete process.env.TEMPLATE_CACHE_DIR;
+        }
+        if (origAutoUpdate !== undefined) {
+            process.env.TEMPLATE_AUTO_UPDATE = origAutoUpdate;
+        } else {
+            delete process.env.TEMPLATE_AUTO_UPDATE;
+        }
     });
 });
 

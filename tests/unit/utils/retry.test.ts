@@ -3,10 +3,13 @@ import { describe, expect, mock, test } from "bun:test";
 import {
     DEFAULT_BASE_DELAY_MS,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_MS,
     executeWithRetry,
     getRetryAfterMs,
     isRateLimitError,
     sleep,
+    TimeoutError,
+    withTimeout,
 } from "../../../src/utils/retry.js";
 
 describe("retry utilities", () => {
@@ -242,6 +245,152 @@ describe("retry utilities", () => {
         test("handles null and undefined", () => {
             expect(getRetryAfterMs(null)).toBe(0);
             expect(getRetryAfterMs(undefined)).toBe(0);
+        });
+    });
+
+    describe("withTimeout", () => {
+        test("returns result when function completes before timeout", async () => {
+            const fn = async () => {
+                await sleep(10);
+                return "success";
+            };
+
+            const result = await withTimeout(fn, 1000);
+            expect(result).toBe("success");
+        });
+
+        test("throws TimeoutError when function exceeds timeout", async () => {
+            const fn = async () => {
+                await sleep(500);
+                return "should not reach";
+            };
+
+            await expect(withTimeout(fn, 50)).rejects.toThrow(TimeoutError);
+        });
+
+        test("TimeoutError contains timeout duration", async () => {
+            const fn = async () => {
+                await sleep(500);
+                return "should not reach";
+            };
+
+            try {
+                await withTimeout(fn, 50);
+                expect(true).toBe(false); // Should not reach
+            } catch (error) {
+                expect(error).toBeInstanceOf(TimeoutError);
+                if (error instanceof TimeoutError) {
+                    expect(error.timeoutMs).toBe(50);
+                    expect(error.message).toContain("50ms");
+                }
+            }
+        });
+
+        test("skips timeout when timeoutMs is 0", async () => {
+            const fn = async () => {
+                await sleep(10);
+                return "success";
+            };
+
+            const result = await withTimeout(fn, 0);
+            expect(result).toBe("success");
+        });
+
+        test("skips timeout when timeoutMs is negative", async () => {
+            const fn = async () => {
+                await sleep(10);
+                return "success";
+            };
+
+            const result = await withTimeout(fn, -1);
+            expect(result).toBe("success");
+        });
+
+        test("passes AbortSignal to function", async () => {
+            let receivedSignal: AbortSignal | undefined;
+            const fn = async (signal?: AbortSignal) => {
+                receivedSignal = signal;
+                return "success";
+            };
+
+            await withTimeout(fn, 1000);
+            expect(receivedSignal).toBeDefined();
+            expect(receivedSignal).toBeInstanceOf(AbortSignal);
+        });
+    });
+
+    describe("executeWithRetry with timeout", () => {
+        test("retries on timeout errors", async () => {
+            let attempts = 0;
+            const fn = async () => {
+                attempts++;
+                if (attempts < 2) {
+                    await sleep(200); // Will timeout
+                }
+                return "success";
+            };
+
+            const result = await executeWithRetry(fn, {
+                maxRetries: 3,
+                baseDelay: 10,
+                timeout: 50, // Very short timeout
+            });
+
+            expect(result).toBe("success");
+            expect(attempts).toBe(2);
+        });
+
+        test("throws after max retries on persistent timeout", async () => {
+            const fn = async () => {
+                await sleep(200); // Always times out
+                return "should not reach";
+            };
+
+            await expect(
+                executeWithRetry(fn, {
+                    maxRetries: 2,
+                    baseDelay: 10,
+                    timeout: 50,
+                })
+            ).rejects.toThrow(TimeoutError);
+        });
+
+        test("does not apply timeout when timeout is 0", async () => {
+            const fn = mock(async () => {
+                await sleep(10);
+                return "success";
+            });
+
+            const result = await executeWithRetry(fn, {
+                maxRetries: 1,
+                timeout: 0,
+            });
+
+            expect(result).toBe("success");
+            expect(fn).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("DEFAULT_TIMEOUT_MS", () => {
+        test("DEFAULT_TIMEOUT_MS is 120000 (2 minutes)", () => {
+            expect(DEFAULT_TIMEOUT_MS).toBe(120000);
+        });
+    });
+
+    describe("TimeoutError", () => {
+        test("has correct name", () => {
+            const error = new TimeoutError("test", 1000);
+            expect(error.name).toBe("TimeoutError");
+        });
+
+        test("has correct message", () => {
+            const error = new TimeoutError("test message", 1000);
+            expect(error.message).toBe("test message");
+        });
+
+        test("has timeoutMs property", () => {
+            const error = new TimeoutError("test", 5000);
+            expect(error.timeoutMs).toBe(5000);
         });
     });
 });

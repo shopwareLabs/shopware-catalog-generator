@@ -1,7 +1,8 @@
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
+import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+import { logger } from "../utils/index.js";
 
 /** Pollinations.ai text generation provider (see README for details) */
 export class PollinationsTextProvider implements TextProvider {
@@ -62,31 +63,31 @@ export class PollinationsTextProvider implements TextProvider {
         const errorMessage = error instanceof Error ? error.message : String(error);
         const status = this.extractStatusCode(error);
 
-        console.error(`\n❌ Pollinations AI text generation failed`);
-        console.error(`   Error: ${errorMessage}`);
+        logger.error(`\n❌ Pollinations AI text generation failed`);
+        logger.error(`   Error: ${errorMessage}`);
 
         if (
             status === 401 ||
             errorMessage.includes("401") ||
             errorMessage.includes("Invalid API key")
         ) {
-            console.info(`\n💡 TIP: Authentication failed with Pollinations.`);
-            console.info(`   Possible fixes:`);
-            console.info(`   1. Check your AI_API_KEY in .env is correct`);
-            console.info(`   2. Remove AI_API_KEY to use the free tier (no key needed)`);
-            console.info(`   3. Get a new key from enter.pollinations.ai`);
+            logger.cli(`\n💡 TIP: Authentication failed with Pollinations.`);
+            logger.cli(`   Possible fixes:`);
+            logger.cli(`   1. Check your AI_API_KEY in .env is correct`);
+            logger.cli(`   2. Remove AI_API_KEY to use the free tier (no key needed)`);
+            logger.cli(`   3. Get a new key from enter.pollinations.ai`);
         } else if (
             status === 429 ||
             errorMessage.includes("429") ||
             errorMessage.includes("rate")
         ) {
-            console.info(`\n💡 TIP: Rate limited by Pollinations.`);
-            console.info(
+            logger.cli(`\n💡 TIP: Rate limited by Pollinations.`);
+            logger.cli(
                 `   Wait a moment and try again, or get an API key from enter.pollinations.ai`
             );
         }
 
-        console.log(""); // Empty line for readability
+        logger.info(""); // Empty line for readability
     }
 
     /**
@@ -169,12 +170,12 @@ export class PollinationsImageProvider implements ImageProvider {
             return base64;
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
-                console.warn("Pollinations image generation timed out after 2 minutes");
-                console.info(
+                logger.warn("Pollinations image generation timed out after 2 minutes");
+                logger.cli(
                     "TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo"
                 );
             } else {
-                console.warn("Pollinations image generation failed:", error);
+                logger.warn("Pollinations image generation failed:", error);
             }
             return null;
         }
@@ -205,35 +206,35 @@ export class PollinationsImageProvider implements ImageProvider {
                 }
             }
 
-            console.error(`\n❌ Pollinations image generation failed: ${statusText}`);
+            logger.error(`\n❌ Pollinations image generation failed: ${statusText}`);
 
             if (errorMessage) {
-                console.error(`   Error: ${errorMessage}`);
+                logger.error(`   Error: ${errorMessage}`);
             }
 
             // Provide helpful tips based on error
             if (errorMessage.includes("No active") && errorMessage.includes("servers available")) {
                 const otherModels = POLLINATIONS_IMAGE_MODELS.filter((m) => m !== this.model);
-                console.info(`\n💡 TIP: The "${this.model}" model is currently unavailable.`);
-                console.info(`   Try switching to a different model in your .env file:`);
+                logger.cli(`\n💡 TIP: The "${this.model}" model is currently unavailable.`);
+                logger.cli(`   Try switching to a different model in your .env file:`);
                 otherModels.forEach((m) => {
-                    console.info(`   IMAGE_MODEL=${m}`);
+                    logger.cli(`   IMAGE_MODEL=${m}`);
                 });
             } else if (response.status === 401) {
-                console.info(
+                logger.cli(
                     `\n💡 TIP: Authentication failed. Check your API key or try without one.`
                 );
             } else if (response.status === 429) {
-                console.info(
+                logger.cli(
                     `\n💡 TIP: Rate limited. Wait a moment or get an API key from enter.pollinations.ai`
                 );
             }
 
-            console.log(""); // Empty line for readability
+            logger.info(""); // Empty line for readability
         } catch {
             // If JSON parsing fails, just show the status
-            console.error(`Pollinations image generation failed: ${statusText}`);
-            console.info(`TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=klein`);
+            logger.error(`Pollinations image generation failed: ${statusText}`);
+            logger.cli(`TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=klein`);
         }
     }
 }

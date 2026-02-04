@@ -1,9 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
-import type { HydratedBlueprint, ProductMetadata } from "../../../src/types/index.js";
-
 import { ReviewProcessor } from "../../../src/post-processors/review-processor.js";
+import type { HydratedBlueprint, ProductMetadata } from "../../../src/types/index.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
 // Helper to create a minimal mock blueprint
@@ -186,6 +185,216 @@ describe("ReviewProcessor", () => {
             // both products appear to have reviews (total: 3), so both are skipped
             expect(result.skipped).toBe(2); // Both skipped due to mock returning existing reviews
             expect(result.processed).toBe(0);
+        });
+
+        test("creates reviews when product has no existing reviews", async () => {
+            const blueprint = createMockBlueprint([
+                { id: "p1", name: "Product 1", reviewCount: 3 },
+            ]);
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { reviewCount: 3 }],
+            ]);
+
+            const mockApi = createMockApiHelpers();
+
+            // Mock no existing reviews
+            mockApi.mockPostResponse("search/product-review", {
+                total: 0,
+                data: [],
+            });
+
+            // Mock sync success
+            mockApi.mockSyncSuccess();
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            expect(result.skipped).toBe(0);
+            expect(result.errors).toHaveLength(0);
+
+            // Verify sync was called with reviews
+            expect(mockApi.syncEntitiesMock).toHaveBeenCalled();
+        });
+
+        test("handles API error when creating reviews", async () => {
+            const blueprint = createMockBlueprint([
+                { id: "p1", name: "Product 1", reviewCount: 2 },
+            ]);
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { reviewCount: 2 }],
+            ]);
+
+            const mockApi = createMockApiHelpers();
+
+            // Mock no existing reviews
+            mockApi.mockPostResponse("search/product-review", {
+                total: 0,
+                data: [],
+            });
+
+            // Mock sync failure
+            mockApi.syncEntities = mock(async () => {
+                throw new Error("API error");
+            });
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.errors[0]).toContain("Failed to create reviews");
+        });
+
+        test("handles various review counts", async () => {
+            const blueprint = createMockBlueprint([
+                { id: "p1", name: "Product 1", reviewCount: 1 },
+                { id: "p2", name: "Product 2", reviewCount: 5 },
+                { id: "p3", name: "Product 3", reviewCount: 10 },
+            ]);
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { reviewCount: 1 }],
+                ["p2", { reviewCount: 5 }],
+                ["p3", { reviewCount: 10 }],
+            ]);
+
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/product-review", { total: 0, data: [] });
+            mockApi.mockSyncSuccess();
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.process(context);
+
+            expect(result.processed).toBe(3);
+            expect(result.skipped).toBe(0);
+        });
+    });
+
+    describe("cleanup", () => {
+        test("returns early in dry run mode", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+            const mockApi = createMockApiHelpers();
+
+            const context = createMockContext(blueprint, metadataMap, {
+                dryRun: true,
+                mockApi,
+            });
+
+            const result = await ReviewProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns error when API helpers not available", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+
+            // Create context without API
+            const context: PostProcessorContext = {
+                salesChannelId: "sc-123",
+                salesChannelName: "test-store",
+                blueprint,
+                cache: createMockCache(metadataMap) as unknown as PostProcessorContext["cache"],
+                shopwareUrl: "https://test.shopware.com",
+                getAccessToken: async () => "test-token",
+                // api is undefined
+                options: { batchSize: 5, dryRun: false },
+            };
+
+            const result = await ReviewProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toContain("API helpers not available - cannot perform cleanup");
+        });
+
+        test("returns 0 deleted when no products found", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+            const mockApi = createMockApiHelpers();
+
+            // Mock empty product search
+            mockApi.searchEntities = mock(async () => []);
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns 0 deleted when no reviews found", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+            const mockApi = createMockApiHelpers();
+
+            let callCount = 0;
+            (mockApi as { searchEntities: unknown }).searchEntities = mock(async () => {
+                callCount++;
+                if (callCount === 1) {
+                    // First call: products
+                    return [{ id: "p1" }, { id: "p2" }];
+                }
+                // Second call: reviews
+                return [];
+            });
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.cleanup(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("deletes reviews successfully", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+            const mockApi = createMockApiHelpers();
+
+            let callCount = 0;
+            (mockApi as { searchEntities: unknown }).searchEntities = mock(async () => {
+                callCount++;
+                if (callCount === 1) {
+                    // First call: products
+                    return [{ id: "p1" }, { id: "p2" }];
+                }
+                // Second call: reviews
+                return [{ id: "r1" }, { id: "r2" }, { id: "r3" }];
+            });
+
+            mockApi.deleteEntities = mock(async () => {});
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(3);
+            expect(result.errors).toHaveLength(0);
+            expect(mockApi.deleteEntities).toHaveBeenCalledWith("product_review", [
+                "r1",
+                "r2",
+                "r3",
+            ]);
+        });
+
+        test("handles cleanup error", async () => {
+            const blueprint = createMockBlueprint([]);
+            const metadataMap = new Map<string, Partial<ProductMetadata>>();
+            const mockApi = createMockApiHelpers();
+
+            mockApi.searchEntities = mock(async () => {
+                throw new Error("Search failed");
+            });
+
+            const context = createMockContext(blueprint, metadataMap, { mockApi });
+            const result = await ReviewProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors.length).toBeGreaterThan(0);
+            expect(result.errors[0]).toContain("Review cleanup failed");
         });
     });
 });

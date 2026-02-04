@@ -221,31 +221,6 @@ export function flattenCategoryTreeWithPath(
 }
 
 /**
- * Collect all category IDs from a tree into a Map of name -> id
- *
- * @deprecated Use collectCategoryIdsByPath for unique identification
- * @param nodes - Array of category nodes
- * @returns Map of category names to their IDs
- */
-export function collectCategoryIds(nodes: CategoryNode[]): Map<string, string> {
-    const idMap = new Map<string, string>();
-
-    const collect = (categories: CategoryNode[]): void => {
-        for (const node of categories) {
-            if (node.id) {
-                idMap.set(node.name, node.id);
-            }
-            if (node.children.length > 0) {
-                collect(node.children);
-            }
-        }
-    };
-
-    collect(nodes);
-    return idMap;
-}
-
-/**
  * Collect all category IDs from a tree into a Map of path -> id
  * Uses full paths like "Living Room > Sofas" to avoid collisions
  * when categories with the same name exist in different branches.

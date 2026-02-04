@@ -24,7 +24,6 @@ export {
     buildBlueprintCategoryPathMap,
     buildCategoryPath,
     CATEGORY_PATH_SEPARATOR,
-    collectCategoryIds,
     collectCategoryIdsByPath,
     convertBlueprintCategories,
     countCategories,
@@ -46,7 +45,6 @@ export {
     findClosestColor,
     getColorHex,
     getViewSuffix,
-    isColorGroup,
     VIEW_SUFFIXES,
 } from "./color-palette.js";
 // Concurrency utilities
@@ -62,10 +60,13 @@ export type { RetryOptions } from "./retry.js";
 export {
     DEFAULT_BASE_DELAY_MS,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_MS,
     executeWithRetry,
     getRetryAfterMs,
     isRateLimitError,
     sleep,
+    TimeoutError,
+    withTimeout,
 } from "./retry.js";
 // Shopware request utilities
 export type { ShopwareRequestContext } from "./shopware-request.js";

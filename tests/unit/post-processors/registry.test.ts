@@ -1,14 +1,45 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
+import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 import {
     CmsProcessor,
+    cleanupProcessors,
     DEFAULT_PROCESSOR_OPTIONS,
     ImageProcessor,
     ManufacturerProcessor,
     ReviewProcessor,
     registry,
+    runProcessors,
     VariantProcessor,
 } from "../../../src/post-processors/index.js";
+import { logger } from "../../../src/utils/index.js";
+
+// Mock context for testing
+function createMockContext(): PostProcessorContext {
+    return {
+        salesChannelId: "test-sc-id",
+        salesChannelName: "test-store",
+        blueprint: {
+            version: "1.0",
+            createdAt: new Date().toISOString(),
+            hydratedAt: new Date().toISOString(),
+            salesChannel: {
+                name: "test-store",
+                description: "Test store",
+            },
+            categories: [],
+            products: [],
+            propertyGroups: [],
+        },
+        cache: {} as PostProcessorContext["cache"],
+        shopwareUrl: "http://localhost:8000",
+        getAccessToken: async () => "test-token",
+        options: {
+            batchSize: 5,
+            dryRun: false,
+        },
+    };
+}
 
 describe("PostProcessor Registry", () => {
     test("has all processors registered", () => {
@@ -114,5 +145,381 @@ describe("PostProcessor Interface", () => {
         const names = registry.getNames();
         const uniqueNames = new Set(names);
         expect(uniqueNames.size).toBe(names.length);
+    });
+});
+
+describe("runProcessors", () => {
+    // Suppress console output during tests
+    const originalCli = logger.cli.bind(logger);
+    const mockCli = mock(() => {});
+
+    test("throws error for unknown processor", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        await expect(runProcessors(context, ["unknown-processor"])).rejects.toThrow(
+            /Unknown processor/
+        );
+
+        logger.cli = originalCli;
+    });
+
+    test("returns empty array for empty selection", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const results = await runProcessors(context, []);
+
+        expect(results).toEqual([]);
+        logger.cli = originalCli;
+    });
+
+    test("catches processor errors and returns error result", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        // Create a mock processor that throws
+        const errorProcessor = {
+            name: "error-test",
+            description: "Test processor that throws",
+            dependsOn: [],
+            process: mock(async () => {
+                throw new Error("Test error");
+            }),
+        };
+
+        // Temporarily register the error processor
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+        const originalGetAll = registry.getAll.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "error-test") return errorProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "error-test") return true;
+            return originalHas(name);
+        };
+        registry.getAll = () => [...originalGetAll(), errorProcessor];
+
+        const results = await runProcessors(context, ["error-test"]);
+
+        expect(results.length).toBe(1);
+        const result = results[0];
+        if (!result) throw new Error("Expected result");
+        expect(result.name).toBe("error-test");
+        expect(result.errors).toContain("Test error");
+        expect(result.processed).toBe(0);
+
+        // Restore original methods
+        registry.get = originalGet;
+        registry.has = originalHas;
+        registry.getAll = originalGetAll;
+        logger.cli = originalCli;
+    });
+
+    test("runs processors in dependency order", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const executionOrder: string[] = [];
+
+        const firstProcessor = {
+            name: "first-test",
+            description: "First processor",
+            dependsOn: [],
+            process: mock(async () => {
+                executionOrder.push("first-test");
+                return { name: "first-test", processed: 1, skipped: 0, errors: [], durationMs: 0 };
+            }),
+        };
+
+        const secondProcessor = {
+            name: "second-test",
+            description: "Second processor (depends on first)",
+            dependsOn: ["first-test"],
+            process: mock(async () => {
+                executionOrder.push("second-test");
+                return { name: "second-test", processed: 1, skipped: 0, errors: [], durationMs: 0 };
+            }),
+        };
+
+        // Mock registry methods
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+        const originalGetAll = registry.getAll.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "first-test") return firstProcessor;
+            if (name === "second-test") return secondProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "first-test" || name === "second-test") return true;
+            return originalHas(name);
+        };
+        registry.getAll = () => [...originalGetAll(), firstProcessor, secondProcessor];
+
+        const results = await runProcessors(context, ["second-test", "first-test"]);
+
+        expect(results.length).toBe(2);
+        expect(executionOrder[0]).toBe("first-test");
+        expect(executionOrder[1]).toBe("second-test");
+
+        // Restore
+        registry.get = originalGet;
+        registry.has = originalHas;
+        registry.getAll = originalGetAll;
+        logger.cli = originalCli;
+    });
+
+    test("runs independent processors in parallel batches", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const processorA = {
+            name: "parallel-a",
+            description: "Parallel A",
+            dependsOn: [],
+            process: mock(async () => {
+                return { name: "parallel-a", processed: 1, skipped: 0, errors: [], durationMs: 0 };
+            }),
+        };
+
+        const processorB = {
+            name: "parallel-b",
+            description: "Parallel B",
+            dependsOn: [],
+            process: mock(async () => {
+                return { name: "parallel-b", processed: 1, skipped: 0, errors: [], durationMs: 0 };
+            }),
+        };
+
+        // Mock registry methods
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+        const originalGetAll = registry.getAll.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "parallel-a") return processorA;
+            if (name === "parallel-b") return processorB;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "parallel-a" || name === "parallel-b") return true;
+            return originalHas(name);
+        };
+        registry.getAll = () => [...originalGetAll(), processorA, processorB];
+
+        const results = await runProcessors(context, ["parallel-a", "parallel-b"]);
+
+        expect(results.length).toBe(2);
+        expect(processorA.process).toHaveBeenCalled();
+        expect(processorB.process).toHaveBeenCalled();
+
+        // Restore
+        registry.get = originalGet;
+        registry.has = originalHas;
+        registry.getAll = originalGetAll;
+        logger.cli = originalCli;
+    });
+});
+
+describe("cleanupProcessors", () => {
+    const originalCli = logger.cli.bind(logger);
+    const mockCli = mock(() => {});
+
+    test("throws error for unknown processor", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        await expect(cleanupProcessors(context, ["unknown-processor"])).rejects.toThrow(
+            /Unknown processor/
+        );
+
+        logger.cli = originalCli;
+    });
+
+    test("returns empty array when no processors have cleanup", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const noCleanupProcessor = {
+            name: "no-cleanup-test",
+            description: "Processor without cleanup",
+            dependsOn: [],
+            process: mock(async () => ({
+                name: "no-cleanup-test",
+                processed: 0,
+                skipped: 0,
+                errors: [],
+                durationMs: 0,
+            })),
+            // No cleanup method
+        };
+
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "no-cleanup-test") return noCleanupProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "no-cleanup-test") return true;
+            return originalHas(name);
+        };
+
+        const results = await cleanupProcessors(context, ["no-cleanup-test"]);
+
+        expect(results).toEqual([]);
+
+        registry.get = originalGet;
+        registry.has = originalHas;
+        logger.cli = originalCli;
+    });
+
+    test("runs cleanup for processors with cleanup method", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const cleanupProcessor = {
+            name: "cleanup-test",
+            description: "Processor with cleanup",
+            dependsOn: [],
+            process: mock(async () => ({
+                name: "cleanup-test",
+                processed: 0,
+                skipped: 0,
+                errors: [],
+                durationMs: 0,
+            })),
+            cleanup: mock(async () => ({
+                name: "cleanup-test",
+                deleted: 5,
+                errors: [],
+                durationMs: 0,
+            })),
+        };
+
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "cleanup-test") return cleanupProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "cleanup-test") return true;
+            return originalHas(name);
+        };
+
+        const results = await cleanupProcessors(context, ["cleanup-test"]);
+
+        expect(results.length).toBe(1);
+        const result = results[0];
+        if (!result) throw new Error("Expected cleanup result");
+        expect(result.name).toBe("cleanup-test");
+        expect(result.deleted).toBe(5);
+        expect(cleanupProcessor.cleanup).toHaveBeenCalled();
+
+        registry.get = originalGet;
+        registry.has = originalHas;
+        logger.cli = originalCli;
+    });
+
+    test("catches cleanup errors and returns error result", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const errorCleanupProcessor = {
+            name: "error-cleanup-test",
+            description: "Processor with failing cleanup",
+            dependsOn: [],
+            process: mock(async () => ({
+                name: "error-cleanup-test",
+                processed: 0,
+                skipped: 0,
+                errors: [],
+                durationMs: 0,
+            })),
+            cleanup: mock(async () => {
+                throw new Error("Cleanup failed");
+            }),
+        };
+
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "error-cleanup-test") return errorCleanupProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "error-cleanup-test") return true;
+            return originalHas(name);
+        };
+
+        const results = await cleanupProcessors(context, ["error-cleanup-test"]);
+
+        expect(results.length).toBe(1);
+        const result = results[0];
+        if (!result) throw new Error("Expected error cleanup result");
+        expect(result.name).toBe("error-cleanup-test");
+        expect(result.errors).toContain("Cleanup failed");
+        expect(result.deleted).toBe(0);
+
+        registry.get = originalGet;
+        registry.has = originalHas;
+        logger.cli = originalCli;
+    });
+
+    test("handles cleanup with errors in result", async () => {
+        logger.cli = mockCli;
+        const context = createMockContext();
+
+        const partialErrorProcessor = {
+            name: "partial-error-test",
+            description: "Processor with partial cleanup errors",
+            dependsOn: [],
+            process: mock(async () => ({
+                name: "partial-error-test",
+                processed: 0,
+                skipped: 0,
+                errors: [],
+                durationMs: 0,
+            })),
+            cleanup: mock(async () => ({
+                name: "partial-error-test",
+                deleted: 3,
+                errors: ["Failed to delete item 1", "Failed to delete item 2"],
+                durationMs: 0,
+            })),
+        };
+
+        const originalGet = registry.get.bind(registry);
+        const originalHas = registry.has.bind(registry);
+
+        registry.get = (name: string) => {
+            if (name === "partial-error-test") return partialErrorProcessor;
+            return originalGet(name);
+        };
+        registry.has = (name: string) => {
+            if (name === "partial-error-test") return true;
+            return originalHas(name);
+        };
+
+        const results = await cleanupProcessors(context, ["partial-error-test"]);
+
+        expect(results.length).toBe(1);
+        const result = results[0];
+        if (!result) throw new Error("Expected partial error result");
+        expect(result.deleted).toBe(3);
+        expect(result.errors.length).toBe(2);
+
+        registry.get = originalGet;
+        registry.has = originalHas;
+        logger.cli = originalCli;
     });
 });

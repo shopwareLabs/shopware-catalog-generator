@@ -172,9 +172,6 @@ export class ProcessManager {
         if (state.logs.length > ProcessManager.MAX_LOGS) {
             state.logs = state.logs.slice(-ProcessManager.MAX_LOGS);
         }
-
-        // Also log to console for debugging
-        console.log(`[${id}] ${message}`);
     }
 
     /**

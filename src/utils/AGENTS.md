@@ -48,11 +48,11 @@ const title = capitalizeString("hello"); // "Hello"
 Category tree operations:
 
 ```typescript
-import { countCategories, getLeafCategories, collectCategoryIds } from "./utils/index.js";
+import { countCategories, getLeafCategories, collectCategoryIdsByPath } from "./utils/index.js";
 
 const count = countCategories(tree);
 const leaves = getLeafCategories(tree);
-const ids = collectCategoryIds(tree); // Map<name, id>
+const ids = collectCategoryIdsByPath(tree); // Map<path, id> (e.g., "Living Room > Sofas")
 ```
 
 ### concurrency.ts
@@ -113,35 +113,66 @@ const result = validateBlueprint(blueprint, { autoFix: true, logFixes: true });
 
 // Quick check without auto-fix
 if (hasValidationIssues(blueprint)) {
-    console.error("Blueprint has issues");
+    logger.cli("Blueprint has issues", "error");
 }
 ```
 
 Checks for:
 
+**Errors (block sync):**
+
 - **Duplicate product names** (auto-fixable: appends "(2)", "(3)" suffix)
-- **Duplicate category names** at same level (warning)
 - **Placeholder names** (e.g., "Product 1", "Top Category 1")
 - **Missing required fields** (salesChannel.name, products, categories)
-- **Property group validation**: missing names, empty options, missing color hex codes
-- **Orphan property references**: products referencing non-existent property groups
+- **Empty property options** in property groups
+- **Products with no categories** assigned
+- **Invalid category references** (products referencing non-existent categories)
+
+**Warnings (allow sync but log):**
+
+- **Duplicate category names** at same level
+- **Products only in top-level categories** (should have subcategory assignments)
+- **Missing color hex codes** for color properties
+- **Orphan property references** (products referencing non-existent groups)
+- **Products without image descriptions**
+- **Products with empty image prompts**
+- **Products without properties**
+- **Products without manufacturer**
 
 Used automatically in the sync flow before uploading to Shopware.
 
 ### logger.ts
 
-File-based logging:
+File-based logging with MCP-safe console output:
 
 ```typescript
 import { logger } from "./utils/index.js";
 
-logger.debug("Debug info", { data }); // File only
-logger.info("Info message"); // File only
-logger.warn("Warning"); // File + console
-logger.apiError("endpoint", 500, response); // File (full) + console (brief)
+// User-facing output (file + console, respects MCP mode)
+logger.cli("✓ Created SalesChannel");           // info level (default)
+logger.cli("⚠ Rate limited", "warn");           // warn level
+logger.cli("✗ Upload failed", "error");         // error level
+
+// Diagnostic logging (file only)
+logger.debug("Debug info", { data });
+logger.info("Info message");
+logger.warn("Recoverable issue", { context });
+logger.error("Operation failed", { error });
+
+// Special methods
+logger.apiError("endpoint", 500, response);     // File + console (unless MCP)
+
+// Log cleanup (keeps last 10 files by default)
+const deleted = logger.cleanup(10);
 ```
 
 Logs are written to `logs/generator-{timestamp}.log`.
+
+**Convention: Never use `console.*` directly in library modules.**
+
+- Use `logger.cli()` for user-facing output (respects MCP mode)
+- Use `logger.info/warn/error()` for diagnostic logging (file only)
+- Only CLI entry points (`main.ts`, `*-cli.ts`, `server.ts`) may use `console.*` directly
 
 ## Import Pattern
 

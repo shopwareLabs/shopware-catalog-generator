@@ -169,7 +169,7 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 2. **Phase 2: AI Hydration** - Fill blueprint with AI-generated content (parallel when supported)
 3. **Phase 3: Shopware Upload + Post-processors** - Upload and run parallel processors
 
-**Expected times for 90 products:**
+**Expected times for 90 products (text generation only):**
 
 | Provider                      | Processing    | Time    |
 | ----------------------------- | ------------- | ------- |
@@ -177,6 +177,17 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 | Pollinations (sk\_\*)         | Parallel (5x) | ~5 min  |
 | GitHub Models                 | Limited (2x)  | ~10 min |
 | Pollinations (pk\_\* or free) | Sequential    | ~13 min |
+
+**Full generation with images (~270 images at 3 views per product):**
+
+| Provider                      | Image Model   | Processing     | Time       |
+| ----------------------------- | ------------- | -------------- | ---------- |
+| OpenAI                        | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
+| Pollinations (sk\_\*)         | flux          | Parallel (5x)  | ~15-20 min |
+| Pollinations (sk\_\*)         | turbo         | Parallel (5x)  | ~10-15 min |
+| Pollinations (pk\_\* or free) | flux          | Limited (2x)   | ~40-50 min |
+
+> Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~8-10s per image with 10 parallel requests.
 
 ```
 flowchart LR
@@ -330,9 +341,9 @@ import { normalizeDescription, capitalizeString } from "./utils/index.js";
 const clean = normalizeDescription("<p>HTML &amp; entities</p>"); // "HTML & entities"
 
 // Category tree operations (utils/category-tree.ts)
-import { countCategories, getLeafCategories, collectCategoryIds } from "./utils/index.js";
+import { countCategories, getLeafCategories, collectCategoryIdsByPath } from "./utils/index.js";
 const leaves = getLeafCategories(categoryTree);
-const ids = collectCategoryIds(categoryTree); // Map<name, id>
+const ids = collectCategoryIdsByPath(categoryTree); // Map<path, id> (e.g., "Living Room > Sofas")
 
 // Concurrency limiting (utils/concurrency.ts)
 import { ConcurrencyLimiter } from "./utils/index.js";
@@ -766,7 +777,12 @@ bun run blueprint create --name=furniture --description="Wood furniture store"
 # Phase 2: Hydrate with AI
 bun run blueprint hydrate --name=furniture
 
-# Phase 2b: Fix placeholder names (if hydration was incomplete)
+# Phase 2b: Selective re-hydration (preserves product names for image stability)
+bun run blueprint hydrate --name=furniture --only=categories  # Categories only
+bun run blueprint hydrate --name=furniture --only=properties  # Properties only
+bun run blueprint hydrate --name=furniture --force            # Full re-hydration
+
+# Phase 2c: Fix placeholder names (if hydration was incomplete)
 bun run blueprint fix --name=furniture
 
 # Phase 3: Upload to Shopware
@@ -787,6 +803,23 @@ bun run blueprint create \
   --description=TEXT       # Context for AI generation (default: "{name} webshop")
   --products=N             # Products to generate (default: 90)
 ```
+
+### Hydration Options
+
+```bash
+bun run blueprint hydrate \
+  --name=NAME              # Required: SalesChannel name
+  --only=MODE              # Selective: "categories" or "properties"
+  --force                  # Force full re-hydration (changes names, triggers image regen)
+```
+
+Hydration modes:
+- **Default (new)**: Full hydration, generates everything
+- **--only=categories**: Only update category names/descriptions, preserve all product data
+- **--only=properties**: Only update product properties, preserve names (for image stability)
+- **--force**: Force full re-hydration even if hydrated blueprint exists
+
+Safety: If hydrated blueprint exists, requires `--only` or `--force` to prevent accidental name changes.
 
 ### Generate Options
 
@@ -1027,15 +1060,31 @@ Handles GitHub Models' 10 requests/60s limit.
 
 ### Logging
 
-File-based logging keeps CLI clean while preserving debug info:
+**Convention: Never use `console.*` in library modules.** Use `logger.cli()` for user-facing output and `logger.info/warn/error()` for diagnostics.
 
 ```typescript
 import { logger } from "./utils/index.js";
 
-logger.debug("Debug info", { data }); // File only
-logger.info("Info message"); // File only
-logger.warn("Warning"); // File + console
-logger.apiError("endpoint", 500, response); // File (full) + console (brief)
+// User-facing output (file + console, respects MCP mode)
+logger.cli("✓ Created SalesChannel");           // info level
+logger.cli("⚠ Rate limited", "warn");           // warn level
+logger.cli("✗ Failed", "error");                // error level
+
+// Diagnostic logging (file only)
+logger.debug("Debug info", { data });
+logger.info("Info message");
+logger.warn("Recoverable issue");
+logger.error("Operation failed", { error });
+
+// Shopware API errors (file + console unless MCP mode)
+logger.apiError("endpoint", 500, response);
+
+// Cleanup old logs (keeps last 10 by default)
+logger.cleanup(10);
 ```
 
 Logs are written to `logs/generator-{timestamp}.log`. Clear with `bun run logs:clear`.
+
+**Allowed `console.*` usage:**
+- CLI entry points only: `main.ts`, `*-cli.ts`, `server.ts`
+- The `logger.ts` file itself

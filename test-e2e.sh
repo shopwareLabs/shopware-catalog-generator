@@ -51,7 +51,7 @@ if [ -n "$REUSE_NAME" ]; then
 elif [ -n "$CLEANUP_ONLY" ]; then
     TEST_SALESCHANNEL="$CLEANUP_ONLY"
 else
-    TEST_SALESCHANNEL="e2e-test-$(date +%s)"
+    TEST_SALESCHANNEL="e2e-test-kids-store-$(date +%s)"
 fi
 
 SW_URL="${SW_ENV_URL:-http://localhost:8000}"
@@ -90,7 +90,7 @@ if [ "$SKIP_CREATE" = true ]; then
     fi
 else
     echo "[1/5] Creating blueprint..."
-    bun run blueprint create --name="$TEST_SALESCHANNEL" --description="E2E test music store selling guitars, keyboards, and drums."
+    bun run blueprint create --name="$TEST_SALESCHANNEL" --description="Kids store selling toys, books and games." --products=10
 
     if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
         echo "ERROR: blueprint.json not created"
@@ -102,10 +102,12 @@ echo ""
 
 # Phase 2: Hydrate with AI
 if [ "$SKIP_HYDRATE" = true ]; then
-    echo "[2/5] Skipping AI hydration"
+    echo "[2/5] Skipping AI hydration (--skip-hydrate)"
     if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
         echo "WARNING: No hydrated blueprint found. Upload may fail."
     fi
+elif [ -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+    echo "[2/5] Skipping AI hydration (hydrated blueprint already exists)"
 else
     echo "[2/5] Hydrating blueprint with AI..."
     bun run blueprint hydrate --name="$TEST_SALESCHANNEL"

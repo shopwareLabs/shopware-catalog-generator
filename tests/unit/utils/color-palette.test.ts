@@ -6,7 +6,6 @@ import {
     findClosestColor,
     getColorHex,
     getViewSuffix,
-    isColorGroup,
     VIEW_SUFFIXES,
 } from "../../../src/utils/color-palette.js";
 
@@ -81,7 +80,7 @@ describe("Color Palette", () => {
         });
 
         test("returns null for unknown colors", () => {
-            const result = findClosestColor("Ultraviolet Rainbow");
+            const result = findClosestColor("Xyloflux Nebula");
             expect(result).toBeNull();
         });
 
@@ -114,50 +113,16 @@ describe("Color Palette", () => {
         });
 
         test("returns fallback for unknown color", () => {
-            expect(getColorHex("Unknown Color")).toBe("#808080");
+            expect(getColorHex("Xyloflux Nebula")).toBe("#808080");
         });
 
         test("accepts custom fallback", () => {
-            expect(getColorHex("Unknown Color", "#ffffff")).toBe("#ffffff");
+            expect(getColorHex("Xyloflux Nebula", "#ffffff")).toBe("#ffffff");
         });
 
         test("is case-insensitive", () => {
             expect(getColorHex("red")).toBe(COLOR_PALETTE.Red ?? "#FF0000");
             expect(getColorHex("RED")).toBe(COLOR_PALETTE.Red ?? "#FF0000");
-        });
-    });
-
-    describe("isColorGroup", () => {
-        test("returns true for Color group", () => {
-            expect(isColorGroup("Color")).toBe(true);
-            expect(isColorGroup("color")).toBe(true);
-            expect(isColorGroup("COLOR")).toBe(true);
-        });
-
-        test("returns true for Colour (British spelling)", () => {
-            expect(isColorGroup("Colour")).toBe(true);
-            expect(isColorGroup("colour")).toBe(true);
-        });
-
-        test("returns true for Farbe (German)", () => {
-            expect(isColorGroup("Farbe")).toBe(true);
-            expect(isColorGroup("farbe")).toBe(true);
-        });
-
-        test("returns true for Finish group", () => {
-            expect(isColorGroup("Finish")).toBe(true);
-            expect(isColorGroup("finish")).toBe(true);
-        });
-
-        test("returns true for compound color names", () => {
-            expect(isColorGroup("Exterior Color")).toBe(true);
-            expect(isColorGroup("Frame Colour")).toBe(true);
-        });
-
-        test("returns false for non-color groups", () => {
-            expect(isColorGroup("Material")).toBe(false);
-            expect(isColorGroup("Size")).toBe(false);
-            expect(isColorGroup("Style")).toBe(false);
         });
     });
 });

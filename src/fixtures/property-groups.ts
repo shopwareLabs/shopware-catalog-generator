@@ -139,6 +139,41 @@ const COLOR_OPTIONS: Array<{ name: string; hex: string }> = [
 ];
 
 /**
+ * Color options that use images instead of hex codes.
+ * These represent multiple colors or patterns that can't be shown as a single color swatch.
+ * Using PNG format for better storefront compatibility (SVGs may not render in swatches).
+ */
+export const IMAGE_COLOR_OPTIONS: Array<{ name: string; imagePath: string }> = [
+    { name: "Multicolor", imagePath: "color-images/multicolor.png" },
+    { name: "Multi-Color", imagePath: "color-images/multicolor.png" },
+    { name: "Rainbow", imagePath: "color-images/rainbow.png" },
+    { name: "Assorted", imagePath: "color-images/assorted.png" },
+    { name: "Mixed", imagePath: "color-images/assorted.png" },
+    { name: "Patterned", imagePath: "color-images/patterned.png" },
+    { name: "Printed", imagePath: "color-images/patterned.png" },
+    { name: "Gradient", imagePath: "color-images/gradient.png" },
+];
+
+/**
+ * Check if a color option uses an image instead of a hex code
+ */
+export function colorHasImage(colorName: string): boolean {
+    return IMAGE_COLOR_OPTIONS.some(
+        (c) => c.name.toLowerCase() === colorName.toLowerCase()
+    );
+}
+
+/**
+ * Get the image path for a color option (if it uses an image)
+ */
+export function getColorImagePath(colorName: string): string | undefined {
+    const imageColor = IMAGE_COLOR_OPTIONS.find(
+        (c) => c.name.toLowerCase() === colorName.toLowerCase()
+    );
+    return imageColor?.imagePath;
+}
+
+/**
  * Universal property groups - only properties that apply across ALL store types
  *
  * Currently only Color is universal because:

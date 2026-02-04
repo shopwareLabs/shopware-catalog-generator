@@ -240,12 +240,25 @@ curl http://localhost:3000/status/proc_xxx
 
 Expected times for 90 products:
 
+**Text generation only (blueprint hydration):**
+
 | Provider      | Processing    | Time    |
 | ------------- | ------------- | ------- |
 | OpenAI        | Parallel (5x) | ~5 min  |
 | Pollinations  | Parallel (5x) | ~5 min  |
 | GitHub Models | Limited (2x)  | ~10 min |
 | Pollinations  | Sequential    | ~13 min |
+
+**Full generation with images (~270 images at 3 views per product):**
+
+| Provider           | Image Model     | Time       |
+| ------------------ | --------------- | ---------- |
+| OpenAI             | gpt-image-1.5   | ~35-40 min |
+| Pollinations       | flux (default)  | ~15-20 min |
+| Pollinations       | turbo (fast)    | ~10-15 min |
+| Any (images: none) | -               | ~5-13 min  |
+
+> **Note:** Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~35s per image. Use `IMAGE_PROVIDER=none` to skip images for faster testing.
 
 ## Testing
 

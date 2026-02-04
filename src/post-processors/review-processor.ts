@@ -12,15 +12,15 @@
  * - 8-10 reviews: ~22% of products
  */
 
+
+import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
-
-import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /**
  * Review Processor implementation
@@ -55,15 +55,17 @@ class ReviewProcessorImpl implements PostProcessor {
                     continue;
                 }
 
-                // Check if product already has reviews in Shopware
-                const hasExistingReviews = await this.productHasReviews(context, product.id);
-                if (hasExistingReviews) {
-                    skipped++;
-                    continue;
+                // In dry run, skip API check (no network calls)
+                if (!options.dryRun) {
+                    const hasExistingReviews = await this.productHasReviews(context, product.id);
+                    if (hasExistingReviews) {
+                        skipped++;
+                        continue;
+                    }
                 }
 
                 if (options.dryRun) {
-                    console.log(
+                    logger.cli(
                         `    [DRY RUN] Would generate ${reviewCount} reviews for ${product.name}`
                     );
                     totalReviews += reviewCount;
@@ -134,7 +136,7 @@ class ReviewProcessorImpl implements PostProcessor {
             }
         }
 
-        console.log(`    Generated ${totalReviews} reviews for ${processed} products`);
+        logger.cli(`    Generated ${totalReviews} reviews for ${processed} products`);
 
         return {
             name: this.name,
@@ -153,7 +155,7 @@ class ReviewProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            console.log(`    [DRY RUN] Would delete reviews for products in SalesChannel`);
+            logger.cli(`    [DRY RUN] Would delete reviews for products in SalesChannel`);
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -177,12 +179,12 @@ class ReviewProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                console.log(`    No products found in SalesChannel`);
+                logger.cli(`    No products found in SalesChannel`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const productIds = products.map((p) => p.id);
-            console.log(`    Found ${productIds.length} products in SalesChannel`);
+            logger.cli(`    Found ${productIds.length} products in SalesChannel`);
 
             // Step 2: Find all reviews for these products
             // Use equalsAny filter (cast needed as type is not fully exported)
@@ -193,18 +195,18 @@ class ReviewProcessorImpl implements PostProcessor {
             );
 
             if (reviews.length === 0) {
-                console.log(`    No reviews found for products`);
+                logger.cli(`    No reviews found for products`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            console.log(`    Found ${reviews.length} reviews to delete`);
+            logger.cli(`    Found ${reviews.length} reviews to delete`);
 
             // Step 3: Delete reviews
             const reviewIds = reviews.map((r) => r.id);
             await context.api.deleteEntities("product_review", reviewIds);
 
             deleted = reviewIds.length;
-            console.log(`    ✓ Deleted ${deleted} reviews`);
+            logger.cli(`    ✓ Deleted ${deleted} reviews`);
         } catch (error) {
             errors.push(
                 `Review cleanup failed: ${error instanceof Error ? error.message : String(error)}`
