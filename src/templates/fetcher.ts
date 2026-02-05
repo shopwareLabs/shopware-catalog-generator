@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { DataCache } from "../cache.js";
+
 import { logger } from "../utils/index.js";
 
 /** Default template repository URL */

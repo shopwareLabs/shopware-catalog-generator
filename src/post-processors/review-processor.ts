@@ -12,15 +12,15 @@
  * - 8-10 reviews: ~22% of products
  */
 
-
-import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /**
  * Review Processor implementation

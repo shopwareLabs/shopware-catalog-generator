@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { logger } from "./utils/logger.js";
 import type {
     Blueprint,
     CacheOptions,
@@ -19,6 +18,7 @@ import type {
 } from "./types/index.js";
 
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
+import { logger } from "./utils/logger.js";
 
 // Re-export types for convenience
 export type { CacheOptions, PropertyGroup, PropertyOption } from "./types/index.js";

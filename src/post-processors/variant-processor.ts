@@ -8,16 +8,16 @@
  * - Applies price modifiers per variant
  */
 
-
-import { PropertyCache } from "../property-cache.js";
 import type { CachedPropertyGroup, VariantConfig } from "../types/index.js";
-import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { PropertyCache } from "../property-cache.js";
+import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 interface PropertyOption {
     id: string;

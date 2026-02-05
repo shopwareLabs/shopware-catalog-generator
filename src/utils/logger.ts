@@ -72,11 +72,7 @@ class Logger {
     /**
      * Configure the logger
      */
-    configure(options: {
-        enabled?: boolean;
-        minLevel?: LogLevel;
-        logDir?: string;
-    }): void {
+    configure(options: { enabled?: boolean; minLevel?: LogLevel; logDir?: string }): void {
         if (options.enabled !== undefined) this.enabled = options.enabled;
         if (options.minLevel) this.minLevel = options.minLevel;
         if (options.logDir) {
@@ -315,9 +311,10 @@ class Logger {
             return 0;
         }
 
-        const logFiles = fs.readdirSync(this.logDir)
-            .filter(f => f.startsWith("generator-") && f.endsWith(".log"))
-            .map(f => ({
+        const logFiles = fs
+            .readdirSync(this.logDir)
+            .filter((f) => f.startsWith("generator-") && f.endsWith(".log"))
+            .map((f) => ({
                 name: f,
                 path: path.join(this.logDir, f),
                 mtime: fs.statSync(path.join(this.logDir, f)).mtime.getTime(),

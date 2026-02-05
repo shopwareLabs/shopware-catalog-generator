@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+
 import { spawn } from "bun";
 
 const VERBOSE = process.env.MCP_SMOKE_VERBOSE === "1";

@@ -13,6 +13,7 @@
 import type { DataCache } from "../cache.js";
 import type { ShopwareApiHelpers } from "../shopware/api-helpers.js";
 import type { HydratedBlueprint, ImageProvider, TextProvider } from "../types/index.js";
+
 import { logger } from "../utils/index.js";
 
 // =============================================================================
@@ -428,21 +429,50 @@ export async function cleanupProcessors(
 // =============================================================================
 
 // Import processors
-import { CmsProcessor } from "./cms-processor.js";
+import {
+    CommerceProcessor,
+    FormProcessor,
+    ImagesProcessor,
+    TestingProcessor,
+    TextImagesProcessor,
+    TextProcessor,
+    VideoProcessor,
+} from "./cms/index.js";
+import { DigitalProductProcessor } from "./digital-product-processor.js";
 import { ImageProcessor } from "./image-processor.js";
 import { ManufacturerProcessor } from "./manufacturer-processor.js";
 import { ReviewProcessor } from "./review-processor.js";
 import { VariantProcessor } from "./variant-processor.js";
 
 // Re-export processors
-export { CmsProcessor } from "./cms-processor.js";
+export {
+    CommerceProcessor,
+    FormProcessor,
+    ImagesProcessor,
+    TestingProcessor,
+    TextImagesProcessor,
+    TextProcessor,
+    VideoProcessor,
+} from "./cms/index.js";
+export { DigitalProductProcessor } from "./digital-product-processor.js";
 export { ImageProcessor } from "./image-processor.js";
 export { ManufacturerProcessor } from "./manufacturer-processor.js";
 export { ReviewProcessor } from "./review-processor.js";
 export { VariantProcessor } from "./variant-processor.js";
 
 // Register all processors with the registry
-registry.register(CmsProcessor);
+// CMS element processors (create individual demo pages)
+registry.register(TextProcessor);
+registry.register(ImagesProcessor);
+registry.register(VideoProcessor);
+registry.register(TextImagesProcessor);
+registry.register(CommerceProcessor);
+registry.register(FormProcessor);
+// Digital product processor (runs after variants)
+registry.register(DigitalProductProcessor);
+// CMS orchestrator (creates Testing category hierarchy, runs last)
+registry.register(TestingProcessor);
+// Other processors
 registry.register(ImageProcessor);
 registry.register(ManufacturerProcessor);
 registry.register(ReviewProcessor);

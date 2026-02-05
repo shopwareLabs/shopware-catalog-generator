@@ -158,9 +158,7 @@ export const IMAGE_COLOR_OPTIONS: Array<{ name: string; imagePath: string }> = [
  * Check if a color option uses an image instead of a hex code
  */
 export function colorHasImage(colorName: string): boolean {
-    return IMAGE_COLOR_OPTIONS.some(
-        (c) => c.name.toLowerCase() === colorName.toLowerCase()
-    );
+    return IMAGE_COLOR_OPTIONS.some((c) => c.name.toLowerCase() === colorName.toLowerCase());
 }
 
 /**

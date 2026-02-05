@@ -136,7 +136,9 @@ describe("PropertyCollector", () => {
             const groups = collector.collectFromBlueprint(blueprint);
             const colorGroup = groups.find((g) => g.name === "Color");
             expect(colorGroup?.options.find((o) => o.name === "Red")?.colorHexCode).toBe("#dc2626");
-            expect(colorGroup?.options.find((o) => o.name === "Blue")?.colorHexCode).toBe("#2563eb");
+            expect(colorGroup?.options.find((o) => o.name === "Blue")?.colorHexCode).toBe(
+                "#2563eb"
+            );
         });
 
         test("sets colorHexCode for Color groups with existing properties", () => {
@@ -155,10 +157,17 @@ describe("PropertyCollector", () => {
                     options: [],
                 },
             ];
-            const groupsWithExisting = collector.collectFromBlueprint(blueprint, existingProperties);
+            const groupsWithExisting = collector.collectFromBlueprint(
+                blueprint,
+                existingProperties
+            );
             const colorGroupWithExisting = groupsWithExisting.find((g) => g.name === "Color");
-            expect(colorGroupWithExisting?.options.find((o) => o.name === "Red")?.colorHexCode).toBe("#dc2626");
-            expect(colorGroupWithExisting?.options.find((o) => o.name === "Blue")?.colorHexCode).toBe("#2563eb");
+            expect(
+                colorGroupWithExisting?.options.find((o) => o.name === "Red")?.colorHexCode
+            ).toBe("#dc2626");
+            expect(
+                colorGroupWithExisting?.options.find((o) => o.name === "Blue")?.colorHexCode
+            ).toBe("#2563eb");
         });
 
         test("merges with existing properties", () => {

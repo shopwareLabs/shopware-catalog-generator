@@ -9,6 +9,9 @@
  */
 
 import type { DataCache } from "./cache.js";
+import type { HydratedBlueprint } from "./types/index.js";
+import type { ExistingProperty } from "./utils/index.js";
+
 import { createCacheFromEnv } from "./cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
@@ -24,8 +27,6 @@ import {
     syncPropertyIdsToBlueprint,
 } from "./shopware/index.js";
 import { createTemplateFetcherFromEnv } from "./templates/index.js";
-import type { HydratedBlueprint } from "./types/index.js";
-import type { ExistingProperty } from "./utils/index.js";
 import {
     countCategories,
     logger,
@@ -293,7 +294,7 @@ function requireHydratedBlueprint(cache: DataCache, salesChannelName: string): H
     if (!blueprint) {
         throw new CLIError(
             `No hydrated blueprint found for "${salesChannelName}". ` +
-            `Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`,
+                `Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`,
             "BLUEPRINT_NOT_FOUND"
         );
     }
@@ -364,7 +365,9 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
     console.log(`\n=== Blueprint Hydrate ===`);
     console.log(`Name: ${salesChannelName}`);
     if (hydrateOnly) {
-        console.log(`Mode: ${hydrateOnly} only (preserving ${hydrateOnly === "categories" ? "products" : "product names"})`);
+        console.log(
+            `Mode: ${hydrateOnly} only (preserving ${hydrateOnly === "categories" ? "products" : "product names"})`
+        );
     } else if (forceHydration) {
         console.log(`Mode: full (--force)`);
     }
@@ -380,8 +383,8 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
     if (existingHydratedBlueprint && !hydrateOnly && !forceHydration) {
         throw new CLIError(
             `Hydrated blueprint already exists for "${salesChannelName}". ` +
-            `Re-hydrating will change product names and trigger image regeneration. ` +
-            `Use --only=categories, --only=properties, or --force.`,
+                `Re-hydrating will change product names and trigger image regeneration. ` +
+                `Use --only=categories, --only=properties, or --force.`,
             "BLUEPRINT_EXISTS"
         );
     }
@@ -391,7 +394,7 @@ async function blueprintHydrate(args: CliArgs): Promise<void> {
     if (!blueprint) {
         throw new CLIError(
             `No blueprint found for "${salesChannelName}". ` +
-            `Run: bun run src/main.ts blueprint create --name=${salesChannelName}`,
+                `Run: bun run src/main.ts blueprint create --name=${salesChannelName}`,
             "BLUEPRINT_NOT_FOUND"
         );
     }
@@ -709,7 +712,7 @@ async function processCommand(args: CliArgs): Promise<void> {
     if (!salesChannel) {
         throw new CLIError(
             `SalesChannel "${salesChannelName}" not found in Shopware. ` +
-            `Run: bun run src/main.ts generate --name=${salesChannelName}`,
+                `Run: bun run src/main.ts generate --name=${salesChannelName}`,
             "SALESCHANNEL_NOT_FOUND"
         );
     }
@@ -771,7 +774,10 @@ async function imageFixCommand(args: CliArgs): Promise<void> {
 
     const imageDescriptions = product.metadata.imageDescriptions;
     if (imageDescriptions.length === 0) {
-        throw new CLIError("Product has no image descriptions in metadata", "NO_IMAGE_DESCRIPTIONS");
+        throw new CLIError(
+            "Product has no image descriptions in metadata",
+            "NO_IMAGE_DESCRIPTIONS"
+        );
     }
 
     console.log(`Images to generate: ${imageDescriptions.length}`);

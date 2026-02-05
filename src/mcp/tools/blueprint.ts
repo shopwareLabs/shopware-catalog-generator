@@ -4,14 +4,15 @@
  * Exposes blueprint create, hydrate, and fix commands.
  */
 
+import type { HydratedBlueprint } from "../../types/index.js";
+import type { ExistingProperty } from "../../utils/index.js";
 import type { FastMCP } from "fastmcp";
 import { z } from "zod";
+
 import { createCacheFromEnv } from "../../cache.js";
 import { BlueprintGenerator, BlueprintHydrator } from "../../generators/index.js";
 import { createProvidersFromEnv } from "../../providers/index.js";
 import { DataHydrator } from "../../shopware/index.js";
-import type { HydratedBlueprint } from "../../types/index.js";
-import type { ExistingProperty } from "../../utils/index.js";
 import {
     countCategories,
     logger,

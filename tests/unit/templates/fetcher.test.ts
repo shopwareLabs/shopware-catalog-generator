@@ -298,10 +298,7 @@ describe("TemplateFetcher", () => {
                 path.join(propertiesDir, "color.json"),
                 JSON.stringify({ name: "Color", options: [] })
             );
-            fs.writeFileSync(
-                path.join(propertiesDir, "index.json"),
-                JSON.stringify(["color"])
-            );
+            fs.writeFileSync(path.join(propertiesDir, "index.json"), JSON.stringify(["color"]));
 
             const success = fetcher.copyPropertiesToCache(cache);
             expect(success).toBe(true);

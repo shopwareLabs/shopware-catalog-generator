@@ -28,6 +28,11 @@ export interface CmsBlockConfig {
     marginBottom?: string;
     marginLeft?: string;
     marginRight?: string;
+    /** Background media for text-on-image blocks */
+    backgroundMediaId?: string;
+    backgroundMediaMode?: "cover" | "contain" | "auto";
+    /** Custom CSS class */
+    cssClass?: string;
     slots: CmsSlotConfig[];
 }
 

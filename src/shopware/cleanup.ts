@@ -1,4 +1,5 @@
 import { logger } from "../utils/index.js";
+
 import { ShopwareClient } from "./client.js";
 
 /** Common Shopware search response structure */

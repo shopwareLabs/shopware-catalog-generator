@@ -84,8 +84,9 @@ function createTestableCleanup() {
     ) => s.charAt(0).toUpperCase() + s.slice(1);
 
     // Override getProductMediaFolderId
-    (cleanup as unknown as { getProductMediaFolderId: () => Promise<string | null> }).getProductMediaFolderId = async () =>
-        "product-media-folder-id";
+    (
+        cleanup as unknown as { getProductMediaFolderId: () => Promise<string | null> }
+    ).getProductMediaFolderId = async () => "product-media-folder-id";
 
     return { cleanup, mockClient };
 }
@@ -233,9 +234,24 @@ describe("ShopwareCleanup", () => {
             mockClient.mockResponse("search/media", {
                 total: 3,
                 data: [
-                    { id: "media-1", fileName: "product-image-1", mediaFolderId: "folder-1", productMedia: [] },
-                    { id: "media-2", fileName: "product-image-2", mediaFolderId: "folder-1", productMedia: [{ id: "pm-1" }] },
-                    { id: "media-3", fileName: "product-image-3", mediaFolderId: null, productMedia: [] },
+                    {
+                        id: "media-1",
+                        fileName: "product-image-1",
+                        mediaFolderId: "folder-1",
+                        productMedia: [],
+                    },
+                    {
+                        id: "media-2",
+                        fileName: "product-image-2",
+                        mediaFolderId: "folder-1",
+                        productMedia: [{ id: "pm-1" }],
+                    },
+                    {
+                        id: "media-3",
+                        fileName: "product-image-3",
+                        mediaFolderId: null,
+                        productMedia: [],
+                    },
                 ],
             });
 
@@ -255,7 +271,12 @@ describe("ShopwareCleanup", () => {
             mockClient.mockResponse("search/media", {
                 total: 2,
                 data: [
-                    { id: "media-1", fileName: "orphan-1", mediaFolderId: "folder-1", productMedia: [] },
+                    {
+                        id: "media-1",
+                        fileName: "orphan-1",
+                        mediaFolderId: "folder-1",
+                        productMedia: [],
+                    },
                     { id: "media-2", fileName: "orphan-2", mediaFolderId: null, productMedia: [] },
                 ],
             });
@@ -357,10 +378,7 @@ describe("ShopwareCleanup", () => {
 
             mockClient.mockResponse("search/property-group", {
                 total: 2,
-                data: [
-                    { id: "pg-1" },
-                    { id: "pg-2" },
-                ],
+                data: [{ id: "pg-1" }, { id: "pg-2" }],
             });
 
             const count = await cleanup.deletePropertyGroups(["Color", "Size"]);

@@ -7,14 +7,14 @@
  * 4. Assigns manufacturers to products
  */
 
-
-import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 /**
  * Manufacturer Processor implementation
@@ -294,9 +294,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                         payload: productUpdates,
                     },
                 });
-                logger.cli(
-                    `    ✓ Unassigned manufacturers from ${productUpdates.length} products`
-                );
+                logger.cli(`    ✓ Unassigned manufacturers from ${productUpdates.length} products`);
             }
 
             // Step 4: Check which manufacturers are now orphaned (no product associations)

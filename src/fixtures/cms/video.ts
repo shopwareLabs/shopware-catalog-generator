@@ -1,18 +1,11 @@
 /**
- * CMS Page Fixtures - Reusable CMS page configurations
+ * Video Elements Page - Demonstrates video CMS blocks
  *
- * Add new CMS pages here to test different element types.
+ * Blocks: youtube-video, vimeo-video
  */
 
-import type { CmsPageFixture } from "./types.js";
+import type { CmsPageFixture } from "../types.js";
 
-// =============================================================================
-// Video Elements Page
-// =============================================================================
-
-/**
- * Video Elements landing page with YouTube and Vimeo examples
- */
 export const VIDEO_ELEMENTS_PAGE: CmsPageFixture = {
     name: "Video Elements",
     type: "landingpage",
@@ -36,21 +29,42 @@ export const VIDEO_ELEMENTS_PAGE: CmsPageFixture = {
                             config: {
                                 content: {
                                     source: "static",
-                                    value: `<h2 style="text-align: center;">YouTube Video Sample</h2>
-                        <hr>
-                        <p style="text-align: center;">Shopware Global Kickoff 2026 was a blast!</p>`,
+                                    value: `<h1 style="text-align: center;">Video Elements</h1>
+<p style="text-align: center;">Embed videos from YouTube and Vimeo in your CMS pages</p>`,
                                 },
                                 verticalAlign: { source: "static", value: null },
                             },
                         },
                     ],
                 },
-                // Position 1: YouTube Video
+                // Position 1: Text intro for YouTube
                 {
-                    type: "youtube-video",
+                    type: "text-teaser",
                     position: 1,
                     sectionPosition: "main",
                     marginTop: "20px",
+                    marginBottom: "10px",
+                    slots: [
+                        {
+                            type: "text",
+                            slot: "content",
+                            config: {
+                                content: {
+                                    source: "static",
+                                    value: `<h2 style="text-align: center;">YouTube Video</h2>
+<p style="text-align: center;">Shopware Global Kickoff 2026</p>`,
+                                },
+                                verticalAlign: { source: "static", value: null },
+                            },
+                        },
+                    ],
+                },
+                // Position 2: YouTube Video
+                {
+                    type: "youtube-video",
+                    position: 2,
+                    sectionPosition: "main",
+                    marginTop: "10px",
                     marginBottom: "20px",
                     slots: [
                         {
@@ -72,13 +86,13 @@ export const VIDEO_ELEMENTS_PAGE: CmsPageFixture = {
                         },
                     ],
                 },
-                // Position 2: Text Teaser - Vimeo intro
+                // Position 3: Text intro for Vimeo
                 {
                     type: "text-teaser",
-                    position: 2,
+                    position: 3,
                     sectionPosition: "main",
                     marginTop: "20px",
-                    marginBottom: "20px",
+                    marginBottom: "10px",
                     slots: [
                         {
                             type: "text",
@@ -86,20 +100,20 @@ export const VIDEO_ELEMENTS_PAGE: CmsPageFixture = {
                             config: {
                                 content: {
                                     source: "static",
-                                    value: `<h2 style="text-align: center;">Vimeo Video Sample</h2>
-                        <p style="text-align: center;"><i>Testing Vimeo Video Element</i></p>`,
+                                    value: `<h2 style="text-align: center;">Vimeo Video</h2>
+<p style="text-align: center;">Testing the Vimeo video element</p>`,
                                 },
                                 verticalAlign: { source: "static", value: null },
                             },
                         },
                     ],
                 },
-                // Position 3: Vimeo Video
+                // Position 4: Vimeo Video
                 {
                     type: "vimeo-video",
-                    position: 3,
+                    position: 4,
                     sectionPosition: "main",
-                    marginTop: "20px",
+                    marginTop: "10px",
                     marginBottom: "20px",
                     slots: [
                         {

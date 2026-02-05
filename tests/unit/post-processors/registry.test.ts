@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
+
 import {
-    CmsProcessor,
     cleanupProcessors,
     DEFAULT_PROCESSOR_OPTIONS,
     ImageProcessor,
@@ -10,7 +10,9 @@ import {
     ReviewProcessor,
     registry,
     runProcessors,
+    TestingProcessor,
     VariantProcessor,
+    VideoProcessor,
 } from "../../../src/post-processors/index.js";
 import { logger } from "../../../src/utils/index.js";
 
@@ -45,7 +47,15 @@ describe("PostProcessor Registry", () => {
     test("has all processors registered", () => {
         const names = registry.getNames();
 
-        expect(names).toContain("cms");
+        // CMS element processors
+        expect(names).toContain("cms-text");
+        expect(names).toContain("cms-images");
+        expect(names).toContain("cms-video");
+        expect(names).toContain("cms-text-images");
+        expect(names).toContain("cms-commerce");
+        expect(names).toContain("cms-form");
+        expect(names).toContain("cms-testing");
+        // Other processors
         expect(names).toContain("images");
         expect(names).toContain("manufacturers");
         expect(names).toContain("reviews");
@@ -77,8 +87,11 @@ describe("PostProcessor Registry", () => {
 
     test("getAll returns all processors", () => {
         const all = registry.getAll();
-        expect(all.length).toBe(5);
-        expect(all.map((p) => p.name)).toContain("cms");
+        // 7 CMS processors + 5 other processors = 12 total
+        expect(all.length).toBe(12);
+        expect(all.map((p) => p.name)).toContain("cms-video");
+        expect(all.map((p) => p.name)).toContain("cms-testing");
+        expect(all.map((p) => p.name)).toContain("digital-product");
         expect(all.map((p) => p.name)).toContain("images");
         expect(all.map((p) => p.name)).toContain("manufacturers");
         expect(all.map((p) => p.name)).toContain("reviews");
@@ -93,8 +106,17 @@ describe("PostProcessor Registry", () => {
 });
 
 describe("PostProcessor Dependencies", () => {
-    test("cms processor has no dependencies", () => {
-        expect(CmsProcessor.dependsOn).toEqual([]);
+    test("video processor has no dependencies", () => {
+        expect(VideoProcessor.dependsOn).toEqual([]);
+    });
+
+    test("testing processor depends on all element processors", () => {
+        expect(TestingProcessor.dependsOn).toContain("cms-text");
+        expect(TestingProcessor.dependsOn).toContain("cms-images");
+        expect(TestingProcessor.dependsOn).toContain("cms-video");
+        expect(TestingProcessor.dependsOn).toContain("cms-text-images");
+        expect(TestingProcessor.dependsOn).toContain("cms-commerce");
+        expect(TestingProcessor.dependsOn).toContain("cms-form");
     });
 
     test("images processor has no dependencies", () => {

@@ -29,7 +29,10 @@ export interface RetryOptions {
  * Error thrown when an operation times out
  */
 export class TimeoutError extends Error {
-    constructor(message: string, public readonly timeoutMs: number) {
+    constructor(
+        message: string,
+        public readonly timeoutMs: number
+    ) {
         super(message);
         this.name = "TimeoutError";
     }

@@ -494,7 +494,9 @@ ${availableProducts}`;
             results.push(``);
 
             if (args.dryRun) {
-                results.push(`[DRY RUN] Would generate and upload ${imageDescriptions.length} images`);
+                results.push(
+                    `[DRY RUN] Would generate and upload ${imageDescriptions.length} images`
+                );
                 return results.join("\n");
             }
 
@@ -513,7 +515,13 @@ ${availableProducts}`;
                     continue;
                 }
 
-                cache.saveImageWithView(salesChannelName, product.id, desc.view, imageData, desc.prompt);
+                cache.saveImageWithView(
+                    salesChannelName,
+                    product.id,
+                    desc.view,
+                    imageData,
+                    desc.prompt
+                );
                 results.push(`  ✓ Generated and cached ${desc.view} image`);
             }
 

@@ -7,6 +7,12 @@
  * 3. Sets cover image and gallery images
  */
 
+import type {
+    PostProcessor,
+    PostProcessorCleanupResult,
+    PostProcessorContext,
+    PostProcessorResult,
+} from "./index.js";
 
 import {
     apiPost,
@@ -17,12 +23,6 @@ import {
     generateUUID,
     logger,
 } from "../utils/index.js";
-import type {
-    PostProcessor,
-    PostProcessorCleanupResult,
-    PostProcessorContext,
-    PostProcessorResult,
-} from "./index.js";
 
 /**
  * Image Processor implementation
@@ -1185,9 +1185,7 @@ class ImageProcessorImpl implements PostProcessor {
                             payload: categoryUpdates,
                         },
                     });
-                    logger.cli(
-                        `    ✓ Cleared media from ${categoriesWithMedia.length} categories`
-                    );
+                    logger.cli(`    ✓ Cleared media from ${categoriesWithMedia.length} categories`);
                 }
             }
         } catch (error) {

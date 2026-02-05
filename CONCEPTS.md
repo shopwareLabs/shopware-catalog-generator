@@ -413,28 +413,69 @@ Processors can declare dependencies to control execution order:
        │           NO DEPENDENCIES (parallel)             │
        │                                                  │
        │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │
-       │  │  CMS    │ │ Images  │ │Manufact-│ │ Reviews │ │
-       │  │  Pages  │ │         │ │  urers  │ │         │ │
+       │  │ cms-*   │ │ Images  │ │Manufact-│ │ Reviews │ │
+       │  │(6 procs)│ │         │ │  urers  │ │         │ │
        │  └─────────┘ └─────────┘ └────┬────┘ └─────────┘ │
        │                               │                  │
        └───────────────────────────────┼──────────────────┘
-                                       │
                                        │ depends on
                                        ⯆
                                ┌─────────────┐
                                │  Variants   │
-                               └─────────────┘
+                               └──────┬──────┘
+                                      │ depends on
+                                      ⯆
+                              ┌───────────────┐
+                              │digital-product│
+                              └───────┬───────┘
+                                      │ depends on
+                                      ⯆
+                              ┌───────────────┐
+                              │  cms-testing  │
+                              └───────────────┘
 ```
 
 ### Available Processors
 
-| Processor       | Description                          | Dependencies  |
-| --------------- | ------------------------------------ | ------------- |
-| `cms`           | CMS landing pages and category links | None          |
-| `images`        | Product and category images          | None          |
-| `manufacturers` | Fictional manufacturer creation      | None          |
-| `reviews`       | Product reviews (0-10 per product)   | None          |
-| `variants`      | Variant product creation             | manufacturers |
+| Processor         | Description                          | Dependencies               |
+| ----------------- | ------------------------------------ | -------------------------- |
+| `cms-text`        | Text CMS demo page                   | None                       |
+| `cms-images`      | Images CMS demo page                 | None                       |
+| `cms-video`       | Video CMS demo page                  | None                       |
+| `cms-text-images` | Text & Images CMS demo page          | None                       |
+| `cms-commerce`    | Commerce CMS demo page               | None                       |
+| `cms-form`        | Form CMS demo page                   | None                       |
+| `images`          | Product and category images          | None                       |
+| `manufacturers`   | Fictional manufacturer creation      | None                       |
+| `reviews`         | Product reviews (0-10 per product)   | None                       |
+| `variants`        | Variant product creation             | manufacturers              |
+| `digital-product` | Digital product with download        | variants                   |
+| `cms-testing`     | Testing category hierarchy           | cms-*, digital-product     |
+
+### Testing Page Hierarchy
+
+The Testing category provides a structured demo of all CMS elements and product types:
+
+```
+Testing (placeholder landing page)
+├── CMS (CMS Element Showcase)
+│   ├── Text
+│   ├── Images
+│   ├── Video
+│   ├── Text & Images
+│   ├── Commerce
+│   └── Form
+└── Products (navigation category)
+    ├── Simple Product (link to product)
+    ├── Variant Product (link to product)
+    └── Digital Product (link to product)
+```
+
+The `cms-testing` processor orchestrates the entire hierarchy:
+1. Creates Testing category with placeholder page
+2. Creates CMS sub-category with showcase page
+3. Links element demo pages from other CMS processors
+4. Creates Products category with direct product links
 
 ### Processor Interface
 

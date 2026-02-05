@@ -47,7 +47,18 @@ src/
 │
 ├── post-processors/          # v2 Post-processors (parallel execution)
 │   ├── index.ts              # Interface, registry, ordered runner
-│   ├── cms-processor.ts      # CMS landing pages + category links
+│   ├── cms/                  # CMS demo page processors
+│   │   ├── AGENTS.md         # CMS processor documentation
+│   │   ├── index.ts          # Re-exports all CMS processors
+│   │   ├── base-processor.ts # Abstract base class for CMS processors
+│   │   ├── text-processor.ts # Text elements demo page
+│   │   ├── images-processor.ts # Image elements demo page
+│   │   ├── video-processor.ts # Video elements demo page
+│   │   ├── text-images-processor.ts # Text & Images demo page
+│   │   ├── commerce-processor.ts # Commerce elements demo page
+│   │   ├── form-processor.ts # Form elements demo page
+│   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
+│   ├── digital-product-processor.ts # Digital product with download
 │   ├── image-processor.ts    # Multi-view image generation
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── variant-processor.ts  # Simple v2.0 (marking only)
@@ -56,7 +67,16 @@ src/
 ├── fixtures/                 # Reusable data configurations
 │   ├── index.ts              # Re-exports all fixtures
 │   ├── types.ts              # Fixture type definitions
-│   ├── cms-pages.ts          # CMS page configurations (video-elements, etc.)
+│   ├── cms/                  # CMS page fixtures
+│   │   ├── index.ts          # Re-exports all CMS fixtures
+│   │   ├── testing-placeholder.ts # Testing entry page
+│   │   ├── welcome.ts        # CMS Element Showcase page
+│   │   ├── text.ts           # Text elements page
+│   │   ├── images.ts         # Image elements page
+│   │   ├── video.ts          # Video elements page
+│   │   ├── text-images.ts    # Text & Images page
+│   │   ├── commerce.ts       # Commerce elements page
+│   │   └── form.ts           # Form elements page
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
 │
@@ -105,11 +125,17 @@ tests/
 │   │   └── blueprint-generator.test.ts
 │   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
-│   │   ├── cms-processor.test.ts
 │   │   ├── image-processor.test.ts
 │   │   ├── manufacturer-processor.test.ts
 │   │   ├── review-processor.test.ts
-│   │   └── variant-processor.test.ts
+│   │   ├── variant-processor.test.ts
+│   │   ├── digital-product-processor.test.ts
+│   │   └── cms/              # CMS processor tests
+│   │       ├── base-processor.test.ts
+│   │       ├── commerce-processor.test.ts
+│   │       ├── images-processor.test.ts
+│   │       ├── testing-processor.test.ts
+│   │       └── simple-processors.test.ts
 │   ├── providers/            # Provider tests
 │   │   └── pollinations-provider.test.ts
 │   ├── server/               # Server tests
@@ -244,14 +270,24 @@ interface PostProcessor {
     readonly dependsOn: string[];  // Dependency ordering
     process(context: PostProcessorContext): Promise<PostProcessorResult>;
 }
-
-// Available processors
-- cms: CMS landing pages + category links (Video Elements demo page)
-- images: Multi-view product/category images
-- manufacturers: Fictional manufacturer creation
-- variants: Simple tagging (v2.0) - full creation in v2.1
-- reviews: Variable review counts (0-10 per product)
 ```
+
+**Available processors:**
+
+| Processor | Description | Dependencies |
+|-----------|-------------|--------------|
+| `cms-text` | Text elements demo page | none |
+| `cms-images` | Image elements demo page | none |
+| `cms-video` | Video elements demo page | none |
+| `cms-text-images` | Text & Images demo page | none |
+| `cms-commerce` | Commerce elements demo page | none |
+| `cms-form` | Form elements demo page | none |
+| `images` | Multi-view product/category images | none |
+| `manufacturers` | Fictional manufacturer creation | none |
+| `reviews` | Variable review counts (0-10 per product) | none |
+| `variants` | Variant product creation | manufacturers |
+| `digital-product` | Digital product with download | variants |
+| `cms-testing` | Testing category hierarchy | cms-*, digital-product |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -259,6 +295,8 @@ Processors run in parallel when possible, respecting dependencies:
 await runProcessors(context, ["images", "manufacturers", "reviews"]);
 // Runs: manufacturers → (images, reviews in parallel)
 ```
+
+See [src/post-processors/cms/AGENTS.md](src/post-processors/cms/AGENTS.md) for CMS processor details.
 
 ### Provider System
 
@@ -414,6 +452,39 @@ Key principles:
 - Property/category normalization should use generic pattern matching, not hardcoded synonyms
 - Examples in prompts should be abstract or derived from the actual store type
 - The only hardcoded property is `Color` (universal across all domains)
+
+### AI Generation Timing
+
+**AI generation happens ONLY during blueprint hydration, NEVER in post-processors.**
+
+Post-processors must be fast and deterministic. All AI-generated content should be:
+1. Generated during the blueprint hydration phase (Phase 2)
+2. Stored in cache or fixtures for reuse
+3. Loaded from fixtures/cache at runtime
+
+```typescript
+// Bad: AI call in post-processor (slow, non-deterministic)
+async process(context) {
+    const description = await this.textProvider.generate("Create gift card description");
+    await this.createProduct({ description });
+}
+
+// Good: Use pre-defined fixture content
+import { GIFT_CARD_50 } from "../fixtures/digital-products.js";
+
+async process(context) {
+    await this.createProduct({
+        name: GIFT_CARD_50.name,
+        description: GIFT_CARD_50.description,
+    });
+}
+```
+
+Benefits:
+- **Fast execution**: No waiting for AI API calls
+- **Deterministic**: Same content every time
+- **Testable**: Fixtures can be unit tested
+- **Reusable**: Same content across all SalesChannels
 
 ### Idempotency
 
@@ -814,6 +885,7 @@ bun run blueprint hydrate \
 ```
 
 Hydration modes:
+
 - **Default (new)**: Full hydration, generates everything
 - **--only=categories**: Only update category names/descriptions, preserve all product data
 - **--only=properties**: Only update product properties, preserve names (for image stability)
@@ -1066,9 +1138,9 @@ Handles GitHub Models' 10 requests/60s limit.
 import { logger } from "./utils/index.js";
 
 // User-facing output (file + console, respects MCP mode)
-logger.cli("✓ Created SalesChannel");           // info level
-logger.cli("⚠ Rate limited", "warn");           // warn level
-logger.cli("✗ Failed", "error");                // error level
+logger.cli("✓ Created SalesChannel"); // info level
+logger.cli("⚠ Rate limited", "warn"); // warn level
+logger.cli("✗ Failed", "error"); // error level
 
 // Diagnostic logging (file only)
 logger.debug("Debug info", { data });
@@ -1086,5 +1158,6 @@ logger.cleanup(10);
 Logs are written to `logs/generator-{timestamp}.log`. Clear with `bun run logs:clear`.
 
 **Allowed `console.*` usage:**
+
 - CLI entry points only: `main.ts`, `*-cli.ts`, `server.ts`
 - The `logger.ts` file itself

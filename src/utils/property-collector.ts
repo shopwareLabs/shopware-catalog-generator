@@ -13,13 +13,14 @@
  * 6. Applies HEX color codes from the color palette
  */
 
-
-import { colorHasImage } from "../fixtures/index.js";
 import type {
     BlueprintPropertyGroup,
     BlueprintPropertyOption,
     HydratedBlueprint,
 } from "../types/index.js";
+
+import { colorHasImage } from "../fixtures/index.js";
+
 import { getColorHex } from "./color-palette.js";
 import { generateUUID } from "./uuid.js";
 
@@ -89,8 +90,7 @@ export class PropertyCollector {
             // Color type: inherited from existing groups OR if the group name is "Color"
             // This ensures fresh stores get color hex codes too
             const isColorType =
-                existingGroup?.displayType === "color" ||
-                normalizedGroupName === "color";
+                existingGroup?.displayType === "color" || normalizedGroupName === "color";
 
             // Build option ID lookup for this group
             const existingOptionByName = new Map<string, ExistingPropertyOption>();
@@ -115,8 +115,8 @@ export class PropertyCollector {
                     // Only generate hex codes for color-type groups without images
                     colorHexCode: hasImage
                         ? undefined
-                        : existingOption?.colorHexCode ??
-                          (isColorType ? getColorHex(value) : undefined),
+                        : (existingOption?.colorHexCode ??
+                          (isColorType ? getColorHex(value) : undefined)),
                 };
             });
 

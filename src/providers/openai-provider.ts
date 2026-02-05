@@ -1,7 +1,8 @@
+import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+
 import { logger } from "../utils/index.js";
 
 /**

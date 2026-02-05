@@ -251,12 +251,12 @@ Expected times for 90 products:
 
 **Full generation with images (~270 images at 3 views per product):**
 
-| Provider           | Image Model     | Time       |
-| ------------------ | --------------- | ---------- |
-| OpenAI             | gpt-image-1.5   | ~35-40 min |
-| Pollinations       | flux (default)  | ~15-20 min |
-| Pollinations       | turbo (fast)    | ~10-15 min |
-| Any (images: none) | -               | ~5-13 min  |
+| Provider           | Image Model    | Time       |
+| ------------------ | -------------- | ---------- |
+| OpenAI             | gpt-image-1.5  | ~35-40 min |
+| Pollinations       | flux (default) | ~15-20 min |
+| Pollinations       | turbo (fast)   | ~10-15 min |
+| Any (images: none) | -              | ~5-13 min  |
 
 > **Note:** Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~35s per image. Use `IMAGE_PROVIDER=none` to skip images for faster testing.
 

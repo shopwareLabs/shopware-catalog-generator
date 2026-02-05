@@ -9,8 +9,19 @@
  * import { VIDEO_ELEMENTS_PAGE, REVIEWER_NAMES } from "./fixtures/index.js";
  */
 
-// CMS Pages
-export { VIDEO_ELEMENTS_PAGE } from "./cms-pages.js";
+// CMS Pages (organized by block category)
+export {
+    COMMERCE_ELEMENTS_PAGE,
+    FORM_ELEMENTS_PAGE,
+    IMAGES_ELEMENTS_PAGE,
+    TESTING_PLACEHOLDER_PAGE,
+    TEXT_ELEMENTS_PAGE,
+    TEXT_IMAGES_ELEMENTS_PAGE,
+    VIDEO_ELEMENTS_PAGE,
+    WELCOME_PAGE,
+} from "./cms/index.js";
+// Digital Products
+export { GIFT_CARD_50 } from "./digital-products.js";
 // Property Groups (universal groups for seeding generated/properties/)
 export {
     colorHasImage,

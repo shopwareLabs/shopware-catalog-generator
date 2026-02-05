@@ -1,7 +1,8 @@
+import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+
 import { logger } from "../utils/index.js";
 
 /** Pollinations.ai text generation provider (see README for details) */
@@ -171,9 +172,7 @@ export class PollinationsImageProvider implements ImageProvider {
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
                 logger.warn("Pollinations image generation timed out after 2 minutes");
-                logger.cli(
-                    "TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo"
-                );
+                logger.cli("TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo");
             } else {
                 logger.warn("Pollinations image generation failed:", error);
             }

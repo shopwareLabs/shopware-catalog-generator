@@ -6,6 +6,7 @@
  */
 
 import type { HydratedBlueprint } from "../types/index.js";
+
 import { logger } from "./logger.js";
 
 // =============================================================================
@@ -423,9 +424,7 @@ function validateImageDescriptions(blueprint: HydratedBlueprint): BlueprintValid
         }
 
         // Check for empty prompts
-        const hasEmptyPrompt = imageDescs.some(
-            (desc) => !desc.prompt || desc.prompt.trim() === ""
-        );
+        const hasEmptyPrompt = imageDescs.some((desc) => !desc.prompt || desc.prompt.trim() === "");
         if (hasEmptyPrompt) {
             productsWithEmptyPrompts.push(product.id);
         }
@@ -545,12 +544,24 @@ function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidati
         }
     }
 
-    // 2. Check Color properties have hex codes
+    // 2. Check Color properties have hex codes (excluding image-based colors)
+    const imageColorNames = [
+        "multicolor",
+        "multi-color",
+        "rainbow",
+        "assorted",
+        "mixed",
+        "patterned",
+        "printed",
+        "gradient",
+    ];
     const colorGroups = blueprint.propertyGroups.filter((g) =>
         g.name.toLowerCase().includes("color")
     );
     for (const colorGroup of colorGroups) {
-        const missingHex = colorGroup.options.filter((o) => !o.colorHexCode);
+        const missingHex = colorGroup.options.filter(
+            (o) => !o.colorHexCode && !imageColorNames.includes(o.name.toLowerCase())
+        );
         if (missingHex.length > 0) {
             issues.push({
                 type: "warning",

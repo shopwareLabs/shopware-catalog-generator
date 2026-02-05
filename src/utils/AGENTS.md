@@ -149,9 +149,9 @@ File-based logging with MCP-safe console output:
 import { logger } from "./utils/index.js";
 
 // User-facing output (file + console, respects MCP mode)
-logger.cli("✓ Created SalesChannel");           // info level (default)
-logger.cli("⚠ Rate limited", "warn");           // warn level
-logger.cli("✗ Upload failed", "error");         // error level
+logger.cli("✓ Created SalesChannel"); // info level (default)
+logger.cli("⚠ Rate limited", "warn"); // warn level
+logger.cli("✗ Upload failed", "error"); // error level
 
 // Diagnostic logging (file only)
 logger.debug("Debug info", { data });
@@ -160,7 +160,7 @@ logger.warn("Recoverable issue", { context });
 logger.error("Operation failed", { error });
 
 // Special methods
-logger.apiError("endpoint", 500, response);     // File + console (unless MCP)
+logger.apiError("endpoint", 500, response); // File + console (unless MCP)
 
 // Log cleanup (keeps last 10 files by default)
 const deleted = logger.cleanup(10);

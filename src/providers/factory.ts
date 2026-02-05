@@ -48,9 +48,7 @@ export function createProviders(config: ProviderConfig): {
     const imageProvider = createImageProvider(config);
 
     logger.cli(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`);
-    logger.cli(
-        `Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`
-    );
+    logger.cli(`Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`);
 
     return { text: textProvider, image: imageProvider };
 }

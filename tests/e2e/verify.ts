@@ -248,9 +248,20 @@ async function verifyGeneration(
                 console.log(`  ✓ Color displayType: color`);
             }
 
-            // Check hex codes on options
+            // Check hex codes on options (excluding image-based colors like Multicolor, Rainbow, etc.)
+            const imageColorNames = [
+                "multicolor",
+                "multi-color",
+                "rainbow",
+                "assorted",
+                "mixed",
+                "patterned",
+                "printed",
+                "gradient",
+            ];
             const optionsWithoutHex = (colorGroup.options || []).filter(
-                (o) => !o.colorHexCode
+                (o) =>
+                    !o.colorHexCode && !imageColorNames.includes(o.name?.toLowerCase() || "")
             );
             if (optionsWithoutHex.length > 0) {
                 result.errors.push(
@@ -260,8 +271,12 @@ async function verifyGeneration(
                     `  ✗ Color options missing hex: ${optionsWithoutHex.map((o) => o.name).join(", ")}`
                 );
             } else {
+                const imageColors = (colorGroup.options || []).filter((o) =>
+                    imageColorNames.includes(o.name?.toLowerCase() || "")
+                );
+                const hexColors = (colorGroup.options || []).filter((o) => o.colorHexCode);
                 console.log(
-                    `  ✓ Color hex codes: ${colorGroup.options?.length || 0} options with hex`
+                    `  ✓ Color options: ${hexColors.length} with hex, ${imageColors.length} with images`
                 );
             }
         }

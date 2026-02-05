@@ -941,9 +941,7 @@ export class ShopwareHydrator extends ShopwareClient {
      * Uses SHA256 hash for collision resistance (XOR is not collision-resistant).
      */
     private generateVisibilityId(productId: string, salesChannelId: string): string {
-        const hash = createHash("sha256")
-            .update(`${productId}:${salesChannelId}`)
-            .digest("hex");
+        const hash = createHash("sha256").update(`${productId}:${salesChannelId}`).digest("hex");
         return hash.slice(0, 32); // Shopware UUID format (32 hex chars)
     }
 
@@ -1092,16 +1090,11 @@ export class ShopwareHydrator extends ShopwareClient {
     /**
      * Upload a file to an existing media entity
      */
-    async uploadMediaFile(
-        mediaId: string,
-        buffer: Buffer,
-        extension: string
-    ): Promise<boolean> {
+    async uploadMediaFile(mediaId: string, buffer: Buffer, extension: string): Promise<boolean> {
         if (!this.isAuthenticated()) return false;
 
         try {
-            const contentType =
-                extension === "svg" ? "image/svg+xml" : `image/${extension}`;
+            const contentType = extension === "svg" ? "image/svg+xml" : `image/${extension}`;
 
             await this.apiClient.post(
                 `_action/media/${mediaId}/upload?extension=${extension}&fileName=color-option-${mediaId}`,
@@ -1120,10 +1113,7 @@ export class ShopwareHydrator extends ShopwareClient {
     /**
      * Update a property option with a media ID (and clear hex code)
      */
-    async updatePropertyOptionMedia(
-        optionId: string,
-        mediaId: string
-    ): Promise<boolean> {
+    async updatePropertyOptionMedia(optionId: string, mediaId: string): Promise<boolean> {
         if (!this.isAuthenticated()) return false;
 
         try {

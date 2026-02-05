@@ -3,7 +3,13 @@
  */
 
 import { describe, expect, mock, test } from "bun:test";
+
 import type { DataHydrator } from "../../../src/shopware/index.js";
+import type {
+    BlueprintPropertyGroup,
+    HydratedBlueprint,
+    SalesChannelFull,
+} from "../../../src/types/index.js";
 
 import {
     buildPropertyMaps,
@@ -12,11 +18,6 @@ import {
     syncPropertyGroups,
     syncPropertyIdsToBlueprint,
 } from "../../../src/shopware/sync.js";
-import type {
-    BlueprintPropertyGroup,
-    HydratedBlueprint,
-    SalesChannelFull,
-} from "../../../src/types/index.js";
 import { logger } from "../../../src/utils/index.js";
 
 // Suppress console output during tests
@@ -563,13 +564,7 @@ describe("syncProducts", () => {
         const categoryIdMap = new Map([["Electronics", "sw-cat-123"]]);
         const propertyOptionMap = new Map([["color::red", { id: "opt-red", name: "Red" }]]);
 
-        await syncProducts(
-            dataHydrator,
-            blueprint,
-            salesChannel,
-            categoryIdMap,
-            propertyOptionMap
-        );
+        await syncProducts(dataHydrator, blueprint, salesChannel, categoryIdMap, propertyOptionMap);
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 

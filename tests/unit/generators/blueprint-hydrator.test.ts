@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
-import { BlueprintHydrator } from "../../../src/generators/blueprint-hydrator.js";
+
 import type {
     Blueprint,
     BlueprintCategory,
@@ -15,6 +15,8 @@ import type {
     HydratedBlueprint,
     TextProvider,
 } from "../../../src/types/index.js";
+
+import { BlueprintHydrator } from "../../../src/generators/blueprint-hydrator.js";
 
 // Test cache directory
 const TEST_CACHE_DIR = "./test-generated-hydrator";
@@ -305,9 +307,7 @@ function createTestHydratedBlueprint(): HydratedBlueprint {
                 categoryIds: ["cat1", "cat1-1"],
                 metadata: {
                     imageCount: 1,
-                    imageDescriptions: [
-                        { view: "front", prompt: "Oak coffee table front view" },
-                    ],
+                    imageDescriptions: [{ view: "front", prompt: "Oak coffee table front view" }],
                     isVariant: false,
                     properties: [
                         { group: "Material", value: "Oak" },

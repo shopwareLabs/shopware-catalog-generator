@@ -13,8 +13,6 @@
  * 2. One call per top-level category branch for products
  */
 
-import { z } from "zod";
-import { PropertyCache } from "../property-cache.js";
 import type {
     Blueprint,
     BlueprintCategory,
@@ -27,6 +25,9 @@ import type {
     VariantConfig,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import { z } from "zod";
+
+import { PropertyCache } from "../property-cache.js";
 import {
     ConcurrencyLimiter,
     executeWithRetry,
@@ -163,11 +164,7 @@ function estimateTokens(payload: unknown, providerName?: string): number {
  * @param providerName - Optional provider name for provider-specific estimation
  * @returns True if payload fits within the safe token limit
  */
-function fitsInTokenLimit(
-    payload: unknown,
-    tokenLimit: number,
-    providerName?: string
-): boolean {
+function fitsInTokenLimit(payload: unknown, tokenLimit: number, providerName?: string): boolean {
     const estimated = estimateTokens(payload, providerName);
     return estimated < tokenLimit * 0.7;
 }
@@ -278,9 +275,7 @@ export class BlueprintHydrator {
      * Preserves all product data (names, descriptions, properties) unchanged.
      * Useful for restructuring/renaming categories without triggering image regeneration.
      */
-    async hydrateCategoriesOnly(
-        existingBlueprint: HydratedBlueprint
-    ): Promise<HydratedBlueprint> {
+    async hydrateCategoriesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
         logger.info("Hydrating categories only (preserving product data)...");
         logger.info("Starting categories-only hydration", {
             salesChannel: existingBlueprint.salesChannel.name,
@@ -690,9 +685,7 @@ Return JSON in this exact format:
 
         // Log parallelization strategy
         if (maxConcurrency > 1) {
-            logger.cli(
-                `    Using parallel processing (max ${maxConcurrency} concurrent branches)`
-            );
+            logger.cli(`    Using parallel processing (max ${maxConcurrency} concurrent branches)`);
             logger.info(`Parallel branch processing enabled`, { maxConcurrency, totalBranches });
         } else {
             logger.cli(`    Using sequential processing (provider: ${this.textProvider.name})`);
@@ -754,19 +747,33 @@ Return JSON in this exact format:
                 fulfilledProducts.push(...result.value);
             } else {
                 const branchEntry = branches[i];
-                const branchName = branchEntry ? categoryNameMap.get(branchEntry[0]) || `Branch ${i + 1}` : `Branch ${i + 1}`;
-                const error = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+                const branchName = branchEntry
+                    ? categoryNameMap.get(branchEntry[0]) || `Branch ${i + 1}`
+                    : `Branch ${i + 1}`;
+                const error =
+                    result.reason instanceof Error
+                        ? result.reason
+                        : new Error(String(result.reason));
                 failedBranches.push({ branchIndex: i, error });
-                logger.cli(`    ✗ ${storeContext.name} > ${branchName} failed: ${error.message}`, "error");
-                logger.error(`Branch ${branchName} failed`, { error: error.message, branchIndex: i });
+                logger.cli(
+                    `    ✗ ${storeContext.name} > ${branchName} failed: ${error.message}`,
+                    "error"
+                );
+                logger.error(`Branch ${branchName} failed`, {
+                    error: error.message,
+                    branchIndex: i,
+                });
             }
         }
 
         // If some branches failed, log summary but return partial results
         if (failedBranches.length > 0) {
             const successCount = settledResults.length - failedBranches.length;
-            logger.cli(`\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
-                `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`, "warn");
+            logger.cli(
+                `\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
+                    `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`,
+                "warn"
+            );
             logger.warn(`Partial hydration: ${failedBranches.length} branches failed`, {
                 failedCount: failedBranches.length,
                 successCount,
@@ -1837,7 +1844,9 @@ RESPOND ONLY WITH JSON. No explanation, no markdown. Just the JSON object:`;
         }
 
         // Use concurrency limiter for parallel processing (respects provider limits)
-        const maxConcurrency = this.textProvider.isSequential ? 1 : this.textProvider.maxConcurrency;
+        const maxConcurrency = this.textProvider.isSequential
+            ? 1
+            : this.textProvider.maxConcurrency;
         const limiter = new ConcurrencyLimiter(maxConcurrency);
         const totalBatches = batches.length;
 

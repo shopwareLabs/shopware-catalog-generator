@@ -12,6 +12,11 @@
 #   ./test-e2e.sh --reuse=<name> --skip-hydrate   # Skip AI, just upload → verify
 #   ./test-e2e.sh --reuse=<name> --skip-upload    # Just verify existing data
 #   ./test-e2e.sh --cleanup=<name>   # Only cleanup specific SalesChannel
+#
+# Post-processors run:
+# - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form
+# - Digital product: digital-product (creates Gift Card €50)
+# - CMS orchestrator: cms-testing (creates Testing category hierarchy)
 
 set -e  # Exit on error
 
@@ -76,7 +81,20 @@ trap cleanup EXIT
 # Cleanup only mode
 if [ -n "$CLEANUP_ONLY" ]; then
     echo "Running cleanup for $CLEANUP_ONLY..."
+
+    # Cleanup CMS processors first (reverse order)
+    echo "  Cleaning up CMS processors..."
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-testing || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form || true
+
+    # Cleanup digital product
+    echo "  Cleaning up digital product..."
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=digital-product || true
+
+    # Cleanup SalesChannel and data
+    echo "  Cleaning up SalesChannel..."
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --delete --props || echo "Cleanup skipped (nothing to clean)"
+
     echo "Cleanup complete."
     exit 0
 fi
@@ -139,8 +157,20 @@ elif [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json
     echo "[4/5] Skipping post-processors (no hydrated blueprint)"
 else
     echo "[4/5] Running post-processors..."
-    bun run process --name="$TEST_SALESCHANNEL" --dry-run
-    echo "✓ Post-processors complete (dry run)"
+
+    # Run CMS element processors (create demo pages)
+    echo "  Running CMS processors..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form
+
+    # Run digital product processor (create gift card)
+    echo "  Running digital product processor..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=digital-product
+
+    # Run CMS testing processor (create Testing category hierarchy)
+    echo "  Running CMS testing orchestrator..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=cms-testing
+
+    echo "✓ Post-processors complete"
 fi
 echo ""
 

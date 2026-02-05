@@ -84,7 +84,6 @@ export const COLOR_PALETTE: Record<string, string> = {
     Camel: "#c19a6b",
     Linen: "#faf0e6",
     "Charcoal Gray": "#36454f",
-
 };
 
 /**

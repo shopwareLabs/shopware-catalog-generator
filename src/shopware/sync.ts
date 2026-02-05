@@ -6,13 +6,14 @@
  */
 
 import type { HydratedBlueprint, SalesChannelFull } from "../types/index.js";
+import type { DataHydrator } from "./index.js";
+
 import {
     buildCategoryPath,
     convertBlueprintCategories,
     findCategoryPathById,
     logger,
 } from "../utils/index.js";
-import type { DataHydrator } from "./index.js";
 
 // =============================================================================
 // Types
@@ -197,8 +198,7 @@ export async function syncPropertyGroups(
 
         // Check what the blueprint wants (not what Shopware currently has)
         const blueprintWantsColor = blueprintGroup.displayType === "color";
-        const needsDisplayTypeUpdate =
-            blueprintWantsColor && existing.displayType !== "color";
+        const needsDisplayTypeUpdate = blueprintWantsColor && existing.displayType !== "color";
 
         // For color groups, check if existing options need hex code updates
         let optionsNeedingHexUpdate: typeof blueprintGroup.options = [];
@@ -227,9 +227,8 @@ export async function syncPropertyGroups(
         const allOptionsToSync = needsDisplayTypeUpdate
             ? blueprintGroup.options.map((o) => ({
                   id:
-                      existing.options.find(
-                          (e) => e.name.toLowerCase() === o.name.toLowerCase()
-                      )?.id ?? o.id,
+                      existing.options.find((e) => e.name.toLowerCase() === o.name.toLowerCase())
+                          ?.id ?? o.id,
                   name: o.name,
                   colorHexCode: o.colorHexCode,
               }))
@@ -298,9 +297,7 @@ async function uploadColorImages(
     const path = await import("path");
 
     // Find Color property group in blueprint
-    const colorGroup = blueprint.propertyGroups.find(
-        (g) => g.name.toLowerCase() === "color"
-    );
+    const colorGroup = blueprint.propertyGroups.find((g) => g.name.toLowerCase() === "color");
     if (!colorGroup) return;
 
     // Find color options that use images
