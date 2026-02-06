@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
-import { DigitalProductProcessor } from "../../../src/post-processors/digital-product-processor.js";
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
+
+import { DigitalProductProcessor } from "../../../src/post-processors/digital-product-processor.js";
 
 // Helper to create mock cache
 function createMockCache() {
@@ -19,10 +20,12 @@ interface FetchCall {
 }
 
 // Helper to create mock context with fetch tracking
-function createMockContext(options: {
-    dryRun?: boolean;
-    fetchResponses?: Map<string, { ok: boolean; data: unknown }>;
-} = {}): { context: PostProcessorContext; fetchCalls: FetchCall[] } {
+function createMockContext(
+    options: {
+        dryRun?: boolean;
+        fetchResponses?: Map<string, { ok: boolean; data: unknown }>;
+    } = {}
+): { context: PostProcessorContext; fetchCalls: FetchCall[] } {
     const fetchCalls: FetchCall[] = [];
     const responses = options.fetchResponses || new Map();
 

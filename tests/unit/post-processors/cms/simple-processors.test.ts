@@ -3,11 +3,13 @@
  * without custom logic: TextProcessor, VideoProcessor, TextImagesProcessor, FormProcessor
  */
 import { describe, expect, mock, test } from "bun:test";
+
+import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
+
 import { FormProcessor } from "../../../../src/post-processors/cms/form-processor.js";
 import { TextImagesProcessor } from "../../../../src/post-processors/cms/text-images-processor.js";
 import { TextProcessor } from "../../../../src/post-processors/cms/text-processor.js";
 import { VideoProcessor } from "../../../../src/post-processors/cms/video-processor.js";
-import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 // Helper to create mock cache
 function createMockCache() {

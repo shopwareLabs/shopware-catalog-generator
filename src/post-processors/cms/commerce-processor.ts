@@ -6,9 +6,10 @@
  */
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { PostProcessorContext, PostProcessorResult } from "../index.js";
+
 import { COMMERCE_ELEMENTS_PAGE } from "../../fixtures/index.js";
 import { apiPost, logger } from "../../utils/index.js";
-import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { BaseCmsProcessor } from "./base-processor.js";
 

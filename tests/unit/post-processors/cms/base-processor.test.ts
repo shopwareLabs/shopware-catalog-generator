@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import type { CmsPageFixture } from "../../../../src/fixtures/index.js";
-import { BaseCmsProcessor } from "../../../../src/post-processors/cms/base-processor.js";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
+
+import { BaseCmsProcessor } from "../../../../src/post-processors/cms/base-processor.js";
 
 // Concrete implementation for testing the abstract base class
 class TestCmsProcessor extends BaseCmsProcessor {

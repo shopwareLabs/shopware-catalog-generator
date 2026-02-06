@@ -13,14 +13,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { GIFT_CARD_50 } from "../fixtures/digital-products.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
+
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "./index.js";
+
+import { GIFT_CARD_50 } from "../fixtures/digital-products.js";
+import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /** Cache file for storing digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
@@ -79,14 +81,26 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 const taxId = await this.getDefaultTaxId(context);
                 if (!taxId) {
                     errors.push("Could not find default tax rate");
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: Date.now() - startTime };
+                    return {
+                        name: this.name,
+                        processed: 0,
+                        skipped: 0,
+                        errors,
+                        durationMs: Date.now() - startTime,
+                    };
                 }
 
                 // Step 3: Create the gift card product
                 productId = await this.createGiftCardProduct(context, taxId);
                 if (!productId) {
                     errors.push("Failed to create gift card product");
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: Date.now() - startTime };
+                    return {
+                        name: this.name,
+                        processed: 0,
+                        skipped: 0,
+                        errors,
+                        durationMs: Date.now() - startTime,
+                    };
                 }
                 createdNew = true;
                 logger.cli(`    ✓ Created gift card product "${GIFT_CARD_50.name}"`);
@@ -116,14 +130,26 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 mediaId = await this.createDownloadMedia(context);
                 if (!mediaId) {
                     errors.push("Failed to create download media");
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: Date.now() - startTime };
+                    return {
+                        name: this.name,
+                        processed: 0,
+                        skipped: 0,
+                        errors,
+                        durationMs: Date.now() - startTime,
+                    };
                 }
 
                 // Step 6: Create download association
                 downloadId = await this.createProductDownload(context, productId, mediaId);
                 if (!downloadId) {
                     errors.push("Failed to create product download");
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: Date.now() - startTime };
+                    return {
+                        name: this.name,
+                        processed: 0,
+                        skipped: 0,
+                        errors,
+                        durationMs: Date.now() - startTime,
+                    };
                 }
                 logger.cli(`    ✓ Created downloadable voucher`);
             } else {
@@ -146,8 +172,16 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 durationMs: Date.now() - startTime,
             };
         } catch (error) {
-            errors.push(`Digital product creation failed: ${error instanceof Error ? error.message : String(error)}`);
-            return { name: this.name, processed: 0, skipped: 0, errors, durationMs: Date.now() - startTime };
+            errors.push(
+                `Digital product creation failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+            return {
+                name: this.name,
+                processed: 0,
+                skipped: 0,
+                errors,
+                durationMs: Date.now() - startTime,
+            };
         }
     }
 
@@ -178,7 +212,9 @@ class DigitalProductProcessorImpl implements PostProcessor {
             // Clear cache
             this.clearCache(context);
         } catch (error) {
-            errors.push(`Cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+            errors.push(
+                `Cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+            );
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
@@ -300,7 +336,9 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                logger.apiError("_action/sync (create gift card)", response.status, { error: errorText });
+                logger.apiError("_action/sync (create gift card)", response.status, {
+                    error: errorText,
+                });
                 return null;
             }
 
@@ -342,7 +380,11 @@ class DigitalProductProcessorImpl implements PostProcessor {
             });
 
             if (!createMediaResponse.ok) {
-                logger.apiError("_action/sync (create cover media)", createMediaResponse.status, {});
+                logger.apiError(
+                    "_action/sync (create cover media)",
+                    createMediaResponse.status,
+                    {}
+                );
                 return false;
             }
 
@@ -497,9 +539,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
             }
 
             const response = await apiPost(context, "search/product-download", {
-                filter: [
-                    { type: "equals", field: "productId", value: productId },
-                ],
+                filter: [{ type: "equals", field: "productId", value: productId }],
                 limit: 1,
             });
 
@@ -600,7 +640,9 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                logger.apiError("_action/sync (create product download)", response.status, { error: errorText });
+                logger.apiError("_action/sync (create product download)", response.status, {
+                    error: errorText,
+                });
                 return null;
             }
 
@@ -614,7 +656,11 @@ class DigitalProductProcessorImpl implements PostProcessor {
     /**
      * Delete an entity by ID
      */
-    private async deleteEntity(context: PostProcessorContext, entity: string, id: string): Promise<boolean> {
+    private async deleteEntity(
+        context: PostProcessorContext,
+        entity: string,
+        id: string
+    ): Promise<boolean> {
         try {
             const token = await context.getAccessToken();
             const response = await fetch(`${context.shopwareUrl}/api/${entity}/${id}`, {

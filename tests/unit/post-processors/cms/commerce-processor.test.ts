@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
-import { CommerceProcessor } from "../../../../src/post-processors/cms/commerce-processor.js";
+
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
+
+import { CommerceProcessor } from "../../../../src/post-processors/cms/commerce-processor.js";
 
 // Helper to create mock cache
 function createMockCache() {

@@ -10,9 +10,9 @@
  * - Manufacturers exist (if generated)
  */
 
+import type { ShopwareClient } from "../../src/shopware/client.js";
 
 import { createCacheFromEnv } from "../../src/cache.js";
-import type { ShopwareClient } from "../../src/shopware/client.js";
 import { DataHydrator } from "../../src/shopware/index.js";
 import { countCategories, isPlaceholder } from "../../src/utils/index.js";
 
@@ -260,8 +260,7 @@ async function verifyGeneration(
                 "gradient",
             ];
             const optionsWithoutHex = (colorGroup.options || []).filter(
-                (o) =>
-                    !o.colorHexCode && !imageColorNames.includes(o.name?.toLowerCase() || "")
+                (o) => !o.colorHexCode && !imageColorNames.includes(o.name?.toLowerCase() || "")
             );
             if (optionsWithoutHex.length > 0) {
                 result.errors.push(

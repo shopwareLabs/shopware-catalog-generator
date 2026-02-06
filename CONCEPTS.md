@@ -437,20 +437,20 @@ Processors can declare dependencies to control execution order:
 
 ### Available Processors
 
-| Processor         | Description                          | Dependencies               |
-| ----------------- | ------------------------------------ | -------------------------- |
-| `cms-text`        | Text CMS demo page                   | None                       |
-| `cms-images`      | Images CMS demo page                 | None                       |
-| `cms-video`       | Video CMS demo page                  | None                       |
-| `cms-text-images` | Text & Images CMS demo page          | None                       |
-| `cms-commerce`    | Commerce CMS demo page               | None                       |
-| `cms-form`        | Form CMS demo page                   | None                       |
-| `images`          | Product and category images          | None                       |
-| `manufacturers`   | Fictional manufacturer creation      | None                       |
-| `reviews`         | Product reviews (0-10 per product)   | None                       |
-| `variants`        | Variant product creation             | manufacturers              |
-| `digital-product` | Digital product with download        | variants                   |
-| `cms-testing`     | Testing category hierarchy           | cms-*, digital-product     |
+| Processor         | Description                        | Dependencies            |
+| ----------------- | ---------------------------------- | ----------------------- |
+| `cms-text`        | Text CMS demo page                 | None                    |
+| `cms-images`      | Images CMS demo page               | None                    |
+| `cms-video`       | Video CMS demo page                | None                    |
+| `cms-text-images` | Text & Images CMS demo page        | None                    |
+| `cms-commerce`    | Commerce CMS demo page             | None                    |
+| `cms-form`        | Form CMS demo page                 | None                    |
+| `images`          | Product and category images        | None                    |
+| `manufacturers`   | Fictional manufacturer creation    | None                    |
+| `reviews`         | Product reviews (0-10 per product) | None                    |
+| `variants`        | Variant product creation           | manufacturers           |
+| `digital-product` | Digital product with download      | variants                |
+| `cms-testing`     | Testing category hierarchy         | cms-\*, digital-product |
 
 ### Testing Page Hierarchy
 
@@ -472,6 +472,7 @@ Testing (placeholder landing page)
 ```
 
 The `cms-testing` processor orchestrates the entire hierarchy:
+
 1. Creates Testing category with placeholder page
 2. Creates CMS sub-category with showcase page
 3. Links element demo pages from other CMS processors

@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
-import { ImagesProcessor } from "../../../../src/post-processors/cms/images-processor.js";
+
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
+
+import { ImagesProcessor } from "../../../../src/post-processors/cms/images-processor.js";
 
 // Helper to create mock cache
 function createMockCache() {

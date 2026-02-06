@@ -8,13 +8,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "../index.js";
+
+import { apiPost, generateUUID, logger } from "../../utils/index.js";
 
 /** Filename for storing CMS landing page IDs */
 const CMS_LANDING_PAGES_FILE = "cms-landing-pages.json";

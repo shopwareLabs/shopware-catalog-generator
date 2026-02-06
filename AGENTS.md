@@ -267,27 +267,27 @@ Post-processors run after initial Shopware upload for resource-intensive tasks:
 interface PostProcessor {
     readonly name: string;
     readonly description: string;
-    readonly dependsOn: string[];  // Dependency ordering
+    readonly dependsOn: string[]; // Dependency ordering
     process(context: PostProcessorContext): Promise<PostProcessorResult>;
 }
 ```
 
 **Available processors:**
 
-| Processor | Description | Dependencies |
-|-----------|-------------|--------------|
-| `cms-text` | Text elements demo page | none |
-| `cms-images` | Image elements demo page | none |
-| `cms-video` | Video elements demo page | none |
-| `cms-text-images` | Text & Images demo page | none |
-| `cms-commerce` | Commerce elements demo page | none |
-| `cms-form` | Form elements demo page | none |
-| `images` | Multi-view product/category images | none |
-| `manufacturers` | Fictional manufacturer creation | none |
-| `reviews` | Variable review counts (0-10 per product) | none |
-| `variants` | Variant product creation | manufacturers |
-| `digital-product` | Digital product with download | variants |
-| `cms-testing` | Testing category hierarchy | cms-*, digital-product |
+| Processor         | Description                               | Dependencies            |
+| ----------------- | ----------------------------------------- | ----------------------- |
+| `cms-text`        | Text elements demo page                   | none                    |
+| `cms-images`      | Image elements demo page                  | none                    |
+| `cms-video`       | Video elements demo page                  | none                    |
+| `cms-text-images` | Text & Images demo page                   | none                    |
+| `cms-commerce`    | Commerce elements demo page               | none                    |
+| `cms-form`        | Form elements demo page                   | none                    |
+| `images`          | Multi-view product/category images        | none                    |
+| `manufacturers`   | Fictional manufacturer creation           | none                    |
+| `reviews`         | Variable review counts (0-10 per product) | none                    |
+| `variants`        | Variant product creation                  | manufacturers           |
+| `digital-product` | Digital product with download             | variants                |
+| `cms-testing`     | Testing category hierarchy                | cms-\*, digital-product |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -458,6 +458,7 @@ Key principles:
 **AI generation happens ONLY during blueprint hydration, NEVER in post-processors.**
 
 Post-processors must be fast and deterministic. All AI-generated content should be:
+
 1. Generated during the blueprint hydration phase (Phase 2)
 2. Stored in cache or fixtures for reuse
 3. Loaded from fixtures/cache at runtime
@@ -481,6 +482,7 @@ async process(context) {
 ```
 
 Benefits:
+
 - **Fast execution**: No waiting for AI API calls
 - **Deterministic**: Same content every time
 - **Testable**: Fixtures can be unit tested
@@ -810,7 +812,7 @@ server.addTool({
 
 - **Linter:** `oxlint` (via `bun run lint`)
 - **TypeCheck:** `tsc --noEmit` (included in `bun run lint`)
-- **Formatter:** `oxfmt` (via `bun run format`)
+- **Formatter:** `oxfmt` (via `bun run format`). Scripts use `npx oxfmt` so formatting runs under Node; under Bun, oxfmt’s worker threads trigger DataCloneError for JSON/markdown (see [bun#25610](https://github.com/oven-sh/bun/issues/25610)).
 - **Build:** `bun run build` runs lint + format + bun build
 
 ## Environment Variables

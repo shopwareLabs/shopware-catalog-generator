@@ -13,14 +13,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
-import { TESTING_PLACEHOLDER_PAGE, WELCOME_PAGE } from "../../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../../utils/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
     PostProcessorContext,
     PostProcessorResult,
 } from "../index.js";
+
+import { TESTING_PLACEHOLDER_PAGE, WELCOME_PAGE } from "../../fixtures/index.js";
+import { apiPost, generateUUID, logger } from "../../utils/index.js";
 
 import { BaseCmsProcessor } from "./base-processor.js";
 
@@ -53,10 +54,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     readonly pageFixture = TESTING_PLACEHOLDER_PAGE;
 
     /** Dependencies - all element processors and digital product must run first */
-    override readonly dependsOn = [
-        ...CMS_CATEGORIES.map((c) => c.processor),
-        "digital-product",
-    ];
+    override readonly dependsOn = [...CMS_CATEGORIES.map((c) => c.processor), "digital-product"];
 
     /**
      * Override process to create full hierarchy
@@ -67,8 +65,12 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (options.dryRun) {
             logger.cli(`    [DRY RUN] Would create Testing category hierarchy`);
-            logger.cli(`    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`);
-            logger.cli(`    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`);
+            logger.cli(
+                `    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`
+            );
+            logger.cli(
+                `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`
+            );
             return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
         }
 
@@ -162,10 +164,19 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         try {
             const rootCategoryId = await this.getRootCategoryId(context);
             if (!rootCategoryId) {
-                return { name: this.name, deleted: 0, errors: ["Could not find root category"], durationMs: 0 };
+                return {
+                    name: this.name,
+                    deleted: 0,
+                    errors: ["Could not find root category"],
+                    durationMs: 0,
+                };
             }
 
-            const testingCategoryId = await this.findCategoryByName(context, "Testing", rootCategoryId);
+            const testingCategoryId = await this.findCategoryByName(
+                context,
+                "Testing",
+                rootCategoryId
+            );
             if (!testingCategoryId) {
                 logger.cli(`    ⊘ "Testing" category not found`);
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
@@ -173,7 +184,11 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
             // Find CMS and Products sub-categories
             const cmsCategoryId = await this.findCategoryByName(context, "CMS", testingCategoryId);
-            const productsCategoryId = await this.findCategoryByName(context, "Products", testingCategoryId);
+            const productsCategoryId = await this.findCategoryByName(
+                context,
+                "Products",
+                testingCategoryId
+            );
 
             // Delete CMS element categories (deepest first)
             if (cmsCategoryId) {
@@ -200,7 +215,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             await this.cleanupLandingPage(context, TESTING_PLACEHOLDER_PAGE.name, errors);
             await this.cleanupLandingPage(context, WELCOME_PAGE.name, errors);
         } catch (error) {
-            errors.push(`Cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+            errors.push(
+                `Cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+            );
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
@@ -288,7 +305,12 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             }
             logger.cli(`    ✓ Created CMS showcase landing page "${populatedFixture.name}"`);
         } else {
-            await this.ensureSalesChannelAssociated(context, landingPageId, populatedFixture.name, errors);
+            await this.ensureSalesChannelAssociated(
+                context,
+                landingPageId,
+                populatedFixture.name,
+                errors
+            );
         }
 
         return landingPageId;
@@ -362,13 +384,20 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         for (const cat of CMS_CATEGORIES) {
             const landingPageId = landingPages[cat.processor];
             if (!landingPageId) {
-                logger.cli(`    ⚠ No landing page found for "${cat.name}" (processor: ${cat.processor})`);
+                logger.cli(
+                    `    ⚠ No landing page found for "${cat.name}" (processor: ${cat.processor})`
+                );
                 continue;
             }
 
             let subCategoryId = await this.findCategoryByName(context, cat.name, cmsCategoryId);
             if (!subCategoryId) {
-                subCategoryId = await this.createLinkedCategory(context, cat.name, cmsCategoryId, landingPageId);
+                subCategoryId = await this.createLinkedCategory(
+                    context,
+                    cat.name,
+                    cmsCategoryId,
+                    landingPageId
+                );
                 if (subCategoryId) {
                     logger.cli(`    ✓ Created "${cat.name}" CMS sub-category`);
                 } else {
@@ -395,9 +424,18 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 continue;
             }
 
-            let subCategoryId = await this.findCategoryByName(context, cat.name, productsCategoryId);
+            let subCategoryId = await this.findCategoryByName(
+                context,
+                cat.name,
+                productsCategoryId
+            );
             if (!subCategoryId) {
-                subCategoryId = await this.createProductLinkCategory(context, cat.name, productsCategoryId, productId);
+                subCategoryId = await this.createProductLinkCategory(
+                    context,
+                    cat.name,
+                    productsCategoryId,
+                    productId
+                );
                 if (subCategoryId) {
                     logger.cli(`    ✓ Created "${cat.name}" product link`);
                 } else {
@@ -429,7 +467,11 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             if (response.ok) {
                 const data = (await response.json()) as SalesChannelResponse;
                 const salesChannel = data.data?.[0];
-                return salesChannel?.attributes?.navigationCategoryId || salesChannel?.navigationCategoryId || null;
+                return (
+                    salesChannel?.attributes?.navigationCategoryId ||
+                    salesChannel?.navigationCategoryId ||
+                    null
+                );
             }
         } catch (error) {
             logger.warn("Failed to get navigation category from sales channel", { error });
@@ -504,7 +546,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (!response.ok) {
             const errorText = await response.text();
-            logger.apiError("_action/sync (create linked category)", response.status, { error: errorText });
+            logger.apiError("_action/sync (create linked category)", response.status, {
+                error: errorText,
+            });
             return null;
         }
 
@@ -541,7 +585,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (!response.ok) {
             const errorText = await response.text();
-            logger.apiError("_action/sync (create navigation category)", response.status, { error: errorText });
+            logger.apiError("_action/sync (create navigation category)", response.status, {
+                error: errorText,
+            });
             return null;
         }
 
@@ -582,7 +628,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (!response.ok) {
             const errorText = await response.text();
-            logger.apiError("_action/sync (create product link category)", response.status, { error: errorText });
+            logger.apiError("_action/sync (create product link category)", response.status, {
+                error: errorText,
+            });
             return null;
         }
 

@@ -58,14 +58,14 @@ abstract class BaseCmsProcessor {
 
 Simple processors that extend `BaseCmsProcessor`:
 
-| Processor | Name | Fixture | Description |
-|-----------|------|---------|-------------|
-| TextProcessor | `cms-text` | text.ts | Text blocks, heroes, teasers, HTML |
-| ImagesProcessor | `cms-images` | images.ts | Image, gallery, slider |
-| VideoProcessor | `cms-video` | video.ts | YouTube, Vimeo embeds |
-| TextImagesProcessor | `cms-text-images` | text-images.ts | Combined text/image layouts |
-| CommerceProcessor | `cms-commerce` | commerce.ts | Product boxes, sliders, buy boxes |
-| FormProcessor | `cms-form` | form.ts | Contact and newsletter forms |
+| Processor           | Name              | Fixture        | Description                        |
+| ------------------- | ----------------- | -------------- | ---------------------------------- |
+| TextProcessor       | `cms-text`        | text.ts        | Text blocks, heroes, teasers, HTML |
+| ImagesProcessor     | `cms-images`      | images.ts      | Image, gallery, slider             |
+| VideoProcessor      | `cms-video`       | video.ts       | YouTube, Vimeo embeds              |
+| TextImagesProcessor | `cms-text-images` | text-images.ts | Combined text/image layouts        |
+| CommerceProcessor   | `cms-commerce`    | commerce.ts    | Product boxes, sliders, buy boxes  |
+| FormProcessor       | `cms-form`        | form.ts        | Contact and newsletter forms       |
 
 ### Dynamic Data Population
 
