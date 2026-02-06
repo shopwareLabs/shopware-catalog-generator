@@ -295,11 +295,11 @@ generated/
         scent.json
         skin-type.json
         index.json
-    furniture/
+    music/
       properties/
-        material.json                      # AI-generated for furniture
-        dimensions.json
-        style.json
+        brand.json                         # AI-generated for music
+        instrument-type.json
+        material.json
         index.json
 ```
 
@@ -499,10 +499,10 @@ Processors can implement `cleanup()` for reversible operations:
 
 ```bash
 # Cleanup specific processor
-bun run cleanup -- --salesChannel="furniture" --processors=cms
+bun run cleanup -- --salesChannel="music" --processors=cms
 
 # Cleanup all processors
-bun run cleanup -- --salesChannel="furniture" --processors=all
+bun run cleanup -- --salesChannel="music" --processors=all
 ```
 
 ---
@@ -567,7 +567,7 @@ generated/
 │   ├── color.json                 # Color with hex codes
 │   └── index.json
 └── sales-channels/
-    └── furniture/                 # Per-SalesChannel data
+    └── music/                    # Per-SalesChannel data
         ├── metadata.json          # SalesChannel info
         ├── blueprint.json         # Phase 1 output
         ├── hydrated-blueprint.json# Phase 2 output

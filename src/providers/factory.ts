@@ -77,7 +77,7 @@ function createTextProvider(config: ProviderConfig): TextProvider {
             return new GitHubModelsTextProvider(apiKey, model);
 
         case "pollinations":
-            return new PollinationsTextProvider(model, config.apiKey);
+            return new PollinationsTextProvider(model, apiKey);
 
         default:
             throw new Error(`Unknown AI provider: ${config.aiProvider}`);
@@ -110,10 +110,8 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
             // For OpenAI images, we need an API key
             const apiKey = config.imageApiKey || config.apiKey;
             if (!apiKey) {
-                logger.warn(
-                    "No API key for OpenAI image generation. Falling back to Pollinations."
-                );
-                return new PollinationsImageProvider();
+                logger.warn("No API key for OpenAI image generation. Disabling images.");
+                return new NoOpImageProvider();
             }
             const model = config.imageModel || "gpt-image-1.5";
             return new OpenAIImageProvider(apiKey, model);
@@ -121,6 +119,15 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
 
         case "pollinations": {
             const pollinationsApiKey = config.imageApiKey || config.apiKey;
+            if (!pollinationsApiKey) {
+                logger.warn(
+                    "No API key for Pollinations image generation. Disabling images."
+                );
+                logger.cli(
+                    "Get a key at https://enter.pollinations.ai"
+                );
+                return new NoOpImageProvider();
+            }
             const pollinationsModel = config.imageModel || "flux";
             return new PollinationsImageProvider(pollinationsApiKey, pollinationsModel);
         }

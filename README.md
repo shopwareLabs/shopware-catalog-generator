@@ -15,35 +15,35 @@ Create `.env` file:
 
 ```env
 AI_PROVIDER=pollinations
+AI_API_KEY=sk_your_pollinations_key  # Get key at https://enter.pollinations.ai
 SW_ENV_URL=http://localhost:8000
 ```
 
 Generate products:
 
 ```bash
-bun run generate --name=furniture --description="Selling wood furniture like beds, tables and chairs."
+bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 ```
 
 ## Provider Options
 
 | Provider        | API Key  | Images | Parallel        | Best For                 |
 | --------------- | -------- | ------ | --------------- | ------------------------ |
-| `pollinations`  | Optional | Free   | With `sk_*` key | Testing, demos (default) |
+| `pollinations`  | Required | Yes    | With `sk_*` key | Testing, demos (default) |
 | `github-models` | Required | N/A    | Limited (2x)    | GitHub/Copilot users     |
 | `openai`        | Required | Paid   | Yes (5x)        | Production, high volume  |
+
+> Get a Pollinations API key at **[enter.pollinations.ai](https://enter.pollinations.ai)**
 
 ### Configuration
 
 ```env
-# Free tier (Pollinations) - no API key needed, sequential processing
-AI_PROVIDER=pollinations
-
 # Pollinations with secret key - parallel processing, no rate limits
-# Get key at enter.pollinations.ai
+# Get key at https://enter.pollinations.ai
 AI_PROVIDER=pollinations
 AI_API_KEY=sk_your_pollinations_secret_key
 
-# GitHub Models + free images (limited parallelism)
+# GitHub Models (limited parallelism, images via Pollinations)
 AI_PROVIDER=github-models
 AI_API_KEY=ghp_your_github_token
 
@@ -66,10 +66,10 @@ IMAGE_MODEL=turbo            # Pollinations: flux (default), turbo (fast), klein
 
 ```bash
 # Basic usage (90 products across categories)
-bun run generate --name=furniture --description="Wood furniture store"
+bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 
 # Custom product count
-bun run generate --name=electronics --description="Consumer electronics" --products=50
+bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels" --products=50
 ```
 
 | Flag            | Description                                  |
@@ -87,13 +87,13 @@ For more control, run the pipeline phases separately:
 
 ```bash
 # Phase 1: Create structure (instant, no AI)
-bun run blueprint create --name=furniture --description="Wood furniture store"
+bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
 
 # Phase 2: Fill with AI content
-bun run blueprint hydrate --name=furniture
+bun run blueprint hydrate --name=music
 
 # Phase 3: Upload to Shopware
-bun run generate --name=furniture
+bun run generate --name=music
 ```
 
 ### Post-Processors
@@ -101,8 +101,8 @@ bun run generate --name=furniture
 Run specific post-processors after upload:
 
 ```bash
-bun run process --name=furniture --only=images,reviews
-bun run process --name=furniture --dry-run
+bun run process --name=music --only=images,reviews
+bun run process --name=music --dry-run
 ```
 
 | Processor       | Description                             |
@@ -119,16 +119,16 @@ Remove data from Shopware (local cache preserved):
 
 ```bash
 # Core cleanup
-bun run cleanup -- --salesChannel="furniture"           # Products + categories
-bun run cleanup -- --salesChannel="furniture" --props   # Also property groups
-bun run cleanup -- --salesChannel="furniture" --delete  # Also SalesChannel
+bun run cleanup -- --salesChannel="music"           # Products + categories
+bun run cleanup -- --salesChannel="music" --props   # Also property groups
+bun run cleanup -- --salesChannel="music" --delete  # Also SalesChannel
 
 # Processor-specific
-bun run cleanup -- --salesChannel="furniture" --processors=cms
-bun run cleanup -- --salesChannel="furniture" --processors=all
+bun run cleanup -- --salesChannel="music" --processors=cms
+bun run cleanup -- --salesChannel="music" --processors=all
 
 # Full cleanup
-bun run cleanup -- --salesChannel="furniture" --full --delete
+bun run cleanup -- --salesChannel="music" --full --delete
 ```
 
 ### Cache Management
@@ -138,7 +138,7 @@ Local files in `generated/`:
 ```bash
 bun run cache:list                    # Show cached SalesChannels
 bun run cache:clear                   # Move all to trash
-bun run cache:clear -- furniture      # Move specific to trash
+bun run cache:clear -- music         # Move specific to trash
 bun run cache:trash                   # List trash
 bun run cache:restore -- <item>       # Restore from trash
 bun run cache:empty-trash             # Permanently delete
@@ -155,9 +155,9 @@ Properties are generated contextually based on your store type. The AI infers ap
 
 This ensures:
 
+- Music stores get properties like `Brand`, `Material`, `Instrument Type`
 - Beauty stores get properties like `Volume`, `Scent`, `Skin Type`
 - Fashion stores get properties like `Size`, `Fabric`, `Fit`
-- Furniture stores get properties like `Material`, `Dimensions`, `Style`
 
 No manual property configuration needed - the AI derives appropriate properties from context.
 
@@ -211,8 +211,8 @@ curl -X POST http://localhost:3000/generate \
   -H "Content-Type: application/json" \
   -d '{
     "envPath": "http://localhost:8000",
-    "salesChannel": "furniture",
-    "description": "Wood furniture store",
+    "salesChannel": "music",
+    "description": "Musical instruments and accessories for musicians of all levels",
     "shopwareUser": "admin",
     "shopwarePassword": "shopware"
   }'
@@ -242,12 +242,12 @@ Expected times for 90 products:
 
 **Text generation only (blueprint hydration):**
 
-| Provider      | Processing    | Time    |
-| ------------- | ------------- | ------- |
-| OpenAI        | Parallel (5x) | ~5 min  |
-| Pollinations  | Parallel (5x) | ~5 min  |
-| GitHub Models | Limited (2x)  | ~10 min |
-| Pollinations  | Sequential    | ~13 min |
+| Provider              | Processing    | Time    |
+| --------------------- | ------------- | ------- |
+| OpenAI                | Parallel (5x) | ~5 min  |
+| Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
+| GitHub Models         | Limited (2x)  | ~10 min |
+| Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full generation with images (~270 images at 3 views per product):**
 

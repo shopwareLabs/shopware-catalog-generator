@@ -5,7 +5,7 @@ import path from "node:path";
 import { logger } from "../../../src/utils/logger.js";
 
 describe("Logger", () => {
-    const testLogDir = path.join(process.cwd(), "test-logs");
+    const testLogDir = path.join(process.cwd(), "tests", "logs");
 
     beforeEach(() => {
         // Configure logger to use test directory

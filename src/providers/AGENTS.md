@@ -44,7 +44,7 @@ interface ImageProvider {
 | OpenAI                | `openai`        | 5              | High rate limits                |
 | GitHub Models         | `github-models` | 2              | 2 concurrent request limit      |
 | Pollinations (sk\_\*) | `pollinations`  | 5              | Secret keys have no rate limits |
-| Pollinations (free)   | `pollinations`  | 1              | Sequential due to rate limits   |
+| Pollinations (pk\_\*) | `pollinations`  | 1              | Sequential processing           |
 
 ### Image Providers
 
@@ -52,7 +52,7 @@ interface ImageProvider {
 | --------------------- | -------------- | ------------- | -------------- | ------------------------------ |
 | OpenAI                | `openai`       | gpt-image-1.5 | 10             | Returns URL, fetched to base64 |
 | Pollinations (sk\_\*) | `pollinations` | flux/turbo    | 5              | Direct base64 response         |
-| Pollinations (free)   | `pollinations` | flux/turbo    | 2              | Limited parallelism            |
+| Pollinations (pk\_\*) | `pollinations` | flux/turbo    | 2              | Limited parallelism            |
 | Noop                  | `none`         | -             | 1              | Disabled (no images)           |
 
 **OpenAI Image Notes:**
@@ -75,9 +75,11 @@ const { text, image } = createProvidersFromEnv();
 
 ## Environment Variables
 
+All providers require an API key. Get a Pollinations key at [enter.pollinations.ai](https://enter.pollinations.ai).
+
 ```env
 AI_PROVIDER=pollinations|github-models|openai
-AI_API_KEY=xxx
+AI_API_KEY=xxx  # Required for all providers
 AI_MODEL=gpt-4o  # Optional override
 
 IMAGE_PROVIDER=pollinations|openai|none

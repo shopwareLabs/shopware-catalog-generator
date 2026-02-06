@@ -68,7 +68,7 @@ export interface ProviderConfig {
     /** Main AI provider for text generation */
     aiProvider: AIProviderType;
 
-    /** API key for paid providers (optional for pollinations) */
+    /** API key for the AI provider (required for all providers) */
     apiKey?: string;
 
     /** Override the default text model */
@@ -119,7 +119,7 @@ export const PROVIDER_DEFAULTS: Record<
         imageModel: "flux",
         supportsImages: true,
         isSequential: true,
-        requiresApiKey: false,
-        tokenLimit: 32000, // Conservative limit for free tier
+        requiresApiKey: true,
+        tokenLimit: 32000,
     },
 };

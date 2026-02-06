@@ -5,7 +5,7 @@ import type { z } from "zod";
 
 import { logger } from "../utils/index.js";
 
-/** Pollinations.ai text generation provider (see README for details) */
+/** Pollinations.ai text generation provider (requires API key from enter.pollinations.ai) */
 export class PollinationsTextProvider implements TextProvider {
     private readonly client: OpenAI;
     private readonly model: string;
@@ -13,18 +13,18 @@ export class PollinationsTextProvider implements TextProvider {
     readonly isSequential: boolean;
     readonly maxConcurrency: number;
     readonly name = "pollinations";
-    readonly tokenLimit = 32000; // Conservative limit for free tier
+    readonly tokenLimit = 32000;
 
-    constructor(model: string = "openai", apiKey?: string) {
+    constructor(model: string = "openai", apiKey: string) {
         this.client = new OpenAI({
-            apiKey: apiKey || "pollinations", // Use API key if provided, otherwise dummy
+            apiKey,
             baseURL: "https://gen.pollinations.ai/v1",
         });
         this.model = model;
 
         // Secret keys (sk_*) have no rate limits - enable parallel processing
-        // Publishable keys (pk_*) or no key - sequential only
-        if (apiKey?.startsWith("sk_")) {
+        // Publishable keys (pk_*) - sequential only
+        if (apiKey.startsWith("sk_")) {
             this.isSequential = false;
             this.maxConcurrency = 5;
         } else {
@@ -51,7 +51,6 @@ export class PollinationsTextProvider implements TextProvider {
             const completion = await this.client.chat.completions.create(requestOptions);
             return completion.choices[0]?.message.content || "";
         } catch (error) {
-            // Enhance error message with provider context and helpful tips
             this.handleApiError(error);
             throw error;
         }
@@ -73,19 +72,15 @@ export class PollinationsTextProvider implements TextProvider {
             errorMessage.includes("Invalid API key")
         ) {
             logger.cli(`\n💡 TIP: Authentication failed with Pollinations.`);
-            logger.cli(`   Possible fixes:`);
-            logger.cli(`   1. Check your AI_API_KEY in .env is correct`);
-            logger.cli(`   2. Remove AI_API_KEY to use the free tier (no key needed)`);
-            logger.cli(`   3. Get a new key from enter.pollinations.ai`);
+            logger.cli(`   Check your AI_API_KEY in .env is correct.`);
+            logger.cli(`   Get a key at https://enter.pollinations.ai`);
         } else if (
             status === 429 ||
             errorMessage.includes("429") ||
             errorMessage.includes("rate")
         ) {
             logger.cli(`\n💡 TIP: Rate limited by Pollinations.`);
-            logger.cli(
-                `   Wait a moment and try again, or get an API key from enter.pollinations.ai`
-            );
+            logger.cli(`   Wait a moment and try again.`);
         }
 
         logger.info(""); // Empty line for readability
@@ -112,30 +107,30 @@ export class PollinationsTextProvider implements TextProvider {
     }
 }
 
-/** Available Pollinations image models (see README for pricing) */
+/** Available Pollinations image models */
 const POLLINATIONS_IMAGE_MODELS = ["flux", "klein", "turbo"] as const;
 
-/** Pollinations.ai image generation provider */
+/** Pollinations.ai image generation provider (requires API key from enter.pollinations.ai) */
 export class PollinationsImageProvider implements ImageProvider {
     readonly isSequential: boolean;
     readonly maxConcurrency: number;
     readonly name = "pollinations";
 
-    private readonly apiKey?: string;
+    private readonly apiKey: string;
     private readonly model: string;
 
-    constructor(apiKey?: string, model: string = "klein") {
+    constructor(apiKey: string, model: string = "klein") {
         this.apiKey = apiKey;
         this.model = model;
 
         // Secret keys (sk_*) have no rate limits - enable parallel processing
-        // Publishable keys (pk_*) or no key - limited parallelism
-        if (apiKey?.startsWith("sk_")) {
+        // Publishable keys (pk_*) - limited parallelism
+        if (apiKey.startsWith("sk_")) {
             this.isSequential = false;
             this.maxConcurrency = 5;
         } else {
             this.isSequential = true;
-            this.maxConcurrency = 2; // Allow some parallelism even without key
+            this.maxConcurrency = 2;
         }
     }
 
@@ -146,12 +141,7 @@ export class PollinationsImageProvider implements ImageProvider {
             const truncatedPrompt = prompt.length > 500 ? prompt.slice(0, 500) : prompt;
             const encodedPrompt = encodeURIComponent(truncatedPrompt);
             // Landscape ratio ~1.75:1, matches Shopware product images (775x430)
-            let url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=1792&height=1024&model=${this.model}`;
-
-            // Add API key if available
-            if (this.apiKey) {
-                url += `&key=${this.apiKey}`;
-            }
+            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=1792&height=1024&model=${this.model}&key=${this.apiKey}`;
 
             // Add timeout (2 minutes for image generation)
             const controller = new AbortController();
@@ -221,12 +211,10 @@ export class PollinationsImageProvider implements ImageProvider {
                 });
             } else if (response.status === 401) {
                 logger.cli(
-                    `\n💡 TIP: Authentication failed. Check your API key or try without one.`
+                    `\n💡 TIP: Authentication failed. Check your API key at https://enter.pollinations.ai`
                 );
             } else if (response.status === 429) {
-                logger.cli(
-                    `\n💡 TIP: Rate limited. Wait a moment or get an API key from enter.pollinations.ai`
-                );
+                logger.cli(`\n💡 TIP: Rate limited. Wait a moment and try again.`);
             }
 
             logger.info(""); // Empty line for readability

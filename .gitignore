@@ -4,7 +4,7 @@ generated/
 .template-repo/
 .trash/
 logs/
-test-logs/
+tests/logs/
 dist/
 /.idea/
 /.fleet/

@@ -197,21 +197,21 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 
 **Expected times for 90 products (text generation only):**
 
-| Provider                      | Processing    | Time    |
-| ----------------------------- | ------------- | ------- |
-| OpenAI                        | Parallel (5x) | ~5 min  |
-| Pollinations (sk\_\*)         | Parallel (5x) | ~5 min  |
-| GitHub Models                 | Limited (2x)  | ~10 min |
-| Pollinations (pk\_\* or free) | Sequential    | ~13 min |
+| Provider                | Processing    | Time    |
+| ----------------------- | ------------- | ------- |
+| OpenAI                  | Parallel (5x) | ~5 min  |
+| Pollinations (sk\_\*)   | Parallel (5x) | ~5 min  |
+| GitHub Models           | Limited (2x)  | ~10 min |
+| Pollinations (pk\_\*)   | Sequential    | ~13 min |
 
 **Full generation with images (~270 images at 3 views per product):**
 
-| Provider                      | Image Model   | Processing     | Time       |
-| ----------------------------- | ------------- | -------------- | ---------- |
-| OpenAI                        | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
-| Pollinations (sk\_\*)         | flux          | Parallel (5x)  | ~15-20 min |
-| Pollinations (sk\_\*)         | turbo         | Parallel (5x)  | ~10-15 min |
-| Pollinations (pk\_\* or free) | flux          | Limited (2x)   | ~40-50 min |
+| Provider                | Image Model   | Processing     | Time       |
+| ----------------------- | ------------- | -------------- | ---------- |
+| OpenAI                  | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
+| Pollinations (sk\_\*)   | flux          | Parallel (5x)  | ~15-20 min |
+| Pollinations (sk\_\*)   | turbo         | Parallel (5x)  | ~10-15 min |
+| Pollinations (pk\_\*)   | flux          | Limited (2x)   | ~40-50 min |
 
 > Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~8-10s per image with 10 parallel requests.
 
@@ -246,13 +246,13 @@ The architecture is centered around SalesChannels:
 ```typescript
 // v2 Flow
 const generator = new BlueprintGenerator();
-const blueprint = generator.generateBlueprint("furniture", "Wood furniture store");
+const blueprint = generator.generateBlueprint("music", "Musical instruments and accessories for musicians of all levels");
 
 const hydrator = new BlueprintHydrator(textProvider);
 const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
 
 // Upload to Shopware
-await dataHydrator.createSalesChannel({ name: "furniture", ... });
+await dataHydrator.createSalesChannel({ name: "music", ... });
 await dataHydrator.createCategoryTree(categories, rootId, salesChannelId);
 
 // Run post-processors
@@ -314,12 +314,12 @@ interface TextProvider {
 
 **Provider concurrency settings:**
 
-| Provider                     | maxConcurrency | Notes                           |
-| ---------------------------- | -------------- | ------------------------------- |
-| OpenAI                       | 5              | High rate limits                |
-| GitHub Models                | 2              | 2 concurrent request limit      |
-| Pollinations (sk\_\*)        | 5              | Secret keys have no rate limits |
-| Pollinations (no key/pk\_\*) | 1              | Sequential due to rate limits   |
+| Provider               | maxConcurrency | Notes                           |
+| ---------------------- | -------------- | ------------------------------- |
+| OpenAI                 | 5              | High rate limits                |
+| GitHub Models          | 2              | 2 concurrent request limit      |
+| Pollinations (sk\_\*)  | 5              | Secret keys have no rate limits |
+| Pollinations (pk\_\*)  | 1              | Sequential processing           |
 
 Factory in `providers/factory.ts` creates providers from env vars:
 
@@ -818,9 +818,9 @@ server.addTool({
 ## Environment Variables
 
 ```env
-# Required for paid providers
+# Required for all providers
 AI_PROVIDER=pollinations|github-models|openai
-AI_API_KEY=xxx
+AI_API_KEY=xxx  # Get Pollinations key at https://enter.pollinations.ai
 
 # Optional overrides
 AI_MODEL=gpt-4o
@@ -845,27 +845,27 @@ SERVER_PORT=3000
 
 ```bash
 # Phase 1: Create blueprint (no AI)
-bun run blueprint create --name=furniture --description="Wood furniture store"
+bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
 
 # Phase 2: Hydrate with AI
-bun run blueprint hydrate --name=furniture
+bun run blueprint hydrate --name=music
 
 # Phase 2b: Selective re-hydration (preserves product names for image stability)
-bun run blueprint hydrate --name=furniture --only=categories  # Categories only
-bun run blueprint hydrate --name=furniture --only=properties  # Properties only
-bun run blueprint hydrate --name=furniture --force            # Full re-hydration
+bun run blueprint hydrate --name=music --only=categories  # Categories only
+bun run blueprint hydrate --name=music --only=properties  # Properties only
+bun run blueprint hydrate --name=music --force            # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
-bun run blueprint fix --name=furniture
+bun run blueprint fix --name=music
 
 # Phase 3: Upload to Shopware
-bun run generate --name=furniture
+bun run generate --name=music
 
 # Run post-processors separately
-bun run process --name=furniture --only=images,manufacturers
+bun run process --name=music --only=images,manufacturers
 
 # Full pipeline (creates blueprint, hydrates, and uploads if needed)
-bun run generate --name=furniture --description="Wood furniture store"
+bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 ```
 
 ### Blueprint Options
@@ -915,12 +915,12 @@ bun run process \
 ### Cleanup (SalesChannel-centric)
 
 ```bash
-bun run cleanup -- --salesChannel="furniture"                  # Delete products + categories
-bun run cleanup -- --salesChannel="furniture" --props          # Also delete property groups
-bun run cleanup -- --salesChannel="furniture" --manufacturers  # Also delete manufacturers
-bun run cleanup -- --salesChannel="furniture" --delete         # Also delete SalesChannel
-bun run cleanup -- --salesChannel="furniture" --processors=cms # Cleanup specific processor entities
-bun run cleanup:media                                          # Delete orphaned product images
+bun run cleanup -- --salesChannel="music"                  # Delete products + categories
+bun run cleanup -- --salesChannel="music" --props          # Also delete property groups
+bun run cleanup -- --salesChannel="music" --manufacturers  # Also delete manufacturers
+bun run cleanup -- --salesChannel="music" --delete         # Also delete SalesChannel
+bun run cleanup -- --salesChannel="music" --processors=cms # Cleanup specific processor entities
+bun run cleanup:media                                      # Delete orphaned product images
 ```
 
 **Processor-specific cleanup:** Use `--processors=<list>` to cleanup only entities created by specific
@@ -931,10 +931,10 @@ Available processors with cleanup: `cms`.
 
 ```bash
 ./test-e2e.sh                              # Full E2E test pipeline
-./test-e2e.sh --reuse=furniture            # Reuse existing blueprint
-./test-e2e.sh --reuse=furniture --skip-hydrate  # Skip AI, just upload
-./test-e2e.sh --cleanup=furniture          # Only cleanup specific SalesChannel
-bun run test:verify --name=furniture       # Verify Shopware data
+./test-e2e.sh --reuse=music               # Reuse existing blueprint
+./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
+./test-e2e.sh --cleanup=music             # Only cleanup specific SalesChannel
+bun run test:verify --name=music          # Verify Shopware data
 ```
 
 ## Testing
@@ -962,7 +962,7 @@ bun run server
 # Cache management
 bun run cache:list                    # List cached SalesChannels
 bun run cache:clear                   # Move all cache to trash
-bun run cache:clear -- furniture      # Move specific SalesChannel to trash
+bun run cache:clear -- music         # Move specific SalesChannel to trash
 bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore item from trash
 bun run cache:empty-trash             # Permanently delete trash
