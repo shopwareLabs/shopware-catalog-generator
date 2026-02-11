@@ -89,7 +89,7 @@ src/
 │   ├── validation.ts         # Subdomain validation
 │   ├── blueprint-validation.ts # Validate blueprints before sync (duplicates, placeholders)
 │   ├── retry.ts              # executeWithRetry, sleep, rate limit handling
-│   ├── strings.ts            # normalizeString, stripHtml, capitalizeString
+│   ├── strings.ts            # normalizeString, stripHtml, capitalizeString, createShortHash
 │   ├── category-tree.ts      # countCategories, getLeafCategories, etc.
 │   ├── property-collector.ts # Collect, deduplicate, merge properties (v2)
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
@@ -374,9 +374,10 @@ Centralized utilities in `utils/` avoid code duplication:
 import { executeWithRetry, sleep } from "./utils/index.js";
 await executeWithRetry(() => apiCall(), { maxRetries: 3, baseDelay: 2000 });
 
-// String normalization (utils/strings.ts)
-import { normalizeDescription, capitalizeString } from "./utils/index.js";
+// String normalization and hashing (utils/strings.ts)
+import { normalizeDescription, capitalizeString, createShortHash } from "./utils/index.js";
 const clean = normalizeDescription("<p>HTML &amp; entities</p>"); // "HTML & entities"
+const hash = createShortHash("long-option-name-suffix", 5); // deterministic 5-char alphanumeric hash
 
 // Category tree operations (utils/category-tree.ts)
 import { countCategories, getLeafCategories, collectCategoryIdsByPath } from "./utils/index.js";
@@ -511,7 +512,8 @@ Use these lookup methods from `ShopwareClient`:
 - `findCmsPageByName(name)` - Find CMS page by name
 - `getCmsPageById(id)` - Get full CMS page with associations
 - `findCategoryByName(name, parentId)` - Find category under parent
-- `getStandardSalesChannel(name)` - Find sales channel by name
+- `getStandardSalesChannel(name)` - Find sales channel by name (with Storefront type fallback)
+- `getFullSalesChannel(name)` - Full sales channel details for cloning (with Storefront type fallback)
 
 Console output conventions for idempotent operations:
 
@@ -739,6 +741,7 @@ Common utilities already available in `utils/`:
 - `executeWithRetry()` - Retry with exponential backoff
 - `normalizeDescription()` - Strip HTML, decode entities
 - `capitalizeString()` - Capitalize first letter
+- `createShortHash()` - Deterministic short hash for unique suffixes
 - `countCategories()`, `getLeafCategories()` - Tree operations
 - `ConcurrencyLimiter` - Parallel processing with limits
 
@@ -1034,31 +1037,20 @@ The inspector opens a web UI where you can:
 
 ### Cursor Configuration
 
-Setup (first time only):
-
-```bash
-cp .cursor/mcp.json.example .cursor/mcp.json
-# Restart Cursor to load the MCP server
-```
-
-If `bun` isn't in Cursor's PATH, use the absolute path in `.cursor/mcp.json`:
-
-```json
-"command": "/home/youruser/.bun/bin/bun"
-```
-
-The config file `.cursor/mcp.json` is gitignored (contains local paths). The example file shows the required format:
+The `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamically, so it works on any machine without editing:
 
 ```json
 {
     "mcpServers": {
         "catalog-generator": {
-            "command": "bun",
-            "args": ["run", "src/mcp/index.ts"]
+            "command": "/bin/sh",
+            "args": ["-c", "\"$HOME/.bun/bin/bun\" run src/mcp/index.ts"]
         }
     }
 }
 ```
+
+If your `bun` is installed elsewhere, adjust the path in the `args` accordingly. Restart Cursor to load the MCP server.
 
 ## Common Tasks
 

@@ -118,3 +118,41 @@ export function toKebabCase(str: string): string {
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "");
 }
+
+/**
+ * Create a short deterministic hash from a string using djb2 algorithm.
+ * Useful for generating unique suffixes when strings must be truncated.
+ *
+ * @param input - The string to hash
+ * @param length - Desired hash length (default: 5, max: 8)
+ * @returns Alphanumeric hash string of the specified length
+ *
+ * @example
+ * createShortHash("adjustable-100-135-cm-polyester-exterior-foam") // "a3x1k"
+ * createShortHash("adjustable-100-135-cm-polyester-exterior-nylon") // "b7m2p"
+ */
+export function createShortHash(input: string, length: number = 5): string {
+    const safeLength = Math.min(Math.max(1, length), 8);
+    const chars = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+    // djb2 hash - simple, fast, good distribution
+    let hash = 5381;
+    for (let i = 0; i < input.length; i++) {
+        hash = (hash * 33) ^ input.charCodeAt(i);
+        hash = hash >>> 0; // Keep as unsigned 32-bit
+    }
+
+    // Convert to alphanumeric string
+    let result = "";
+    let remaining = hash;
+    for (let i = 0; i < safeLength; i++) {
+        result += chars[remaining % chars.length];
+        remaining = Math.floor(remaining / chars.length);
+        // Mix in extra bits for longer hashes
+        if (remaining === 0) {
+            remaining = (hash * (i + 2)) >>> 0;
+        }
+    }
+
+    return result;
+}

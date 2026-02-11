@@ -75,6 +75,13 @@ await client.authenticateWithClientCredentials(url, clientId, clientSecret);
 const token = await client.getAccessToken();
 ```
 
+**Storefront sales channel lookup** uses a two-step fallback:
+
+1. Try exact name match (e.g., "Storefront")
+2. If not found, search by Storefront type ID (`ShopwareClient.STOREFRONT_TYPE_ID`)
+
+This ensures generation works even if the default Storefront was renamed or if the Shopware instance uses a different language.
+
 ### ShopwareHydrator
 
 Create entities in Shopware:

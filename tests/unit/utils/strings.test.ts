@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
     capitalizeString,
+    createShortHash,
     decodeHtmlEntities,
     generateCategoryPlaceholder,
     generateProductPlaceholder,
@@ -140,6 +141,57 @@ describe("string utilities", () => {
 
         test("generatePropertyGroupPlaceholder creates group description", () => {
             expect(generatePropertyGroupPlaceholder("Color")).toBe("Color property options");
+        });
+    });
+
+    describe("createShortHash", () => {
+        test("returns a string of the requested length", () => {
+            expect(createShortHash("hello", 5)).toHaveLength(5);
+            expect(createShortHash("hello", 3)).toHaveLength(3);
+            expect(createShortHash("hello", 8)).toHaveLength(8);
+        });
+
+        test("defaults to length 5", () => {
+            expect(createShortHash("hello")).toHaveLength(5);
+        });
+
+        test("is deterministic (same input produces same output)", () => {
+            const hash1 = createShortHash("test-input", 5);
+            const hash2 = createShortHash("test-input", 5);
+            expect(hash1).toBe(hash2);
+        });
+
+        test("produces different hashes for different inputs", () => {
+            const hash1 = createShortHash("adjustable-100-135-cm-polyester-exterior-foam", 5);
+            const hash2 = createShortHash("adjustable-100-135-cm-polyester-exterior-nylon", 5);
+            expect(hash1).not.toBe(hash2);
+        });
+
+        test("produces different hashes for inputs differing only at the end", () => {
+            const prefix = "very-long-option-name-that-shares-a-common-prefix-with-another";
+            const hash1 = createShortHash(`${prefix}-variant-a`, 5);
+            const hash2 = createShortHash(`${prefix}-variant-b`, 5);
+            expect(hash1).not.toBe(hash2);
+        });
+
+        test("only contains alphanumeric characters", () => {
+            const hash = createShortHash("some input with spaces & symbols!", 8);
+            expect(hash).toMatch(/^[0-9a-z]+$/);
+        });
+
+        test("clamps length to max 8", () => {
+            expect(createShortHash("hello", 20)).toHaveLength(8);
+        });
+
+        test("clamps length to min 1", () => {
+            expect(createShortHash("hello", 0)).toHaveLength(1);
+            expect(createShortHash("hello", -5)).toHaveLength(1);
+        });
+
+        test("handles empty string input", () => {
+            const hash = createShortHash("", 5);
+            expect(hash).toHaveLength(5);
+            expect(hash).toMatch(/^[0-9a-z]+$/);
         });
     });
 });

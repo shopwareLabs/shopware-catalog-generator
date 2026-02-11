@@ -283,17 +283,20 @@ This project includes an MCP server for seamless AI assistant integration in Cur
 
 ### Setup
 
-Copy the example config and restart Cursor:
-
-```bash
-cp .cursor/mcp.json.example .cursor/mcp.json
-```
-
-If `bun` isn't in Cursor's PATH, edit `.cursor/mcp.json` to use the absolute path:
+The MCP config at `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamically, so it works on any machine without editing:
 
 ```json
-"command": "/home/youruser/.bun/bin/bun"
+{
+  "mcpServers": {
+    "catalog-generator": {
+      "command": "/bin/sh",
+      "args": ["-c", "\"$HOME/.bun/bin/bun\" run src/mcp/index.ts"]
+    }
+  }
+}
 ```
+
+If your `bun` is installed elsewhere, adjust the path in the `args` accordingly.
 
 ### Testing
 

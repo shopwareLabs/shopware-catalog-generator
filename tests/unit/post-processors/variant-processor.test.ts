@@ -483,6 +483,106 @@ describe("VariantProcessor", () => {
             expect(result.errors).toHaveLength(0);
         });
 
+        test("generates unique product numbers for options with long shared prefixes", async () => {
+            // Simulate the real-world bug: options that share a very long prefix
+            // and only differ after the truncation point
+            const materialConfig: VariantConfig = {
+                group: "Material",
+                selectedOptions: [
+                    "Adjustable 100-135 cm Polyester Exterior with Foam Interior Padding",
+                    "Adjustable 100-135 cm Polyester Exterior with Nylon Interior Padding",
+                ],
+                priceModifiers: {},
+            };
+
+            const propertyGroups: BlueprintPropertyGroup[] = [
+                {
+                    id: "pg-material",
+                    name: "Material",
+                    displayType: "text",
+                    options: [
+                        {
+                            id: "opt-foam",
+                            name: "Adjustable 100-135 cm Polyester Exterior with Foam Interior Padding",
+                        },
+                        {
+                            id: "opt-nylon",
+                            name: "Adjustable 100-135 cm Polyester Exterior with Nylon Interior Padding",
+                        },
+                    ],
+                },
+            ];
+
+            const blueprint = createMockBlueprint(
+                [
+                    {
+                        id: "d263d564abcdef1234567890abcdef12",
+                        name: "Trekking Poles - Carbon - Collapsible",
+                        isVariant: true,
+                        variantConfigs: [materialConfig],
+                    },
+                ],
+                propertyGroups
+            );
+
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                [
+                    "d263d564abcdef1234567890abcdef12",
+                    { isVariant: true, variantConfigs: [materialConfig] },
+                ],
+            ]);
+
+            // Use non-dry-run to capture the actual sync payload
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/property-group", { data: [] });
+            mockApi.mockPostResponse("search/product", {
+                data: [
+                    {
+                        id: "d263d564abcdef1234567890abcdef12",
+                        children: [],
+                        configuratorSettings: [],
+                    },
+                ],
+            });
+            mockApi.mockPostResponse("search/currency", { data: [{ id: "currency-eur" }] });
+            mockApi.setDefaultPostResponse({ success: true });
+            mockApi.mockSyncSuccess();
+
+            const context = createMockContext(blueprint, metadataMap, {
+                dryRun: false,
+                mockApi,
+            });
+            const result = await VariantProcessor.process(context);
+
+            // Check that the sync was called and extract variant product numbers
+            const syncCalls = mockApi.getCallsByEndpoint("_action/sync");
+            const variantSyncCall = syncCalls.find((call) => {
+                const body = call.body as Record<string, unknown> | undefined;
+                return body?.createVariants !== undefined;
+            });
+
+            if (variantSyncCall) {
+                const body = variantSyncCall.body as Record<
+                    string,
+                    { payload: Array<{ productNumber: string }> } | undefined
+                >;
+                const variants = body.createVariants?.payload ?? [];
+                const productNumbers = variants.map((v) => v.productNumber);
+
+                // All product numbers must be unique
+                const uniqueNumbers = new Set(productNumbers);
+                expect(uniqueNumbers.size).toBe(productNumbers.length);
+
+                // All product numbers must be within 64-char limit
+                for (const num of productNumbers) {
+                    expect(num.length).toBeLessThanOrEqual(64);
+                }
+            }
+
+            expect(result.processed).toBe(1);
+            expect(result.errors).toHaveLength(0);
+        });
+
         test("finds property group via partial match", async () => {
             // The processor should find "Size Type" when looking for "Size"
             const sizeConfig: VariantConfig = {

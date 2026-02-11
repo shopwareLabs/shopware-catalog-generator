@@ -276,91 +276,103 @@ class ImageProcessorImpl implements PostProcessor {
             );
         }
 
-        // Now upload product images to Shopware
+        // Now upload product images to Shopware (parallel across products)
         logger.cli(`    Uploading product images to Shopware...`);
         let uploadedProducts = 0;
+        const uploadLimiter = new ConcurrencyLimiter(3);
 
-        for (const { product, metadata, shouldCleanup } of productsNeedingImages) {
-            try {
-                // Collect all cached images for upload
-                const mediaToUpload: Array<{
-                    mediaId: string;
-                    productMediaId: string;
-                    view: string;
-                    base64Data: string;
-                }> = [];
+        const uploadResults = await uploadLimiter.all(
+            productsNeedingImages.map(({ product, metadata, shouldCleanup }) => async () => {
+                try {
+                    // Collect all cached images for upload
+                    const mediaToUpload: Array<{
+                        mediaId: string;
+                        productMediaId: string;
+                        view: string;
+                        base64Data: string;
+                    }> = [];
 
-                for (const desc of metadata.imageDescriptions) {
-                    const cachedImage = cache.loadImageWithView(
-                        context.salesChannelName,
-                        product.id,
-                        desc.view
-                    );
-                    if (cachedImage) {
-                        mediaToUpload.push({
-                            mediaId: generateUUID(),
-                            productMediaId: generateUUID(),
-                            view: desc.view,
-                            base64Data: cachedImage,
-                        });
+                    for (const desc of metadata.imageDescriptions) {
+                        const cachedImage = cache.loadImageWithView(
+                            context.salesChannelName,
+                            product.id,
+                            desc.view
+                        );
+                        if (cachedImage) {
+                            mediaToUpload.push({
+                                mediaId: generateUUID(),
+                                productMediaId: generateUUID(),
+                                view: desc.view,
+                                base64Data: cachedImage,
+                            });
+                        }
                     }
-                }
 
-                // Upload images to Shopware
-                if (mediaToUpload.length > 0) {
-                    await this.uploadProductImages(
-                        context,
-                        product.id,
-                        product.name,
-                        mediaToUpload,
-                        shouldCleanup
+                    // Upload images to Shopware
+                    if (mediaToUpload.length > 0) {
+                        await this.uploadProductImages(
+                            context,
+                            product.id,
+                            product.name,
+                            mediaToUpload,
+                            shouldCleanup
+                        );
+                        return { uploaded: true, processed: true };
+                    }
+
+                    return { uploaded: false, processed: true };
+                } catch (error) {
+                    errors.push(
+                        `Failed to upload images for ${product.name}: ${error instanceof Error ? error.message : String(error)}`
                     );
-                    uploadedProducts++;
+                    return { uploaded: false, processed: false };
                 }
+            })
+        );
 
-                processed++;
-            } catch (error) {
-                errors.push(
-                    `Failed to upload images for ${product.name}: ${error instanceof Error ? error.message : String(error)}`
-                );
-            }
+        for (const result of uploadResults) {
+            if (result.processed) processed++;
+            if (result.uploaded) uploadedProducts++;
         }
 
         logger.cli(`    ✓ Uploaded images for ${uploadedProducts} products`);
 
-        // Now upload category banners to Shopware
+        // Now upload category banners to Shopware (parallel)
         if (categoriesWithImages.length > 0) {
             logger.cli(`    Uploading category banners to Shopware...`);
             let uploadedCategories = 0;
             const categoriesToRebuild = new Set(categoriesNeedingImages.map((c) => c.id));
+            const categoryLimiter = new ConcurrencyLimiter(3);
 
-            for (const category of categoriesWithImages) {
-                try {
-                    const cachedImage = cache.loadImageWithView(
-                        context.salesChannelName,
-                        category.id,
-                        "banner"
-                    );
-
-                    if (cachedImage) {
-                        const uploaded = await this.uploadCategoryImage(
-                            context,
+            const categoryResults = await categoryLimiter.all(
+                categoriesWithImages.map((category) => async () => {
+                    try {
+                        const cachedImage = cache.loadImageWithView(
+                            context.salesChannelName,
                             category.id,
-                            category.name,
-                            cachedImage,
-                            categoriesToRebuild.has(category.id)
+                            "banner"
                         );
-                        if (uploaded) {
-                            uploadedCategories++;
-                        }
-                    }
-                } catch (error) {
-                    errors.push(
-                        `Failed to upload banner for ${category.name}: ${error instanceof Error ? error.message : String(error)}`
-                    );
-                }
-            }
 
+                        if (cachedImage) {
+                            return await this.uploadCategoryImage(
+                                context,
+                                category.id,
+                                category.name,
+                                cachedImage,
+                                categoriesToRebuild.has(category.id)
+                            );
+                        }
+                        return false;
+                    } catch (error) {
+                        errors.push(
+                            `Failed to upload banner for ${category.name}: ${error instanceof Error ? error.message : String(error)}`
+                        );
+                        return false;
+                    }
+                })
+            );
+
+            uploadedCategories = categoryResults.filter(Boolean).length;
             logger.cli(`    ✓ Uploaded banners for ${uploadedCategories} categories`);
         }
 
@@ -525,55 +537,67 @@ class ImageProcessorImpl implements PostProcessor {
             throw new Error(`Failed to link media to product: ${syncResponse.status}`);
         }
 
-        // Upload actual image files for NEW media only (with retry for transient failures)
+        // Upload actual image files for NEW media only (parallel, with retry for transient failures)
         let uploadedCount = 0;
         let duplicateCount = 0;
-        for (const img of newMedia) {
-            const imageBuffer = Buffer.from(img.base64Data, "base64");
-            const fileName = `${productName.replace(/[^a-zA-Z0-9]/g, "-")}-${img.view}`;
+        const fileLimiter = new ConcurrencyLimiter(5);
 
-            // Detect image format from magic bytes
-            const format = this.detectImageFormat(imageBuffer);
+        const fileResults = await fileLimiter.all(
+            newMedia.map((img) => async () => {
+                const imageBuffer = Buffer.from(img.base64Data, "base64");
+                const fileName = `${sanitizedName}-${img.view}`;
 
-            try {
-                const uploadResponse = await this.uploadImageWithRetry(
-                    context,
-                    img.mediaId,
-                    fileName,
-                    imageBuffer,
-                    format
-                );
+                // Detect image format from magic bytes
+                const format = this.detectImageFormat(imageBuffer);
 
-                if (!uploadResponse.ok) {
-                    const errorText = await uploadResponse.text();
+                try {
+                    const uploadResponse = await this.uploadImageWithRetry(
+                        context,
+                        img.mediaId,
+                        fileName,
+                        imageBuffer,
+                        format
+                    );
 
-                    // Skip if file already exists (not an error)
-                    if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
-                        duplicateCount++;
-                        continue;
+                    if (!uploadResponse.ok) {
+                        const errorText = await uploadResponse.text();
+
+                        // Skip if file already exists (not an error)
+                        if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
+                            return "duplicate" as const;
+                        }
+
+                        logger.apiError("_action/media/upload", uploadResponse.status, {
+                            mediaId: img.mediaId,
+                            view: img.view,
+                            error: errorText,
+                        });
+                        logger.cli(
+                            `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`,
+                            "error"
+                        );
+                        return "error" as const;
                     }
-
-                    logger.apiError("_action/media/upload", uploadResponse.status, {
+                    return "uploaded" as const;
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    logger.error(`Failed to upload image after retries`, {
                         mediaId: img.mediaId,
                         view: img.view,
-                        error: errorText,
+                        error: message,
                     });
                     logger.cli(
-                        `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`,
+                        `      ✗ ${shortName} (${img.view}) upload failed: ${message}`,
                         "error"
                     );
-                } else {
-                    uploadedCount++;
+                    return "error" as const;
                 }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                logger.error(`Failed to upload image after retries`, {
-                    mediaId: img.mediaId,
-                    view: img.view,
-                    error: message,
-                });
-                logger.cli(`      ✗ ${shortName} (${img.view}) upload failed: ${message}`, "error");
-            }
+            })
+        );
+
+        for (const result of fileResults) {
+            if (result === "uploaded") uploadedCount++;
+            if (result === "duplicate") duplicateCount++;
         }
 
         // Log summary for this product

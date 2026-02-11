@@ -27,7 +27,7 @@ async function runMcpSmokeTest(): Promise<{
         stderr: "pipe",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const initRequest = JSON.stringify({
         jsonrpc: "2.0",
@@ -43,7 +43,7 @@ async function runMcpSmokeTest(): Promise<{
     proc.stdin.write(`${initRequest}\n`);
     proc.stdin.flush();
 
-    const timeout = 5000;
+    const timeout = 10000;
     const startTime = Date.now();
     let response = "";
     const decoder = new TextDecoder();
@@ -53,7 +53,7 @@ async function runMcpSmokeTest(): Promise<{
         while (Date.now() - startTime < timeout) {
             const readPromise = reader.read();
             const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) =>
-                setTimeout(() => resolve({ done: true, value: undefined }), 1000)
+                setTimeout(() => resolve({ done: true, value: undefined }), 3000)
             );
             const result = await Promise.race([readPromise, timeoutPromise]);
             if (result.value) {

@@ -325,35 +325,23 @@ export class ShopwareClient {
         return taxData.id;
     }
 
-    /** Get sales channel by name */
+    /** Well-known Shopware Storefront sales channel type ID */
+    static readonly STOREFRONT_TYPE_ID = "8a243080f92e4c719546314b577cf82b";
+
+    /** Get sales channel by name, with fallback to any Storefront-type channel */
     async getStandardSalesChannel(salesChannelName: string = "Storefront"): Promise<{
         id: string;
         navigationCategoryId: string;
         currencyId?: string;
     }> {
-        const salesChannelResponse = await this.apiClient.post<{
-            data: { id: string; navigationCategoryId: string; currencyId?: string }[];
-        }>("search/sales-channel", {
-            limit: 1,
-            filter: [{ type: "equals", field: "name", value: salesChannelName }],
-        });
-
-        if (!salesChannelResponse.ok) {
-            throw new Error(
-                `Failed to search sales channel: ${JSON.stringify(salesChannelResponse.data)}`
-            );
-        }
-
-        const salesChannel = salesChannelResponse.data?.data?.[0];
-        if (!salesChannel) {
-            throw new Error(
-                `Sales channel "${salesChannelName}" not found. Response: ${JSON.stringify(salesChannelResponse.data)}`
-            );
-        }
-        return salesChannel;
+        return this.findSalesChannel<{
+            id: string;
+            navigationCategoryId: string;
+            currencyId?: string;
+        }>(salesChannelName);
     }
 
-    /** Get full sales channel details for cloning */
+    /** Get full sales channel details for cloning, with fallback to any Storefront-type channel */
     async getFullSalesChannel(salesChannelName: string = "Storefront"): Promise<{
         id: string;
         name: string;
@@ -381,30 +369,84 @@ export class ShopwareClient {
             domains?: Array<{ snippetSetId: string }>;
         }
 
-        const response = await this.apiClient.post<{ data: SalesChannelSearchItem[] }>(
+        const channel = await this.findSalesChannel<SalesChannelSearchItem>(
+            salesChannelName,
+            { domains: {} }
+        );
+
+        return {
+            ...channel,
+            snippetSetId: channel.domains?.[0]?.snippetSetId,
+        };
+    }
+
+    /**
+     * Find a sales channel by name, with fallback to any Storefront-type channel.
+     * Shared lookup logic: tries exact name match first, then falls back to type ID.
+     */
+    private async findSalesChannel<T>(
+        salesChannelName: string,
+        associations?: Record<string, object>
+    ): Promise<T> {
+        // Step 1: Try exact name match
+        const response = await this.apiClient.post<{ data: T[] }>(
             "search/sales-channel",
             {
                 limit: 1,
                 filter: [{ type: "equals", field: "name", value: salesChannelName }],
-                associations: { domains: {} },
+                ...(associations && { associations }),
             }
         );
 
         if (!response.ok) {
-            throw new Error(`Failed to search sales channel: ${JSON.stringify(response.data)}`);
-        }
-
-        const salesChannel = response.data?.data?.[0];
-        if (!salesChannel) {
             throw new Error(
-                `Sales channel "${salesChannelName}" not found. Response: ${JSON.stringify(response.data)}`
+                `Failed to search sales channel: ${JSON.stringify(response.data)}`
             );
         }
 
-        return {
-            ...salesChannel,
-            snippetSetId: salesChannel.domains?.[0]?.snippetSetId,
-        };
+        const salesChannel = response.data?.data?.[0];
+        if (salesChannel) {
+            return salesChannel;
+        }
+
+        // Step 2: Fallback - find any Storefront-type sales channel
+        logger.warn(
+            `Sales channel "${salesChannelName}" not found by name, falling back to Storefront type lookup`
+        );
+
+        const fallbackResponse = await this.apiClient.post<{ data: T[] }>(
+            "search/sales-channel",
+            {
+                limit: 1,
+                filter: [
+                    {
+                        type: "equals",
+                        field: "typeId",
+                        value: ShopwareClient.STOREFRONT_TYPE_ID,
+                    },
+                ],
+                ...(associations && { associations }),
+            }
+        );
+
+        if (!fallbackResponse.ok) {
+            throw new Error(
+                `Failed to search sales channel by type: ${JSON.stringify(fallbackResponse.data)}`
+            );
+        }
+
+        const fallbackChannel = fallbackResponse.data?.data?.[0];
+        if (!fallbackChannel) {
+            throw new Error(
+                `No sales channel found: tried name "${salesChannelName}" and Storefront type ID "${ShopwareClient.STOREFRONT_TYPE_ID}". ` +
+                    `Ensure at least one Storefront-type sales channel exists in Shopware.`
+            );
+        }
+
+        logger.cli(
+            `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`
+        );
+        return fallbackChannel;
     }
 
     /** Generate a random access key for a SalesChannel */

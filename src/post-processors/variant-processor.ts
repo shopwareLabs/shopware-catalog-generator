@@ -17,7 +17,14 @@ import type {
 } from "./index.js";
 
 import { PropertyCache } from "../property-cache.js";
-import { apiPost, cartesianProduct, generateUUID, logger, toKebabCase } from "../utils/index.js";
+import {
+    apiPost,
+    cartesianProduct,
+    createShortHash,
+    generateUUID,
+    logger,
+    toKebabCase,
+} from "../utils/index.js";
 
 interface PropertyOption {
     id: string;
@@ -587,15 +594,19 @@ class VariantProcessorImpl implements PostProcessor {
                 .map((o) => o.name.toLowerCase().replace(/\s+/g, "-"))
                 .join("-");
 
-            // Shopware productNumber has max 64 chars. Use 8-char UUID prefix + truncated suffix
+            // Shopware productNumber has max 64 chars.
+            // Format: {8-char UUID prefix}-{truncated suffix}-{5-char hash}
+            // The hash of the full suffix guarantees uniqueness even when truncation
+            // causes different option combos to share the same prefix.
             const prefix = product.id.slice(0, 8);
-            const maxSuffixLength = 64 - prefix.length - 1; // -1 for the hyphen
+            const hashSuffix = createShortHash(optionSuffix, 5);
+            const maxSuffixLength = 64 - prefix.length - 1 - hashSuffix.length - 1; // hyphens between parts
             const truncatedSuffix = optionSuffix.slice(0, maxSuffixLength);
 
             return {
                 id: generateUUID(),
                 parentId: product.id,
-                productNumber: `${prefix}-${truncatedSuffix}`,
+                productNumber: `${prefix}-${truncatedSuffix}-${hashSuffix}`,
                 stock: Math.floor(Math.random() * 100) + 10,
                 options: combo.map((o) => ({ id: o.id })),
                 price: [

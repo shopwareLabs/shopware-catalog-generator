@@ -74,6 +74,7 @@ export { apiPost, apiUpload } from "./shopware-request.js";
 // String utilities
 export {
     capitalizeString,
+    createShortHash,
     decodeHtmlEntities,
     generateCategoryPlaceholder,
     generateProductPlaceholder,

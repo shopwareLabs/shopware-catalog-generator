@@ -33,14 +33,18 @@ Settings:
 
 ### strings.ts
 
-String normalization:
+String normalization and hashing:
 
 ```typescript
-import { normalizeDescription, stripHtml, capitalizeString } from "./utils/index.js";
+import { normalizeDescription, stripHtml, capitalizeString, createShortHash } from "./utils/index.js";
 
 const clean = normalizeDescription("<p>HTML &amp; entities</p>"); // "HTML & entities"
 const text = stripHtml("<b>Bold</b> text"); // "Bold text"
 const title = capitalizeString("hello"); // "Hello"
+
+// Deterministic short hash (djb2 algorithm) - useful for unique suffixes
+const hash = createShortHash("long-option-name-suffix", 5); // e.g. "a3x1k"
+const hash2 = createShortHash("long-option-name-suffix", 5); // same: "a3x1k"
 ```
 
 ### category-tree.ts
