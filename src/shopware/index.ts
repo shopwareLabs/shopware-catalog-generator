@@ -10,6 +10,7 @@ import type {
     SalesChannelFull,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import type { AdminApiClient } from "./admin-client.js";
 
 import { ShopwareCleanup } from "./cleanup.js";
 import { ShopwareExporter } from "./export.js";
@@ -60,10 +61,10 @@ export class DataHydrator extends ShopwareHydrator {
     private cleanup: ShopwareCleanup;
     private exporter: ShopwareExporter;
 
-    constructor() {
-        super();
-        this.cleanup = new ShopwareCleanup();
-        this.exporter = new ShopwareExporter();
+    constructor(client?: AdminApiClient) {
+        super(client);
+        this.cleanup = new ShopwareCleanup(client);
+        this.exporter = new ShopwareExporter(client);
     }
 
     // Override authentication to also authenticate cleanup and exporter instances
@@ -141,7 +142,11 @@ export class DataHydrator extends ShopwareHydrator {
     async cleanupCategory(
         categoryName: string,
         options: { deletePropertyGroups?: boolean } = {}
-    ): Promise<{ products: number; category: boolean; propertyGroups: number }> {
+    ): Promise<{
+        products: number;
+        category: boolean;
+        propertyGroups: number;
+    }> {
         return this.cleanup.cleanupCategory(categoryName, options);
     }
 
@@ -157,7 +162,6 @@ export class DataHydrator extends ShopwareHydrator {
         return this.cleanup.deleteUnusedPropertyOptions(dryRun);
     }
 
-    // SalesChannel-centric cleanup methods
     async cleanupSalesChannel(
         salesChannelName: string,
         options: {
@@ -172,18 +176,17 @@ export class DataHydrator extends ShopwareHydrator {
         manufacturers: number;
         salesChannelDeleted: boolean;
         rootCategoryDeleted: boolean;
+        errors: string[];
     }> {
         return this.cleanup.cleanupSalesChannel(salesChannelName, options);
     }
 
-    // Keep the old method signature for hydrateEnvWithPropertyGroups
     override async hydrateEnvWithPropertyGroups(
         propertyGroups: PropertyGroup[]
     ): Promise<PropertyGroup[]> {
         return super.hydrateEnvWithPropertyGroups(propertyGroups);
     }
 
-    // Keep the old method signature for hydrateEnvWithProducts
     override async hydrateEnvWithProducts(
         products: ProductInput[],
         category: string,

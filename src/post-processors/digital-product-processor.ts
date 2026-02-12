@@ -48,7 +48,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
         const startTime = Date.now();
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create gift card digital product`);
+            logger.info(`    [DRY RUN] Would create gift card digital product`, { cli: true });
             return {
                 name: this.name,
                 processed: 1,
@@ -62,7 +62,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
             // Check if already processed for this SalesChannel
             const cached = this.loadCache(context);
             if (cached) {
-                logger.cli(`    ⊘ Gift card already exists (${cached.productId})`);
+                logger.info(`    ⊘ Gift card already exists (${cached.productId})`, { cli: true });
                 return {
                     name: this.name,
                     processed: 0,
@@ -103,23 +103,25 @@ class DigitalProductProcessorImpl implements PostProcessor {
                     };
                 }
                 createdNew = true;
-                logger.cli(`    ✓ Created gift card product "${GIFT_CARD_50.name}"`);
+                logger.info(`    ✓ Created gift card product "${GIFT_CARD_50.name}"`, {
+                    cli: true,
+                });
 
                 // Step 3b: Upload product cover image
                 const coverUploaded = await this.uploadProductCoverImage(context, productId);
                 if (coverUploaded) {
-                    logger.cli(`    ✓ Uploaded gift card cover image`);
+                    logger.info(`    ✓ Uploaded gift card cover image`, { cli: true });
                 }
             } else {
-                logger.cli(`    ⊘ Gift card product already exists globally`);
+                logger.info(`    ⊘ Gift card product already exists globally`, { cli: true });
             }
 
             // Step 4: Add visibility for this SalesChannel
             const visibilityAdded = await this.addSalesChannelVisibility(context, productId);
             if (!visibilityAdded) {
-                logger.cli(`    ⊘ Gift card already visible in SalesChannel`);
+                logger.info(`    ⊘ Gift card already visible in SalesChannel`, { cli: true });
             } else {
-                logger.cli(`    ✓ Added gift card to SalesChannel`);
+                logger.info(`    ✓ Added gift card to SalesChannel`, { cli: true });
             }
 
             // Step 5: Create download media if not exists
@@ -151,9 +153,9 @@ class DigitalProductProcessorImpl implements PostProcessor {
                         durationMs: Date.now() - startTime,
                     };
                 }
-                logger.cli(`    ✓ Created downloadable voucher`);
+                logger.info(`    ✓ Created downloadable voucher`, { cli: true });
             } else {
-                logger.cli(`    ⊘ Download media already exists`);
+                logger.info(`    ⊘ Download media already exists`, { cli: true });
             }
 
             // Save to cache for TestingProcessor
@@ -191,21 +193,23 @@ class DigitalProductProcessorImpl implements PostProcessor {
         const errors: string[] = [];
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would remove gift card visibility from SalesChannel`);
+            logger.info(`    [DRY RUN] Would remove gift card visibility from SalesChannel`, {
+                cli: true,
+            });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
         try {
             const cached = this.loadCache(context);
             if (!cached) {
-                logger.cli(`    ⊘ No gift card found in cache`);
+                logger.info(`    ⊘ No gift card found in cache`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             // Remove visibility from this SalesChannel (don't delete the product)
             const removed = await this.removeSalesChannelVisibility(context, cached.productId);
             if (removed) {
-                logger.cli(`    ✓ Removed gift card from SalesChannel`);
+                logger.info(`    ✓ Removed gift card from SalesChannel`, { cli: true });
                 deleted++;
             }
 
@@ -249,7 +253,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 return data.data?.[0]?.id || null;
             }
         } catch (error) {
-            logger.warn("Failed to find existing gift card", { error });
+            logger.warn("Failed to find existing gift card", { data: error });
         }
 
         return null;
@@ -289,7 +293,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 return data.data?.[0]?.id || null;
             }
         } catch (error) {
-            logger.warn("Failed to get default tax ID", { error });
+            logger.warn("Failed to get default tax ID", { data: error });
         }
 
         return null;
@@ -344,7 +348,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return productId;
         } catch (error) {
-            logger.warn("Failed to create gift card product", { error });
+            logger.warn("Failed to create gift card product", { data: error });
             return null;
         }
     }
@@ -359,7 +363,9 @@ class DigitalProductProcessorImpl implements PostProcessor {
         try {
             // Check if image file exists
             if (!fs.existsSync(GIFT_CARD_50.imagePath)) {
-                logger.warn("Gift card image not found at path", { path: GIFT_CARD_50.imagePath });
+                logger.warn("Gift card image not found at path", {
+                    data: { path: GIFT_CARD_50.imagePath },
+                });
                 return false;
             }
 
@@ -431,7 +437,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return setCoverResponse.ok;
         } catch (error) {
-            logger.warn("Failed to upload product cover image", { error });
+            logger.warn("Failed to upload product cover image", { data: error });
             return false;
         }
     }
@@ -483,7 +489,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return response.ok;
         } catch (error) {
-            logger.warn("Failed to add SalesChannel visibility", { error });
+            logger.warn("Failed to add SalesChannel visibility", { data: error });
             return false;
         }
     }
@@ -521,7 +527,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return await this.deleteEntity(context, "product-visibility", visibilityId);
         } catch (error) {
-            logger.warn("Failed to remove SalesChannel visibility", { error });
+            logger.warn("Failed to remove SalesChannel visibility", { data: error });
             return false;
         }
     }
@@ -548,7 +554,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 return data.data?.[0]?.mediaId || null;
             }
         } catch (error) {
-            logger.warn("Failed to find existing download media", { error });
+            logger.warn("Failed to find existing download media", { data: error });
         }
 
         return null;
@@ -607,7 +613,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return mediaId;
         } catch (error) {
-            logger.warn("Failed to create download media", { error });
+            logger.warn("Failed to create download media", { data: error });
             return null;
         }
     }
@@ -648,7 +654,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return downloadId;
         } catch (error) {
-            logger.warn("Failed to create product download", { error });
+            logger.warn("Failed to create product download", { data: error });
             return null;
         }
     }
@@ -673,7 +679,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             return response.ok || response.status === 404;
         } catch (error) {
-            logger.warn(`Failed to delete ${entity}/${id}`, { error });
+            logger.warn(`Failed to delete ${entity}/${id}`, { data: error });
             return false;
         }
     }

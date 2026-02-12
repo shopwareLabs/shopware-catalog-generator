@@ -263,6 +263,16 @@ export function registerGenerateTools(server: FastMCP): void {
             }
             results.push(`  Processed: ${totalProcessed}, Errors: ${totalErrors}`);
 
+            // Per-processor breakdown (always show for visibility)
+            for (const result of processorResults) {
+                const status = result.errors.length === 0 ? "✓" : "✗";
+                const errorSuffix =
+                    result.errors.length > 0 ? ` [${result.errors.join("; ")}]` : "";
+                results.push(
+                    `  ${status} ${result.name}: ${result.processed} processed, ${result.skipped} skipped${errorSuffix}`
+                );
+            }
+
             results.push(``);
             results.push(`=== Generation Complete ===`);
             results.push(`SalesChannel: ${salesChannelName}`);

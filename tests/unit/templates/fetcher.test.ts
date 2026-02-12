@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -7,8 +7,6 @@ import { createTemplateFetcherFromEnv, TemplateFetcher } from "../../../src/temp
 import { logger } from "../../../src/utils/index.js";
 
 // Suppress console output during tests
-const originalCli = logger.cli.bind(logger);
-const mockCli = mock(() => {});
 
 const TEST_BASE_DIR = "./test-template-temp";
 const TEST_CACHE_DIR = `${TEST_BASE_DIR}/cache`;
@@ -277,7 +275,7 @@ describe("TemplateFetcher", () => {
 
     describe("copyPropertiesToCache", () => {
         test("returns false when properties folder does not exist", () => {
-            logger.cli = mockCli;
+            logger.setMcpMode(true);
 
             // Create empty template directory (no properties folder)
             fs.mkdirSync(path.join(TEST_TEMPLATE_DIR, "generated"), { recursive: true });
@@ -285,11 +283,11 @@ describe("TemplateFetcher", () => {
             const success = fetcher.copyPropertiesToCache(cache);
             expect(success).toBe(false);
 
-            logger.cli = originalCli;
+            logger.setMcpMode(false);
         });
 
         test("copies properties folder to cache", () => {
-            logger.cli = mockCli;
+            logger.setMcpMode(true);
 
             // Create properties folder in template
             const propertiesDir = path.join(TEST_TEMPLATE_DIR, "generated", "properties");
@@ -308,11 +306,11 @@ describe("TemplateFetcher", () => {
             expect(fs.existsSync(path.join(targetPropertiesDir, "color.json"))).toBe(true);
             expect(fs.existsSync(path.join(targetPropertiesDir, "index.json"))).toBe(true);
 
-            logger.cli = originalCli;
+            logger.setMcpMode(false);
         });
 
         test("handles copy errors gracefully", () => {
-            logger.cli = mockCli;
+            logger.setMcpMode(true);
 
             // Create properties folder
             const propertiesDir = path.join(TEST_TEMPLATE_DIR, "generated", "properties");
@@ -329,13 +327,13 @@ describe("TemplateFetcher", () => {
 
             // Restore permissions
             fs.chmodSync(cacheDir, originalMode);
-            logger.cli = originalCli;
+            logger.setMcpMode(false);
         });
     });
 
     describe("copyToCache error handling", () => {
         test("handles copy errors gracefully", () => {
-            logger.cli = mockCli;
+            logger.setMcpMode(true);
 
             // Create template with files
             const templateDir = path.join(
@@ -360,7 +358,7 @@ describe("TemplateFetcher", () => {
 
             // Restore permissions
             fs.chmodSync(cacheDir, originalMode);
-            logger.cli = originalCli;
+            logger.setMcpMode(false);
         });
     });
 });

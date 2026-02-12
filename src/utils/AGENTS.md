@@ -36,7 +36,12 @@ Settings:
 String normalization and hashing:
 
 ```typescript
-import { normalizeDescription, stripHtml, capitalizeString, createShortHash } from "./utils/index.js";
+import {
+    normalizeDescription,
+    stripHtml,
+    capitalizeString,
+    createShortHash,
+} from "./utils/index.js";
 
 const clean = normalizeDescription("<p>HTML &amp; entities</p>"); // "HTML & entities"
 const text = stripHtml("<b>Bold</b> text"); // "Bold text"
@@ -117,7 +122,7 @@ const result = validateBlueprint(blueprint, { autoFix: true, logFixes: true });
 
 // Quick check without auto-fix
 if (hasValidationIssues(blueprint)) {
-    logger.cli("Blueprint has issues", "error");
+    logger.error("Blueprint has issues", { cli: true });
 }
 ```
 
@@ -153,9 +158,9 @@ File-based logging with MCP-safe console output:
 import { logger } from "./utils/index.js";
 
 // User-facing output (file + console, respects MCP mode)
-logger.cli("✓ Created SalesChannel"); // info level (default)
-logger.cli("⚠ Rate limited", "warn"); // warn level
-logger.cli("✗ Upload failed", "error"); // error level
+logger.info("✓ Created SalesChannel", { cli: true });
+logger.warn("⚠ Rate limited", { cli: true });
+logger.error("✗ Upload failed", { cli: true });
 
 // Diagnostic logging (file only)
 logger.debug("Debug info", { data });
@@ -174,7 +179,7 @@ Logs are written to `logs/generator-{timestamp}.log`.
 
 **Convention: Never use `console.*` directly in library modules.**
 
-- Use `logger.cli()` for user-facing output (respects MCP mode)
+- Use `logger.info/warn/error("msg", { cli: true })` for user-facing output (respects MCP mode)
 - Use `logger.info/warn/error()` for diagnostic logging (file only)
 - Only CLI entry points (`main.ts`, `*-cli.ts`, `server.ts`) may use `console.*` directly
 

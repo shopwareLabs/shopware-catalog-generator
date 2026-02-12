@@ -80,7 +80,7 @@ class VariantProcessorImpl implements PostProcessor {
             };
         }
 
-        logger.cli(`    Creating variants for ${variantProducts.length} products...`);
+        logger.info(`    Creating variants for ${variantProducts.length} products...`, { cli: true });
 
         for (const product of variantProducts) {
             const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
@@ -95,7 +95,9 @@ class VariantProcessorImpl implements PostProcessor {
 
             if (options.dryRun) {
                 const groupNames = variantConfigs.map((c) => c.group).join(" + ");
-                logger.cli(`      [DRY RUN] ${product.name} -> ${groupNames} variants`);
+                logger.info(`      [DRY RUN] ${product.name} -> ${groupNames} variants`, {
+                    cli: true,
+                });
                 processed++;
                 continue;
             }
@@ -105,7 +107,9 @@ class VariantProcessorImpl implements PostProcessor {
                 const resolvedGroups = await this.resolvePropertyGroups(context, variantConfigs);
 
                 if (resolvedGroups.length === 0) {
-                    logger.cli(`      ⊘ ${product.name}: No suitable property groups found`);
+                    logger.info(`      ⊘ ${product.name}: No suitable property groups found`, {
+                        cli: true,
+                    });
                     skipped++;
                     continue;
                 }
@@ -113,7 +117,9 @@ class VariantProcessorImpl implements PostProcessor {
                 // Check if product already has variants or configurator settings
                 const hasVariants = await this.productHasVariants(context, product.id);
                 if (hasVariants) {
-                    logger.cli(`      ⊘ ${product.name}: Already configured as variant product`);
+                    logger.info(`      ⊘ ${product.name}: Already configured as variant product`, {
+                        cli: true,
+                    });
                     skipped++;
                     continue;
                 }
@@ -127,8 +133,9 @@ class VariantProcessorImpl implements PostProcessor {
 
                 if (variantCount > 0) {
                     const groupNames = resolvedGroups.map((g) => g.group.name).join(" + ");
-                    logger.cli(
-                        `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`
+                    logger.info(
+                        `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`,
+                        { cli: true }
                     );
                     processed++;
                 } else {
@@ -138,7 +145,7 @@ class VariantProcessorImpl implements PostProcessor {
             } catch (error) {
                 const errorMsg = `Failed to create variants for ${product.name}: ${error instanceof Error ? error.message : String(error)}`;
                 errors.push(errorMsg);
-                logger.warn(errorMsg);
+                logger.warn(errorMsg, { cli: true });
             }
         }
 
@@ -220,7 +227,7 @@ class VariantProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.warn("Failed to get currency ID", { error });
+            logger.warn("Failed to get currency ID", { data: error });
         }
 
         // Fallback to Shopware's default EUR currency ID
@@ -281,8 +288,9 @@ class VariantProcessorImpl implements PostProcessor {
             return existingGroup;
         }
 
-        logger.cli(
-            `      Creating variant property group "${groupName}" with ${cachedGroup.options.length} options...`
+        logger.info(
+            `      Creating variant property group "${groupName}" with ${cachedGroup.options.length} options...`,
+            { cli: true }
         );
 
         // Create/update property group with all options
@@ -397,7 +405,7 @@ class VariantProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.warn(`Failed to get property group "${groupName}"`, { error });
+            logger.warn(`Failed to get property group "${groupName}"`, { data: error });
         }
 
         return null;
@@ -437,16 +445,18 @@ class VariantProcessorImpl implements PostProcessor {
 
                 if (hasChildren || hasConfigSettings) {
                     logger.debug(`Product ${productId} already has variants`, {
-                        hasChildren,
-                        hasConfigSettings,
-                        childCount: product?.children?.length || 0,
-                        configCount: product?.configuratorSettings?.length || 0,
+                        data: {
+                            hasChildren,
+                            hasConfigSettings,
+                            childCount: product?.children?.length || 0,
+                            configCount: product?.configuratorSettings?.length || 0,
+                        },
                     });
                     return true;
                 }
             }
         } catch (error) {
-            logger.warn(`Error checking variants for ${productId}`, { error });
+            logger.warn(`Error checking variants for ${productId}`, { data: error });
         }
 
         return false;
@@ -488,8 +498,10 @@ class VariantProcessorImpl implements PostProcessor {
 
             if (!propertyGroup || propertyGroup.options.length < 2) {
                 logger.debug(`Skipping variant config "${config.group}": not enough options`, {
-                    found: !!propertyGroup,
-                    optionCount: propertyGroup?.options.length || 0,
+                    data: {
+                        found: !!propertyGroup,
+                        optionCount: propertyGroup?.options.length || 0,
+                    },
                 });
                 continue;
             }
@@ -562,7 +574,9 @@ class VariantProcessorImpl implements PostProcessor {
             const errorText = await updateParentResponse.text();
 
             if (errorText.includes("Duplicate entry") || errorText.includes("1062")) {
-                logger.cli(`      ⊘ ${product.name}: Configurator settings already exist`);
+                logger.info(`      ⊘ ${product.name}: Configurator settings already exist`, {
+                    cli: true,
+                });
                 return 0;
             }
 
@@ -676,7 +690,9 @@ class VariantProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            logger.cli(`    [DRY RUN] Would delete variants for products in SalesChannel`);
+            logger.info(`    [DRY RUN] Would delete variants for products in SalesChannel`, {
+                cli: true,
+            });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -700,12 +716,14 @@ class VariantProcessorImpl implements PostProcessor {
             );
 
             if (parentProducts.length === 0) {
-                logger.cli(`    No products found in SalesChannel`);
+                logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const parentIds = parentProducts.map((p) => p.id);
-            logger.cli(`    Found ${parentIds.length} parent products in SalesChannel`);
+            logger.info(`    Found ${parentIds.length} parent products in SalesChannel`, {
+                cli: true,
+            });
 
             // Step 2: Find all child products (variants) with these parentIds
             const variants = await context.api.searchEntities<{ id: string }>(
@@ -715,15 +733,15 @@ class VariantProcessorImpl implements PostProcessor {
             );
 
             if (variants.length > 0) {
-                logger.cli(`    Found ${variants.length} variant products`);
+                logger.info(`    Found ${variants.length} variant products`, { cli: true });
 
                 // Step 3: Delete child products
                 const variantIds = variants.map((v) => v.id);
                 await context.api.deleteEntities("product", variantIds);
                 deleted = variantIds.length;
-                logger.cli(`    ✓ Deleted ${deleted} variant products`);
+                logger.info(`    ✓ Deleted ${deleted} variant products`, { cli: true });
             } else {
-                logger.cli(`    No variant products found`);
+                logger.info(`    No variant products found`, { cli: true });
             }
 
             // Step 4: Clear configuratorSettings from parent products
@@ -761,8 +779,9 @@ class VariantProcessorImpl implements PostProcessor {
                         // Settings might not exist, skip
                     }
                 }
-                logger.cli(
-                    `    ✓ Cleared configurator settings from ${parentsToUpdate.length} parent products`
+                logger.info(
+                    `    ✓ Cleared configurator settings from ${parentsToUpdate.length} parent products`,
+                    { cli: true }
                 );
             }
         } catch (error) {

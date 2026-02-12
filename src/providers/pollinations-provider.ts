@@ -71,16 +71,16 @@ export class PollinationsTextProvider implements TextProvider {
             errorMessage.includes("401") ||
             errorMessage.includes("Invalid API key")
         ) {
-            logger.cli(`\n💡 TIP: Authentication failed with Pollinations.`);
-            logger.cli(`   Check your AI_API_KEY in .env is correct.`);
-            logger.cli(`   Get a key at https://enter.pollinations.ai`);
+            logger.info(`\n💡 TIP: Authentication failed with Pollinations.`, { cli: true });
+            logger.info(`   Check your AI_API_KEY in .env is correct.`, { cli: true });
+            logger.info(`   Get a key at https://enter.pollinations.ai`, { cli: true });
         } else if (
             status === 429 ||
             errorMessage.includes("429") ||
             errorMessage.includes("rate")
         ) {
-            logger.cli(`\n💡 TIP: Rate limited by Pollinations.`);
-            logger.cli(`   Wait a moment and try again.`);
+            logger.info(`\n💡 TIP: Rate limited by Pollinations.`, { cli: true });
+            logger.info(`   Wait a moment and try again.`, { cli: true });
         }
 
         logger.info(""); // Empty line for readability
@@ -162,9 +162,11 @@ export class PollinationsImageProvider implements ImageProvider {
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
                 logger.warn("Pollinations image generation timed out after 2 minutes");
-                logger.cli("TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo");
+                logger.info("TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo", {
+                    cli: true,
+                });
             } else {
-                logger.warn("Pollinations image generation failed:", error);
+                logger.warn("Pollinations image generation failed:", { data: error });
             }
             return null;
         }
@@ -204,24 +206,33 @@ export class PollinationsImageProvider implements ImageProvider {
             // Provide helpful tips based on error
             if (errorMessage.includes("No active") && errorMessage.includes("servers available")) {
                 const otherModels = POLLINATIONS_IMAGE_MODELS.filter((m) => m !== this.model);
-                logger.cli(`\n💡 TIP: The "${this.model}" model is currently unavailable.`);
-                logger.cli(`   Try switching to a different model in your .env file:`);
+                logger.info(`\n💡 TIP: The "${this.model}" model is currently unavailable.`, {
+                    cli: true,
+                });
+                logger.info(`   Try switching to a different model in your .env file:`, {
+                    cli: true,
+                });
                 otherModels.forEach((m) => {
-                    logger.cli(`   IMAGE_MODEL=${m}`);
+                    logger.info(`   IMAGE_MODEL=${m}`, { cli: true });
                 });
             } else if (response.status === 401) {
-                logger.cli(
-                    `\n💡 TIP: Authentication failed. Check your API key at https://enter.pollinations.ai`
+                logger.info(
+                    `\n💡 TIP: Authentication failed. Check your API key at https://enter.pollinations.ai`,
+                    { cli: true }
                 );
             } else if (response.status === 429) {
-                logger.cli(`\n💡 TIP: Rate limited. Wait a moment and try again.`);
+                logger.info(`\n💡 TIP: Rate limited. Wait a moment and try again.`, {
+                    cli: true,
+                });
             }
 
             logger.info(""); // Empty line for readability
         } catch {
             // If JSON parsing fails, just show the status
             logger.error(`Pollinations image generation failed: ${statusText}`);
-            logger.cli(`TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=klein`);
+            logger.info(`TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=klein`, {
+                cli: true,
+            });
         }
     }
 }

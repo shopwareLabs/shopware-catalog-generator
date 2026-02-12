@@ -173,19 +173,27 @@ export function registerCleanupTools(server: FastMCP): void {
                     },
                 };
 
-                const processorResults = await cleanupProcessors(context, processorList);
+                try {
+                    const processorResults = await cleanupProcessors(context, processorList);
 
-                let totalDeleted = 0;
-                let totalErrors = 0;
-                for (const result of processorResults) {
+                    let totalDeleted = 0;
+                    let totalErrors = 0;
+                    for (const result of processorResults) {
+                        results.push(
+                            `${result.name}: ${result.deleted} deleted, ${result.errors.length} errors`
+                        );
+                        totalDeleted += result.deleted;
+                        totalErrors += result.errors.length;
+                    }
+                    results.push(``);
                     results.push(
-                        `${result.name}: ${result.deleted} deleted, ${result.errors.length} errors`
+                        `Processor cleanup: ${totalDeleted} deleted, ${totalErrors} errors`
                     );
-                    totalDeleted += result.deleted;
-                    totalErrors += result.errors.length;
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    results.push(``);
+                    results.push(`Processor cleanup FAILED: ${message}`);
                 }
-                results.push(``);
-                results.push(`Processor cleanup: ${totalDeleted} deleted, ${totalErrors} errors`);
             }
 
             // Handle core cleanup (if no processors specified or if --full)
@@ -203,23 +211,38 @@ export function registerCleanupTools(server: FastMCP): void {
                         results.push(`  - SalesChannel itself`);
                     }
                 } else {
-                    const result = await hydrator.cleanupSalesChannel(args.salesChannel, {
-                        deletePropertyGroups: args.deleteProps,
-                        deleteSalesChannel: args.deleteSalesChannel || args.full,
-                        deleteManufacturers: false,
-                    });
+                    try {
+                        const result = await hydrator.cleanupSalesChannel(args.salesChannel, {
+                            deletePropertyGroups: args.deleteProps,
+                            deleteSalesChannel: args.deleteSalesChannel || args.full,
+                            deleteManufacturers: false,
+                        });
 
-                    results.push(``);
-                    results.push(`Core cleanup:`);
-                    results.push(`  Products deleted: ${result.products}`);
-                    results.push(`  Categories deleted: ${result.categories}`);
-                    if (args.deleteProps) {
-                        results.push(`  Property groups deleted: ${result.propertyGroups}`);
-                    }
-                    if (args.deleteSalesChannel || args.full) {
-                        results.push(
-                            `  SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`
-                        );
+                        results.push(``);
+                        results.push(`Core cleanup:`);
+                        results.push(`  Products deleted: ${result.products}`);
+                        results.push(`  Categories deleted: ${result.categories}`);
+                        if (args.deleteProps) {
+                            results.push(
+                                `  Property groups deleted: ${result.propertyGroups}`
+                            );
+                        }
+                        if (args.deleteSalesChannel || args.full) {
+                            results.push(
+                                `  SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`
+                            );
+                        }
+                        if (result.errors.length > 0) {
+                            results.push(``);
+                            results.push(`Core cleanup errors:`);
+                            for (const err of result.errors) {
+                                results.push(`  - ${err}`);
+                            }
+                        }
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        results.push(``);
+                        results.push(`Core cleanup FAILED: ${message}`);
                     }
                 }
             }

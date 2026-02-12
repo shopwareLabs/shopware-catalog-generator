@@ -29,8 +29,12 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
         const landingPageName = this.getLandingPageName(context);
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create CMS layout "${this.pageFixture.name}"`);
-            logger.cli(`    [DRY RUN] Would create Landing Page "${this.pageFixture.name}"`);
+            logger.info(`    [DRY RUN] Would create CMS layout "${this.pageFixture.name}"`, {
+                cli: true,
+            });
+            logger.info(`    [DRY RUN] Would create Landing Page "${this.pageFixture.name}"`, {
+                cli: true,
+            });
             return {
                 name: this.name,
                 processed: 1,
@@ -44,8 +48,9 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
             // Get products with media from this SalesChannel
             const products = await this.getProductsWithMedia(context);
             if (products.length === 0) {
-                logger.cli(
-                    `    ⚠ No products found in SalesChannel, commerce blocks will be empty`
+                logger.warn(
+                    `    ⚠ No products found in SalesChannel, commerce blocks will be empty`,
+                    { cli: true }
                 );
             }
 
@@ -61,11 +66,14 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
                     errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(
-                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${products.length} products`
+                logger.info(
+                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${products.length} products`,
+                    { cli: true }
                 );
             } else {
-                logger.cli(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`);
+                logger.info(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`, {
+                    cli: true,
+                });
             }
 
             // Step 2: Check if Landing Page already exists for this SalesChannel
@@ -77,7 +85,9 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
                     errors.push(`Failed to create Landing Page "${landingPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(`    ✓ Created Landing Page "${this.pageFixture.name}"`);
+                logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, {
+                    cli: true,
+                });
             } else {
                 await this.ensureSalesChannelAssociated(
                     context,
@@ -155,7 +165,7 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
                 });
             }
         } catch (error) {
-            logger.warn("Failed to get products for commerce page", { error });
+            logger.warn("Failed to get products for commerce page", { data: error });
         }
 
         return [];

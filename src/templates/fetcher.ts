@@ -86,7 +86,7 @@ export class TemplateFetcher {
      */
     private initRepo(): boolean {
         try {
-            logger.cli(`Initializing template repository from ${this.repoUrl}...`);
+            logger.info(`Initializing template repository from ${this.repoUrl}...`, { cli: true });
 
             // Create directory if it doesn't exist
             if (!fs.existsSync(this.cacheDir)) {
@@ -102,13 +102,13 @@ export class TemplateFetcher {
                 }
             );
 
-            logger.cli(`Template repository initialized (sparse checkout)`);
+            logger.info(`Template repository initialized (sparse checkout)`, { cli: true });
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            logger.cli(`Failed to initialize template repository: ${message}`, "warn");
-            logger.cli(`Repository URL: ${this.repoUrl}`, "warn");
-            logger.cli(`Target directory: ${this.cacheDir}`, "warn");
+            logger.warn(`Failed to initialize template repository: ${message}`, { cli: true });
+            logger.warn(`Repository URL: ${this.repoUrl}`, { cli: true });
+            logger.warn(`Target directory: ${this.cacheDir}`, { cli: true });
             return false;
         }
     }
@@ -118,7 +118,7 @@ export class TemplateFetcher {
      */
     private fetchTemplate(name: string): boolean {
         try {
-            logger.cli(`Fetching template "${name}" and properties...`);
+            logger.info(`Fetching template "${name}" and properties...`, { cli: true });
 
             // Add the specific sales channel and properties folder to sparse checkout
             // Repository structure: generated/sales-channels/<name> and generated/properties
@@ -136,15 +136,15 @@ export class TemplateFetcher {
             const hydratedBlueprintPath = path.join(templatePath, "hydrated-blueprint.json");
 
             if (!fs.existsSync(hydratedBlueprintPath)) {
-                logger.cli(`Template "${name}" does not exist in the repository`);
+                logger.info(`Template "${name}" does not exist in the repository`, { cli: true });
                 return false;
             }
 
-            logger.cli(`Template "${name}" fetched successfully`);
+            logger.info(`Template "${name}" fetched successfully`, { cli: true });
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            logger.cli(`Failed to fetch template "${name}": ${message}`, "warn");
+            logger.warn(`Failed to fetch template "${name}": ${message}`, { cli: true });
             return false;
         }
     }
@@ -154,7 +154,7 @@ export class TemplateFetcher {
      */
     private updateRepo(): boolean {
         try {
-            logger.cli(`Updating template repository...`);
+            logger.info(`Updating template repository...`, { cli: true });
             execSync("git pull --ff-only", {
                 cwd: this.cacheDir,
                 stdio: "inherit",
@@ -163,7 +163,7 @@ export class TemplateFetcher {
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            logger.cli(`Failed to update template repository: ${message}`, "warn");
+            logger.warn(`Failed to update template repository: ${message}`, { cli: true });
             return false;
         }
     }
@@ -205,7 +205,7 @@ export class TemplateFetcher {
 
         // If template is already checked out, we're done
         if (this.isTemplateCheckedOut(name)) {
-            logger.cli(`Template "${name}" already available`);
+            logger.info(`Template "${name}" already available`, { cli: true });
             return true;
         }
 
@@ -272,7 +272,7 @@ export class TemplateFetcher {
         const propertiesPath = path.join(this.cacheDir, "generated", "properties");
 
         if (!fs.existsSync(propertiesPath)) {
-            logger.cli(`No properties folder in template repository`);
+            logger.info(`No properties folder in template repository`, { cli: true });
             return false;
         }
 
@@ -280,11 +280,11 @@ export class TemplateFetcher {
             // Target: generated/properties (same level as sales-channels)
             const targetPath = path.join(cache.getCacheDir(), "properties");
             fs.cpSync(propertiesPath, targetPath, { recursive: true });
-            logger.cli(`✓ Copied properties to local cache`);
+            logger.info(`✓ Copied properties to local cache`, { cli: true });
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            logger.cli(`Failed to copy properties: ${message}`, "error");
+            logger.error(`Failed to copy properties: ${message}`, { cli: true });
             return false;
         }
     }

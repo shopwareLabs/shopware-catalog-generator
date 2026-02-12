@@ -287,12 +287,12 @@ The MCP config at `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamical
 
 ```json
 {
-  "mcpServers": {
-    "catalog-generator": {
-      "command": "/bin/sh",
-      "args": ["-c", "\"$HOME/.bun/bin/bun\" run src/mcp/index.ts"]
+    "mcpServers": {
+        "catalog-generator": {
+            "command": "/bin/sh",
+            "args": ["-c", "\"$HOME/.bun/bin/bun\" run src/mcp/index.ts"]
+        }
     }
-  }
 }
 ```
 

@@ -21,21 +21,13 @@ import {
     validateSubdomainName,
 } from "../utils/index.js";
 
+import type { Schemas } from "./admin-client.js";
+import type { SearchResult } from "./api-types.js";
 import { ShopwareClient } from "./client.js";
 
-/** Common Shopware search response structure */
-interface SearchResponse<T> {
-    total: number;
-    data: T[];
-}
-
-/** Create response structure */
-interface CreateResponse<T> {
-    data: T;
-}
-
 /**
- * Shopware data hydrator - creates products, categories, and property groups
+ * Shopware data hydrator - creates products, categories, and property groups.
+ * Uses the official @shopware/api-client invoke() for all API calls.
  */
 export class ShopwareHydrator extends ShopwareClient {
     /**
@@ -48,46 +40,64 @@ export class ShopwareHydrator extends ShopwareClient {
         const categoryName = capitalizeString(category.trim());
 
         logger.debug("Searching for category", {
-            name: categoryName,
-            parentId: salesChannel.navigationCategoryId,
+            data: {
+                name: categoryName,
+                parentId: salesChannel.navigationCategoryId,
+            },
         });
 
-        const categorySearchResponse = await this.apiClient.post<
-            SearchResponse<{ id: string; name: string }>
-        >("search/category", {
-            limit: 1,
-            filter: [
-                { type: "equals", field: "name", value: categoryName },
-                {
-                    type: "equals",
-                    field: "parentId",
-                    value: salesChannel.navigationCategoryId,
+        const { data: searchData } = await this.getClient().invoke(
+            "searchCategory post /search/category",
+            {
+                body: {
+                    limit: 1,
+                    filter: [
+                        { type: "equals", field: "name", value: categoryName },
+                        {
+                            type: "equals",
+                            field: "parentId",
+                            value: salesChannel.navigationCategoryId,
+                        },
+                    ],
                 },
-            ],
-        });
+            }
+        );
+        const searchResult = searchData as SearchResult<Schemas["Category"]>;
 
-        if (categorySearchResponse.data.total === 1 && categorySearchResponse.data.data[0]) {
-            logger.debug("Found existing category", categorySearchResponse.data.data[0]);
-            return categorySearchResponse.data.data[0];
+        if ((searchResult.total ?? 0) === 1 && searchResult.data?.[0]) {
+            const existing = searchResult.data[0];
+            logger.debug("Found existing category", {
+                data: { id: existing.id, name: existing.name },
+            });
+            return { id: existing.id, name: existing.name ?? categoryName };
         }
 
-        logger.debug("Creating new category", { name: categoryName });
+        logger.debug("Creating new category", { data: { name: categoryName } });
 
-        const categoryResponse = await this.apiClient.post<
-            CreateResponse<{ id: string; name: string }>
-        >("category?_response", {
-            name: categoryName,
-            parentId: salesChannel.navigationCategoryId,
-            displayNestedProducts: true,
-            type: "page",
-            productAssignmentType: "product",
-            visible: true,
-            active: true,
+        const newCategoryId = generateUUID();
+        await this.sync([
+            {
+                entity: "category",
+                action: "upsert",
+                payload: [
+                    {
+                        id: newCategoryId,
+                        name: categoryName,
+                        parentId: salesChannel.navigationCategoryId,
+                        displayNestedProducts: true,
+                        type: "page",
+                        productAssignmentType: "product",
+                        visible: true,
+                        active: true,
+                    },
+                ],
+            },
+        ]);
+
+        logger.debug("Category created", {
+            data: { id: newCategoryId, name: categoryName },
         });
-
-        logger.debug("Category created", categoryResponse.data.data);
-
-        return categoryResponse.data.data;
+        return { id: newCategoryId, name: categoryName };
     }
 
     /**
@@ -121,19 +131,24 @@ export class ShopwareHydrator extends ShopwareClient {
         try {
             // Check if property groups exist
             if (groupIds.length > 0) {
-                const groupResponse = await this.apiClient.post<SearchResponse<{ id: string }>>(
-                    "search/property-group",
+                const { data: groupData } = await this.getClient().invoke(
+                    "searchPropertyGroup post /search/property-group",
                     {
-                        limit: groupIds.length,
-                        filter: [{ type: "equalsAny", field: "id", value: groupIds }],
+                        body: {
+                            limit: groupIds.length,
+                            filter: [{ type: "equalsAny", field: "id", value: groupIds }],
+                        },
                     }
                 );
+                const groupResult = groupData as SearchResult<Schemas["PropertyGroup"]>;
 
-                const foundGroups = groupResponse.data.total || 0;
+                const foundGroups = groupResult.total ?? 0;
                 if (foundGroups !== groupIds.length) {
                     logger.debug("Property groups verification failed", {
-                        requestedGroups: groupIds.length,
-                        foundGroups,
+                        data: {
+                            requestedGroups: groupIds.length,
+                            foundGroups,
+                        },
                     });
                     return false;
                 }
@@ -141,32 +156,39 @@ export class ShopwareHydrator extends ShopwareClient {
 
             // Check if options exist
             if (optionIds.length > 0) {
-                const optionResponse = await this.apiClient.post<SearchResponse<{ id: string }>>(
-                    "search/property-group-option",
+                const { data: optionData } = await this.getClient().invoke(
+                    "searchPropertyGroupOption post /search/property-group-option",
                     {
-                        limit: optionIds.length,
-                        filter: [{ type: "equalsAny", field: "id", value: optionIds }],
+                        body: {
+                            limit: optionIds.length,
+                            filter: [{ type: "equalsAny", field: "id", value: optionIds }],
+                        },
                     }
                 );
+                const optionResult = optionData as SearchResult<Schemas["PropertyGroupOption"]>;
 
-                const foundOptions = optionResponse.data.total || 0;
+                const foundOptions = optionResult.total ?? 0;
                 if (foundOptions !== optionIds.length) {
                     logger.debug("Property options verification failed", {
-                        requestedOptions: optionIds.length,
-                        foundOptions,
+                        data: {
+                            requestedOptions: optionIds.length,
+                            foundOptions,
+                        },
                     });
                     return false;
                 }
             }
 
             logger.debug("Property groups and options verified", {
-                groups: groupIds.length,
-                options: optionIds.length,
+                data: {
+                    groups: groupIds.length,
+                    options: optionIds.length,
+                },
             });
 
             return true;
         } catch (error) {
-            logger.error("Failed to verify property groups", error);
+            logger.error("Failed to verify property groups", { data: error });
             return false;
         }
     }
@@ -181,32 +203,31 @@ export class ShopwareHydrator extends ShopwareClient {
         const result = new Map<string, { id: string; options: Map<string, string> }>();
 
         try {
-            const response = await this.apiClient.post<
-                SearchResponse<{
-                    id: string;
-                    name: string;
-                    options: Array<{ id: string; name: string }>;
-                }>
-            >("search/property-group", {
-                limit: 100,
-                associations: {
-                    options: { sort: [{ field: "position", order: "ASC" }] },
-                },
-            });
+            const { data: searchData } = await this.getClient().invoke(
+                "searchPropertyGroup post /search/property-group",
+                {
+                    body: {
+                        limit: 100,
+                        associations: {
+                            options: { sort: [{ field: "position", order: "ASC" }] },
+                        },
+                    },
+                }
+            );
+            const searchResult = searchData as SearchResult<Schemas["PropertyGroup"]>;
 
-            if (!response.ok || !response.data?.data) {
-                return result;
-            }
-
-            for (const group of response.data.data) {
+            for (const group of searchResult.data ?? []) {
                 const optionMap = new Map<string, string>();
-                for (const opt of group.options || []) {
+                for (const opt of group.options ?? []) {
                     optionMap.set(opt.name.toLowerCase(), opt.id);
                 }
-                result.set(group.name.toLowerCase(), { id: group.id, options: optionMap });
+                const name = group.name ?? "";
+                result.set(name.toLowerCase(), { id: group.id, options: optionMap });
             }
         } catch (error) {
-            logger.warn("Failed to fetch existing property groups for idempotency check", error);
+            logger.warn("Failed to fetch existing property groups for idempotency check", {
+                data: error,
+            });
         }
 
         return result;
@@ -247,24 +268,22 @@ export class ShopwareHydrator extends ShopwareClient {
             };
         });
 
-        const propertyGroupResponse = await this.apiClient.post("_action/sync", {
-            hydratePropertyGroups: {
-                entity: "property_group",
-                action: "upsert",
-                payload: propertyGroupsPayload,
-            },
-        });
+        try {
+            await this.sync([
+                {
+                    entity: "property_group",
+                    action: "upsert",
+                    payload: propertyGroupsPayload,
+                },
+            ]);
 
-        // Log response for debugging
-        if (propertyGroupResponse.status >= 400) {
-            logger.apiError("_action/sync (property_groups)", propertyGroupResponse.status, {
-                request: propertyGroupsPayload,
-                response: propertyGroupResponse.data,
-            });
-        } else {
             logger.debug("Property groups sync successful", {
-                status: propertyGroupResponse.status,
-                reusedExisting: existingGroups.size,
+                data: { reusedExisting: existingGroups.size },
+            });
+        } catch (error) {
+            logger.apiError("_action/sync (property_groups)", 400, {
+                request: propertyGroupsPayload,
+                response: error,
             });
         }
 
@@ -348,21 +367,14 @@ export class ShopwareHydrator extends ShopwareClient {
         for (let i = 0; i < productPayload.length; i += BATCH_SIZE) {
             const batch = productPayload.slice(i, i + BATCH_SIZE);
 
-            const response = await this.apiClient.post("_action/sync", {
-                hydrateProducts: {
-                    entity: "product",
-                    action: "upsert",
-                    payload: batch,
-                },
-            });
-
-            if (response.status >= 400) {
-                logger.apiError("_action/sync (products)", response.status, {
-                    request: batch.slice(0, 2), // Log first 2 products for debugging
-                    response: response.data,
-                });
-            } else {
+            try {
+                await this.sync([{ entity: "product", action: "upsert", payload: batch }]);
                 created += batch.length;
+            } catch (error) {
+                logger.apiError("_action/sync (products)", 400, {
+                    request: batch.slice(0, 2),
+                    response: error,
+                });
             }
         }
 
@@ -395,7 +407,7 @@ export class ShopwareHydrator extends ShopwareClient {
         const productMediaFolderId = await this.getProductMediaFolderId();
 
         const mediaUploads: { id: string; image: { name: string; data: string } }[] = [];
-        const mediaPayload: { id: string; private: boolean; mediaFolderId?: string }[] = [];
+        const mediaPayload: Record<string, unknown>[] = [];
 
         const productPayload = products.map((p: ProductInput) => {
             const UUID = generateUUID();
@@ -465,57 +477,50 @@ export class ShopwareHydrator extends ShopwareClient {
             return product;
         });
 
-        const syncPayload: Record<string, unknown> = {
-            hydrateProducts: {
-                entity: "product",
-                action: "upsert",
-                payload: productPayload,
-            },
-        };
-
-        // Only include media sync if there are media items to upsert
-        if (mediaPayload.length > 0) {
-            syncPayload.hydrateMedia = {
-                entity: "media",
-                action: "upsert",
-                payload: mediaPayload,
-            };
-        }
-
         logger.debug("Syncing products", {
-            productCount: productPayload.length,
-            mediaCount: mediaPayload.length,
-            categoryId: productCategory.id,
-            categoryName: productCategory.name,
+            data: {
+                productCount: productPayload.length,
+                mediaCount: mediaPayload.length,
+                categoryId: productCategory.id,
+                categoryName: productCategory.name,
+            },
         });
 
-        const productResponse = await this.apiClient.post("_action/sync", syncPayload);
+        // Build sync operations
+        const syncOps: Array<{ entity: string; action: "upsert"; payload: Record<string, unknown>[] }> = [
+            { entity: "product", action: "upsert", payload: productPayload },
+        ];
 
-        // Log response for debugging
-        if (productResponse.status >= 400) {
-            logger.apiError("_action/sync (products)", productResponse.status, {
-                request: syncPayload,
-                response: productResponse.data,
+        if (mediaPayload.length > 0) {
+            syncOps.push({ entity: "media", action: "upsert", payload: mediaPayload });
+        }
+
+        let syncSuccess = true;
+        try {
+            await this.sync(syncOps);
+            logger.debug("Product sync successful");
+        } catch (error) {
+            logger.apiError("_action/sync (products)", 400, {
+                request: syncOps,
+                response: error,
             });
-        } else {
-            logger.debug("Product sync successful", { status: productResponse.status });
+            syncSuccess = false;
         }
 
         // Upload media files
         await Promise.all(
             mediaUploads.map(async (media) => {
                 const imageBuffer = Buffer.from(media.image.data, "base64");
-                return await this.apiClient.post(
-                    `_action/media/${media.id}/upload?extension=png&fileName=${media.image.name}-${media.id}`,
+                await this.uploadMediaBuffer(
+                    media.id,
                     imageBuffer,
-                    {
-                        headers: { "Content-Type": "image/png" },
-                    }
+                    `${media.image.name}-${media.id}`,
+                    "png"
                 );
             })
         );
 
-        return productResponse.status;
+        return syncSuccess ? 200 : 400;
     }
 
     // =========================================================================
@@ -544,13 +549,15 @@ export class ShopwareHydrator extends ShopwareClient {
 
         const sanitizedName = validation.sanitized;
         if (validation.warning) {
-            logger.warn(validation.warning);
+            logger.warn(validation.warning, { cli: true });
         }
 
         // Check if SalesChannel already exists
         const existing = await this.findSalesChannelByName(sanitizedName);
         if (existing) {
-            logger.cli(`Using existing SalesChannel "${existing.name}" (ID: ${existing.id})`);
+            logger.info(`Using existing SalesChannel "${existing.name}" (ID: ${existing.id})`, {
+                cli: true,
+            });
             return { ...existing, isNew: false };
         }
 
@@ -612,9 +619,17 @@ export class ShopwareHydrator extends ShopwareClient {
             ],
         };
 
-        await this.apiClient.post<{ data: SalesChannelFull }>("sales-channel?_response", payload);
+        await this.sync([
+            {
+                entity: "sales_channel",
+                action: "upsert",
+                payload: [payload],
+            },
+        ]);
 
-        logger.cli(`Created SalesChannel "${sanitizedName}" with URL: ${baseUrl}`);
+        logger.info(`Created SalesChannel "${sanitizedName}" with URL: ${baseUrl}`, {
+            cli: true,
+        });
 
         // Assign the same theme as Storefront
         const storefrontThemeId = await this.getThemeForSalesChannel(storefront.id);
@@ -649,21 +664,36 @@ export class ShopwareHydrator extends ShopwareClient {
     async findSalesChannelByName(name: string): Promise<SalesChannelFull | null> {
         const capitalizedName = capitalizeString(name);
 
-        const response = await this.apiClient.post<SearchResponse<SalesChannelFull>>(
-            "search/sales-channel",
+        const { data: searchData } = await this.getClient().invoke(
+            "searchSalesChannel post /search/sales-channel",
             {
-                limit: 1,
-                filter: [{ type: "equals", field: "name", value: capitalizedName }],
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "name", value: capitalizedName }],
+                },
             }
         );
+        const result = searchData as SearchResult<Schemas["SalesChannel"]>;
 
-        if (response.ok && response.data?.data?.[0]) {
+        if (result.data?.[0]) {
             // Fetch full details including snippetSetId
             try {
                 return await this.getFullSalesChannel(capitalizedName);
             } catch {
                 // If we can't get full details, return what we have
-                return response.data.data[0];
+                const sc = result.data[0];
+                return {
+                    id: sc.id ?? "",
+                    name: sc.name ?? capitalizedName,
+                    typeId: sc.typeId ?? "",
+                    languageId: sc.languageId ?? "",
+                    currencyId: sc.currencyId ?? "",
+                    paymentMethodId: sc.paymentMethodId ?? "",
+                    shippingMethodId: sc.shippingMethodId ?? "",
+                    countryId: sc.countryId ?? "",
+                    customerGroupId: sc.customerGroupId ?? "",
+                    navigationCategoryId: sc.navigationCategoryId ?? "",
+                };
             }
         }
 
@@ -679,36 +709,50 @@ export class ShopwareHydrator extends ShopwareClient {
         const categoryName = `${capitalizeString(name)} Root`;
 
         // Check if a root category with this name already exists
-        const existingResponse = await this.apiClient.post<SearchResponse<{ id: string }>>(
-            "search/category",
+        const { data: searchData } = await this.getClient().invoke(
+            "searchCategory post /search/category",
             {
-                limit: 1,
-                filter: [{ type: "equals", field: "name", value: categoryName }],
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "name", value: categoryName }],
+                },
             }
         );
+        const searchResult = searchData as SearchResult<Schemas["Category"]>;
 
-        if (existingResponse.ok && existingResponse.data?.data?.[0]) {
-            const existingCategory = existingResponse.data.data[0];
+        if (searchResult.data?.[0]) {
             logger.info(
-                `Reusing existing root category: ${categoryName} (ID: ${existingCategory.id})`
+                `Reusing existing root category: ${categoryName} (ID: ${searchResult.data[0].id})`
             );
-            return { ...existingCategory, name: categoryName, isNew: false };
+            return { id: searchResult.data[0].id, name: categoryName, isNew: false };
         }
 
         // Create new root category
-        const categoryResponse = await this.apiClient.post<
-            CreateResponse<{ id: string; name: string }>
-        >("category?_response", {
-            name: categoryName,
-            displayNestedProducts: true,
-            type: "page",
-            productAssignmentType: "product",
-            visible: false, // Root categories are typically hidden
-            active: true,
-        });
+        const rootCategoryId = generateUUID();
+        await this.sync([
+            {
+                entity: "category",
+                action: "upsert",
+                payload: [
+                    {
+                        id: rootCategoryId,
+                        name: categoryName,
+                        displayNestedProducts: true,
+                        type: "page",
+                        productAssignmentType: "product",
+                        visible: false,
+                        active: true,
+                    },
+                ],
+            },
+        ]);
 
-        logger.cli(`Created root category: ${categoryName}`);
-        return { ...categoryResponse.data.data, isNew: true };
+        logger.info(`Created root category: ${categoryName}`, { cli: true });
+        return {
+            id: rootCategoryId,
+            name: categoryName,
+            isNew: true,
+        };
     }
 
     /**
@@ -716,20 +760,21 @@ export class ShopwareHydrator extends ShopwareClient {
      * Used to clean up before regenerating a category tree.
      */
     async deleteChildCategories(parentCategoryId: string): Promise<number> {
-        // Find all child categories
-        const childResponse = await this.apiClient.post<SearchResponse<{ id: string }>>(
-            "search/category",
+        const { data: searchData } = await this.getClient().invoke(
+            "searchCategory post /search/category",
             {
-                filter: [{ type: "equals", field: "parentId", value: parentCategoryId }],
-                limit: 500,
+                body: {
+                    filter: [{ type: "equals", field: "parentId", value: parentCategoryId }],
+                    limit: 500,
+                },
             }
         );
+        const searchResult = searchData as SearchResult<Schemas["Category"]>;
 
-        if (!childResponse.ok || !childResponse.data?.data?.length) {
+        const children = searchResult.data ?? [];
+        if (children.length === 0) {
             return 0;
         }
-
-        const children = childResponse.data.data;
 
         // Recursively delete children of each child first
         for (const child of children) {
@@ -738,13 +783,13 @@ export class ShopwareHydrator extends ShopwareClient {
 
         // Delete all child categories
         const deletePayload = children.map((c) => ({ id: c.id }));
-        await this.apiClient.post("_action/sync", {
-            deleteChildCategories: {
+        await this.sync([
+            {
                 entity: "category",
                 action: "delete",
                 payload: deletePayload,
             },
-        });
+        ]);
 
         return children.length;
     }
@@ -770,10 +815,11 @@ export class ShopwareHydrator extends ShopwareClient {
         }
 
         // Check for existing categories and reuse their IDs (idempotency)
-        // This modifies tree nodes in-place by setting node.id for matches
         const existingMap = await this.getExistingCategoryMap(parentId, tree);
         if (existingMap.size > 0) {
-            logger.debug("Found existing categories for reuse", { count: existingMap.size });
+            logger.debug("Found existing categories for reuse", {
+                data: { count: existingMap.size },
+            });
         }
 
         const categoryIdMap = new Map<string, string>();
@@ -800,20 +846,19 @@ export class ShopwareHydrator extends ShopwareClient {
             const payloadItem = categoryPayload[i];
             if (item && payloadItem) {
                 item.category.id = payloadItem.id;
-                // Use full path as key to avoid collisions with duplicate names
                 categoryIdMap.set(item.path, payloadItem.id);
             }
         }
 
-        const response = await this.apiClient.post("_action/sync", {
-            createCategories: {
+        await this.sync([
+            {
                 entity: "category",
                 action: "upsert",
                 payload: categoryPayload,
             },
-        });
+        ]);
 
-        logger.cli(`Created ${categoryPayload.length} categories (status: ${response.status})`);
+        logger.info(`Created ${categoryPayload.length} categories`, { cli: true });
 
         // Upload category images
         await this.uploadCategoryImages(flatCategories.map((f) => f.category));
@@ -824,9 +869,8 @@ export class ShopwareHydrator extends ShopwareClient {
     /**
      * Get existing categories under a parent and map them to the expected category tree.
      * Uses full paths as keys to avoid collisions with duplicate names.
-     * Used when a SalesChannel already exists.
      *
-     * @returns Map of category paths to their Shopware IDs (e.g., "Living Room > Sofas" -> "uuid")
+     * @returns Map of category paths to their Shopware IDs
      */
     async getExistingCategoryMap(
         parentCategoryId: string,
@@ -834,33 +878,47 @@ export class ShopwareHydrator extends ShopwareClient {
     ): Promise<Map<string, string>> {
         const categoryIdMap = new Map<string, string>();
 
-        // Fetch all categories under the parent
-        const response = await this.apiClient.post<
-            SearchResponse<{ id: string; name: string; parentId: string }>
-        >("search/category", {
-            limit: 500,
-            filter: [
-                {
-                    type: "multi",
-                    operator: "OR",
-                    queries: [
-                        { type: "equals", field: "parentId", value: parentCategoryId },
-                        { type: "contains", field: "path", value: parentCategoryId },
+        const { data: searchData } = await this.getClient().invoke(
+            "searchCategory post /search/category",
+            {
+                body: {
+                    limit: 500,
+                    filter: [
+                        {
+                            type: "multi",
+                            operator: "or",
+                            queries: [
+                                {
+                                    type: "equals",
+                                    field: "parentId",
+                                    value: parentCategoryId,
+                                },
+                                {
+                                    type: "contains",
+                                    field: "path",
+                                    value: parentCategoryId,
+                                },
+                            ],
+                        },
                     ],
                 },
-            ],
-        });
+            }
+        );
+        const searchResult = searchData as SearchResult<Schemas["Category"]>;
 
-        if (!response.ok || !response.data?.data) {
+        const existingCategories = searchResult.data ?? [];
+        if (existingCategories.length === 0) {
             return categoryIdMap;
         }
-
-        const existingCategories = response.data.data;
 
         // Build parent-child relationships to reconstruct paths
         const categoriesById = new Map<string, { id: string; name: string; parentId: string }>();
         for (const cat of existingCategories) {
-            categoriesById.set(cat.id, cat);
+            categoriesById.set(cat.id, {
+                id: cat.id,
+                name: cat.name ?? "",
+                parentId: cat.parentId ?? "",
+            });
         }
 
         // Reconstruct path for each category by walking up the parent chain
@@ -936,13 +994,11 @@ export class ShopwareHydrator extends ShopwareClient {
 
     /**
      * Generate a deterministic visibility ID from product and sales channel IDs.
-     * This ensures idempotent upserts - re-running won't create duplicate visibilities.
-     *
-     * Uses SHA256 hash for collision resistance (XOR is not collision-resistant).
+     * Uses SHA256 hash for collision resistance.
      */
     private generateVisibilityId(productId: string, salesChannelId: string): string {
         const hash = createHash("sha256").update(`${productId}:${salesChannelId}`).digest("hex");
-        return hash.slice(0, 32); // Shopware UUID format (32 hex chars)
+        return hash.slice(0, 32);
     }
 
     /**
@@ -965,34 +1021,36 @@ export class ShopwareHydrator extends ShopwareClient {
             const mediaId = generateUUID();
 
             // Create media entity
-            await this.apiClient.post("_action/sync", {
-                createMedia: {
+            await this.sync([
+                {
                     entity: "media",
                     action: "upsert",
                     payload: [
                         {
                             id: mediaId,
                             private: false,
-                            ...(productMediaFolderId && { mediaFolderId: productMediaFolderId }),
+                            ...(productMediaFolderId && {
+                                mediaFolderId: productMediaFolderId,
+                            }),
                         },
                     ],
                 },
-            });
+            ]);
 
             // Upload the image
             const imageBuffer = Buffer.from(category.image.data, "base64");
-            await this.apiClient.post(
-                `_action/media/${mediaId}/upload?extension=png&fileName=category-${category.id}`,
-                imageBuffer,
-                { headers: { "Content-Type": "image/png" } }
-            );
+            await this.uploadMediaBuffer(mediaId, imageBuffer, `category-${category.id}`, "png");
 
             // Associate media with category
-            await this.apiClient.patch(`category/${category.id}`, {
-                mediaId,
-            });
+            await this.sync([
+                {
+                    entity: "category",
+                    action: "upsert",
+                    payload: [{ id: category.id, mediaId }],
+                },
+            ]);
 
-            logger.cli(`Uploaded image for category "${category.name}"`);
+            logger.info(`Uploaded image for category "${category.name}"`, { cli: true });
         }
     }
 
@@ -1008,31 +1066,38 @@ export class ShopwareHydrator extends ShopwareClient {
 
         try {
             // Search for existing folder
-            const response = await this.apiClient.post<{
-                data?: Array<{ id: string; name: string }>;
-            }>("search/media-folder", {
-                filter: [{ type: "equals", field: "name", value: folderName }],
-                limit: 1,
-            });
+            const { data: folderSearchData } = await this.getClient().invoke(
+                "searchMediaFolder post /search/media-folder",
+                {
+                    body: {
+                        filter: [{ type: "equals", field: "name", value: folderName }],
+                        limit: 1,
+                    },
+                }
+            );
+            const folderResult = folderSearchData as SearchResult<Schemas["MediaFolder"]>;
 
-            const existing = response.data?.data?.[0];
-            if (existing) {
-                return existing.id;
+            if (folderResult.data?.[0]) {
+                return folderResult.data[0].id;
             }
 
             // Get default configuration to use for the folder
-            const configResponse = await this.apiClient.post<{
-                data?: Array<{ id: string }>;
-            }>("search/media-default-folder", {
-                filter: [{ type: "equals", field: "entity", value: "product" }],
-                limit: 1,
-            });
-            const defaultConfig = configResponse.data?.data?.[0];
+            const { data: configSearchData } = await this.getClient().invoke(
+                "searchMediaDefaultFolder post /search/media-default-folder",
+                {
+                    body: {
+                        filter: [{ type: "equals", field: "entity", value: "product" }],
+                        limit: 1,
+                    },
+                }
+            );
+            const configResult = configSearchData as SearchResult<Schemas["MediaDefaultFolder"]>;
+            const defaultConfigs = configResult.data ?? [];
 
             // Create new folder
             const folderId = generateUUID();
-            await this.apiClient.post("_action/sync", {
-                createMediaFolder: {
+            await this.sync([
+                {
                     entity: "media_folder",
                     action: "upsert",
                     payload: [
@@ -1040,13 +1105,13 @@ export class ShopwareHydrator extends ShopwareClient {
                             id: folderId,
                             name: folderName,
                             useParentConfiguration: true,
-                            ...(defaultConfig && {
-                                configurationId: defaultConfig.id,
+                            ...(defaultConfigs[0] && {
+                                configurationId: defaultConfigs[0].id,
                             }),
                         },
                     ],
                 },
-            });
+            ]);
 
             return folderId;
         } catch (error) {
@@ -1065,8 +1130,8 @@ export class ShopwareHydrator extends ShopwareClient {
 
         try {
             const mediaId = generateUUID();
-            await this.apiClient.post("_action/sync", {
-                createMedia: {
+            await this.sync([
+                {
                     entity: "media",
                     action: "upsert",
                     payload: [
@@ -1077,7 +1142,7 @@ export class ShopwareHydrator extends ShopwareClient {
                         },
                     ],
                 },
-            });
+            ]);
             return mediaId;
         } catch (error) {
             logger.warn(
@@ -1094,13 +1159,7 @@ export class ShopwareHydrator extends ShopwareClient {
         if (!this.isAuthenticated()) return false;
 
         try {
-            const contentType = extension === "svg" ? "image/svg+xml" : `image/${extension}`;
-
-            await this.apiClient.post(
-                `_action/media/${mediaId}/upload?extension=${extension}&fileName=color-option-${mediaId}`,
-                buffer,
-                { headers: { "Content-Type": contentType } }
-            );
+            await this.uploadMediaBuffer(mediaId, buffer, `color-option-${mediaId}`, extension);
             return true;
         } catch (error) {
             logger.warn(
@@ -1117,11 +1176,13 @@ export class ShopwareHydrator extends ShopwareClient {
         if (!this.isAuthenticated()) return false;
 
         try {
-            // Set mediaId AND clear colorHexCode - Shopware shows hex over image if both set
-            await this.apiClient.patch(`property-group-option/${optionId}`, {
-                mediaId,
-                colorHexCode: null,
-            });
+            await this.sync([
+                {
+                    entity: "property_group_option",
+                    action: "upsert",
+                    payload: [{ id: optionId, mediaId, colorHexCode: null }],
+                },
+            ]);
             return true;
         } catch (error) {
             logger.warn(

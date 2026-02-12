@@ -48,7 +48,7 @@ describe("Logger", () => {
         });
 
         test("includes data in log when provided", () => {
-            logger.debug("message with data", { foo: "bar" });
+            logger.debug("message with data", { data: { foo: "bar" } });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");
@@ -71,10 +71,6 @@ describe("Logger", () => {
 
     describe("warn", () => {
         test("writes warn message to file", () => {
-            // Mock console.warn to prevent output during test
-            const originalWarn = console.warn;
-            console.warn = mock(() => {});
-
             logger.warn("warn test message");
 
             const logFile = logger.getLogFile();
@@ -82,8 +78,6 @@ describe("Logger", () => {
 
             expect(content).toContain("WARN");
             expect(content).toContain("warn test message");
-
-            console.warn = originalWarn;
         });
     });
 
@@ -99,7 +93,7 @@ describe("Logger", () => {
         });
 
         test("includes error data in file", () => {
-            logger.error("error with data", { code: 500, details: "Something failed" });
+            logger.error("error with data", { data: { code: 500, details: "Something failed" } });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");
@@ -226,99 +220,85 @@ describe("Logger", () => {
         });
     });
 
-    describe("cli", () => {
+    describe("cli option", () => {
         afterEach(() => {
             logger.setMcpMode(false);
         });
 
-        test("writes to log file with default info level", () => {
+        test("info with cli: true writes to file and console.log", () => {
+            const mockLog = mock(() => {});
             const originalLog = console.log;
-            console.log = mock(() => {});
+            console.log = mockLog;
 
-            logger.cli("cli test message");
+            logger.info("cli test message", { cli: true });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");
 
             expect(content).toContain("INFO");
             expect(content).toContain("cli test message");
+            expect(mockLog).toHaveBeenCalledWith("cli test message");
 
             console.log = originalLog;
         });
 
-        test("writes to log file with warn level", () => {
+        test("warn with cli: true writes to file and console.warn", () => {
+            const mockWarn = mock(() => {});
             const originalWarn = console.warn;
-            console.warn = mock(() => {});
+            console.warn = mockWarn;
 
-            logger.cli("cli warning", "warn");
+            logger.warn("cli warning", { cli: true });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");
 
             expect(content).toContain("WARN");
             expect(content).toContain("cli warning");
+            expect(mockWarn).toHaveBeenCalledWith("cli warning");
 
             console.warn = originalWarn;
         });
 
-        test("writes to log file with error level", () => {
+        test("error with cli: true writes to file and console.error", () => {
+            const mockError = mock(() => {});
             const originalError = console.error;
-            console.error = mock(() => {});
+            console.error = mockError;
 
-            logger.cli("cli error", "error");
+            logger.error("cli error", { cli: true });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");
 
             expect(content).toContain("ERROR");
             expect(content).toContain("cli error");
+            expect(mockError).toHaveBeenCalledWith("cli error");
 
             console.error = originalError;
         });
 
-        test("outputs to console.log for info level", () => {
+        test("info without cli option does not output to console", () => {
             const mockLog = mock(() => {});
             const originalLog = console.log;
             console.log = mockLog;
 
-            logger.cli("info message");
+            logger.info("file only message");
 
-            expect(mockLog).toHaveBeenCalledWith("info message");
+            expect(mockLog).not.toHaveBeenCalled();
+
+            const logFile = logger.getLogFile();
+            const content = fs.readFileSync(logFile, "utf-8");
+            expect(content).toContain("file only message");
 
             console.log = originalLog;
         });
 
-        test("outputs to console.warn for warn level", () => {
-            const mockWarn = mock(() => {});
-            const originalWarn = console.warn;
-            console.warn = mockWarn;
-
-            logger.cli("warn message", "warn");
-
-            expect(mockWarn).toHaveBeenCalledWith("warn message");
-
-            console.warn = originalWarn;
-        });
-
-        test("outputs to console.error for error level", () => {
-            const mockError = mock(() => {});
-            const originalError = console.error;
-            console.error = mockError;
-
-            logger.cli("error message", "error");
-
-            expect(mockError).toHaveBeenCalledWith("error message");
-
-            console.error = originalError;
-        });
-
-        test("suppresses console output in MCP mode", () => {
+        test("cli: true suppresses console output in MCP mode", () => {
             const mockLog = mock(() => {});
             const originalLog = console.log;
             console.log = mockLog;
 
             logger.setMcpMode(true);
-            logger.cli("mcp message");
+            logger.info("mcp message", { cli: true });
 
             // Should NOT output to console
             expect(mockLog).not.toHaveBeenCalled();
@@ -331,11 +311,11 @@ describe("Logger", () => {
             console.log = originalLog;
         });
 
-        test("includes data in log file", () => {
+        test("cli: true with data includes data in log file", () => {
             const originalLog = console.log;
             console.log = mock(() => {});
 
-            logger.cli("message with data", "info", { key: "value" });
+            logger.info("message with data", { cli: true, data: { key: "value" } });
 
             const logFile = logger.getLogFile();
             const content = fs.readFileSync(logFile, "utf-8");

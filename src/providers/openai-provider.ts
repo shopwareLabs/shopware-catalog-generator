@@ -90,7 +90,7 @@ export class OpenAIImageProvider implements ImageProvider {
 
             return null;
         } catch (error) {
-            logger.warn(`OpenAI image generation failed:`, error);
+            logger.warn(`OpenAI image generation failed:`, { data: error });
             return null;
         }
     }

@@ -9,19 +9,13 @@
  *
  * ## Logging Methods
  *
- * ### User-facing output (file + console)
+ * `logger.debug(message, options?)` - Verbose debugging info
+ * `logger.info(message, options?)` - Informational events
+ * `logger.warn(message, options?)` - Warnings (recoverable issues)
+ * `logger.error(message, options?)` - Errors (operation failures)
  *
- * `logger.cli(message, level?, data?)` - CLI user feedback
- * - Use for progress, status, and user-facing messages
- * - Console suppressed in MCP mode, but always written to log file
- * - Level: "info" (default), "warn", "error" - controls console method
- *
- * ### Diagnostic logging (file only)
- *
- * `logger.debug(message, data?)` - Verbose debugging info
- * `logger.info(message, data?)` - Informational events
- * `logger.warn(message, data?)` - Warnings (recoverable issues)
- * `logger.error(message, data?)` - Errors (operation failures)
+ * Pass `{ cli: true }` in options to also output to console (suppressed in MCP mode).
+ * Pass `{ data: ... }` to attach diagnostic data to the log file entry.
  *
  * ### Special methods
  *
@@ -34,6 +28,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
+
+/** Options for log methods */
+export interface LogOptions {
+    /** Diagnostic data to attach to the log file entry */
+    data?: unknown;
+    /** Also output message to console (suppressed in MCP mode) */
+    cli?: boolean;
+}
 
 interface LogEntry {
     timestamp: string;
@@ -97,39 +99,6 @@ class Logger {
     }
 
     /**
-     * Output to console + log file (for CLI user feedback).
-     * Console output is suppressed in MCP mode, but still written to log file.
-     *
-     * @param message - User-facing message
-     * @param level - Log level for file output (default: "info")
-     * @param data - Optional diagnostic data for log file
-     */
-    cli(message: string, level: LogLevel = "info", data?: unknown): void {
-        // Always write to log file for debugging
-        const entry: LogEntry = {
-            timestamp: new Date().toISOString(),
-            level,
-            message,
-            data,
-        };
-        this.writeToFile(entry);
-
-        // Only output to console when not in MCP mode
-        if (!this.mcpMode) {
-            switch (level) {
-                case "error":
-                    console.error(message);
-                    break;
-                case "warn":
-                    console.warn(message);
-                    break;
-                default:
-                    console.log(message);
-            }
-        }
-    }
-
-    /**
      * Get the current log file path
      */
     getLogFile(): string {
@@ -170,6 +139,24 @@ class Logger {
     }
 
     /**
+     * Output a message to console based on level (suppressed in MCP mode)
+     */
+    private writeToConsole(level: LogLevel, message: string): void {
+        if (this.mcpMode) return;
+
+        switch (level) {
+            case "error":
+                console.error(message);
+                break;
+            case "warn":
+                console.warn(message);
+                break;
+            default:
+                console.log(message);
+        }
+    }
+
+    /**
      * Check if a log level should be logged
      */
     private shouldLog(level: LogLevel): boolean {
@@ -177,67 +164,51 @@ class Logger {
     }
 
     /**
-     * Log a debug message (file only)
+     * Core log method used by all level methods
      */
-    debug(message: string, data?: unknown): void {
-        if (!this.shouldLog("debug")) return;
+    private log(level: LogLevel, message: string, options?: LogOptions): void {
+        if (!this.shouldLog(level)) return;
 
         const entry: LogEntry = {
             timestamp: new Date().toISOString(),
-            level: "debug",
+            level,
             message,
-            data,
+            data: options?.data,
         };
 
         this.writeToFile(entry);
+
+        if (options?.cli) {
+            this.writeToConsole(level, message);
+        }
     }
 
     /**
-     * Log an info message (file only)
+     * Log a debug message
      */
-    info(message: string, data?: unknown): void {
-        if (!this.shouldLog("info")) return;
-
-        const entry: LogEntry = {
-            timestamp: new Date().toISOString(),
-            level: "info",
-            message,
-            data,
-        };
-
-        this.writeToFile(entry);
+    debug(message: string, options?: LogOptions): void {
+        this.log("debug", message, options);
     }
 
     /**
-     * Log a warning (file only - use cli() for user-facing warnings)
+     * Log an info message
      */
-    warn(message: string, data?: unknown): void {
-        if (!this.shouldLog("warn")) return;
-
-        const entry: LogEntry = {
-            timestamp: new Date().toISOString(),
-            level: "warn",
-            message,
-            data,
-        };
-
-        this.writeToFile(entry);
+    info(message: string, options?: LogOptions): void {
+        this.log("info", message, options);
     }
 
     /**
-     * Log an error (file only - use cli() for user-facing errors)
+     * Log a warning
      */
-    error(message: string, data?: unknown): void {
-        if (!this.shouldLog("error")) return;
+    warn(message: string, options?: LogOptions): void {
+        this.log("warn", message, options);
+    }
 
-        const entry: LogEntry = {
-            timestamp: new Date().toISOString(),
-            level: "error",
-            message,
-            data,
-        };
-
-        this.writeToFile(entry);
+    /**
+     * Log an error
+     */
+    error(message: string, options?: LogOptions): void {
+        this.log("error", message, options);
     }
 
     /**
@@ -277,11 +248,10 @@ class Logger {
         this.writeToFile(entry);
 
         // Brief console message with hint to check log file (not in MCP mode)
-        if (!this.mcpMode) {
-            console.error(
-                `[Shopware] API Error: ${endpoint} returned ${status} (see log file for details)`
-            );
-        }
+        this.writeToConsole(
+            "error",
+            `[Shopware] API Error: ${endpoint} returned ${status} (see log file for details)`
+        );
     }
 
     /**

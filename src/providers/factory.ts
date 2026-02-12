@@ -47,8 +47,12 @@ export function createProviders(config: ProviderConfig): {
     const textProvider = createTextProvider(config);
     const imageProvider = createImageProvider(config);
 
-    logger.cli(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`);
-    logger.cli(`Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`);
+    logger.info(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`, {
+        cli: true,
+    });
+    logger.info(`Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`, {
+        cli: true,
+    });
 
     return { text: textProvider, image: imageProvider };
 }
@@ -121,10 +125,8 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
             const pollinationsApiKey = config.imageApiKey || config.apiKey;
             if (!pollinationsApiKey) {
                 logger.warn(
-                    "No API key for Pollinations image generation. Disabling images."
-                );
-                logger.cli(
-                    "Get a key at https://enter.pollinations.ai"
+                    "No API key for Pollinations image generation. Disabling images. Get a key at https://enter.pollinations.ai",
+                    { cli: true }
                 );
                 return new NoOpImageProvider();
             }

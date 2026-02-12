@@ -107,15 +107,15 @@ const fetcher = createTemplateFetcherFromEnv();
 // Try to use a template
 const used = await fetcher.tryUseTemplate("beauty", cache);
 if (used) {
-    logger.cli("Using pre-generated template");
+    logger.info("Using pre-generated template", { cli: true });
 } else {
-    logger.cli("No template found, generating from scratch");
+    logger.info("No template found, generating from scratch", { cli: true });
 }
 
 // Or step by step
 await fetcher.ensureRepo();
 const templates = fetcher.listTemplates();
-logger.cli(`Available templates: ${templates.join(", ")}`);
+logger.info(`Available templates: ${templates.join(", ")}`, { cli: true });
 ```
 
 ## Git Operations (Sparse Checkout)

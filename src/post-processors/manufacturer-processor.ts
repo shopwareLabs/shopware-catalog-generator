@@ -59,9 +59,11 @@ class ManufacturerProcessorImpl implements PostProcessor {
         const errors: string[] = [];
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create ${newManufacturers.length} manufacturers`);
+            logger.info(`    [DRY RUN] Would create ${newManufacturers.length} manufacturers`, {
+                cli: true,
+            });
             for (const name of newManufacturers) {
-                logger.cli(`      - ${name}`);
+                logger.info(`      - ${name}`, { cli: true });
             }
             return {
                 name: this.name,
@@ -85,7 +87,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
             manufacturerIdMap.set(name, id);
         }
         if (existingManufacturers.size > 0) {
-            logger.debug("Reusing existing manufacturers", { count: existingManufacturers.size });
+            logger.debug("Reusing existing manufacturers", {
+                data: { count: existingManufacturers.size },
+            });
         }
 
         // Create only NEW manufacturers (ones that don't exist in Shopware)
@@ -132,7 +136,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                 } else {
                     processed = manufacturersToCreate.length;
                     logger.debug("Manufacturers created successfully", {
-                        count: manufacturersToCreate.length,
+                        data: { count: manufacturersToCreate.length },
                     });
                 }
             } catch (error) {
@@ -171,7 +175,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
 
             if (alreadyAssigned > 0) {
                 logger.debug("Products already have correct manufacturers", {
-                    count: alreadyAssigned,
+                    data: { count: alreadyAssigned },
                 });
             }
 
@@ -195,7 +199,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                         );
                     } else {
                         logger.debug("Product manufacturers assigned", {
-                            count: productUpdates.length,
+                            data: { count: productUpdates.length },
                         });
                     }
                 } catch (error) {
@@ -231,8 +235,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            logger.cli(
-                `    [DRY RUN] Would unassign and delete manufacturers for products in SalesChannel`
+            logger.info(
+                `    [DRY RUN] Would unassign and delete manufacturers for products in SalesChannel`,
+                { cli: true }
             );
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
@@ -260,7 +265,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                logger.cli(`    No products found in SalesChannel`);
+                logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
@@ -273,12 +278,13 @@ class ManufacturerProcessorImpl implements PostProcessor {
             }
 
             if (manufacturerIds.size === 0) {
-                logger.cli(`    No manufacturers assigned to products`);
+                logger.info(`    No manufacturers assigned to products`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            logger.cli(
-                `    Found ${manufacturerIds.size} unique manufacturers assigned to ${products.length} products`
+            logger.info(
+                `    Found ${manufacturerIds.size} unique manufacturers assigned to ${products.length} products`,
+                { cli: true }
             );
 
             // Step 3: Unassign manufacturers from products (set manufacturerId to null)
@@ -294,7 +300,10 @@ class ManufacturerProcessorImpl implements PostProcessor {
                         payload: productUpdates,
                     },
                 });
-                logger.cli(`    ✓ Unassigned manufacturers from ${productUpdates.length} products`);
+                logger.info(
+                    `    ✓ Unassigned manufacturers from ${productUpdates.length} products`,
+                    { cli: true }
+                );
             }
 
             // Step 4: Check which manufacturers are now orphaned (no product associations)
@@ -317,10 +326,11 @@ class ManufacturerProcessorImpl implements PostProcessor {
             if (manufacturersToDelete.length > 0) {
                 await context.api.deleteEntities("product_manufacturer", manufacturersToDelete);
                 deleted = manufacturersToDelete.length;
-                logger.cli(`    ✓ Deleted ${deleted} orphaned manufacturers`);
+                logger.info(`    ✓ Deleted ${deleted} orphaned manufacturers`, { cli: true });
             } else {
-                logger.cli(
-                    `    No orphaned manufacturers to delete (all still have products in other SalesChannels)`
+                logger.info(
+                    `    No orphaned manufacturers to delete (all still have products in other SalesChannels)`,
+                    { cli: true }
                 );
             }
         } catch (error) {
@@ -373,7 +383,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.error("Failed to fetch existing product manufacturers", error);
+            logger.error("Failed to fetch existing product manufacturers", { data: error });
         }
 
         return result;
@@ -423,7 +433,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.error("Failed to fetch existing manufacturers", error);
+            logger.error("Failed to fetch existing manufacturers", { data: error });
         }
 
         return result;

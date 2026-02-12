@@ -119,9 +119,9 @@ export async function executeWithRetry<T>(
                     options.onRetry(attempt + 1, delay, lastError);
                 } else {
                     const reason = error instanceof TimeoutError ? "Timeout" : "Rate limit hit";
-                    logger.cli(
+                    logger.warn(
                         `${reason}, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`,
-                        "warn"
+                        { cli: true }
                     );
                 }
 

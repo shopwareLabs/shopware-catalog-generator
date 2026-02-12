@@ -171,33 +171,30 @@ describe("PostProcessor Interface", () => {
 });
 
 describe("runProcessors", () => {
-    // Suppress console output during tests
-    const originalCli = logger.cli.bind(logger);
-    const mockCli = mock(() => {});
 
     test("throws error for unknown processor", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         await expect(runProcessors(context, ["unknown-processor"])).rejects.toThrow(
             /Unknown processor/
         );
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("returns empty array for empty selection", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const results = await runProcessors(context, []);
 
         expect(results).toEqual([]);
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("catches processor errors and returns error result", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         // Create a mock processor that throws
@@ -238,11 +235,11 @@ describe("runProcessors", () => {
         registry.get = originalGet;
         registry.has = originalHas;
         registry.getAll = originalGetAll;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("runs processors in dependency order", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const executionOrder: string[] = [];
@@ -293,11 +290,11 @@ describe("runProcessors", () => {
         registry.get = originalGet;
         registry.has = originalHas;
         registry.getAll = originalGetAll;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("runs independent processors in parallel batches", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const processorA = {
@@ -344,27 +341,24 @@ describe("runProcessors", () => {
         registry.get = originalGet;
         registry.has = originalHas;
         registry.getAll = originalGetAll;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 });
 
 describe("cleanupProcessors", () => {
-    const originalCli = logger.cli.bind(logger);
-    const mockCli = mock(() => {});
-
     test("throws error for unknown processor", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         await expect(cleanupProcessors(context, ["unknown-processor"])).rejects.toThrow(
             /Unknown processor/
         );
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("returns empty array when no processors have cleanup", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const noCleanupProcessor = {
@@ -399,11 +393,11 @@ describe("cleanupProcessors", () => {
 
         registry.get = originalGet;
         registry.has = originalHas;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("runs cleanup for processors with cleanup method", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const cleanupProcessor = {
@@ -448,11 +442,11 @@ describe("cleanupProcessors", () => {
 
         registry.get = originalGet;
         registry.has = originalHas;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("catches cleanup errors and returns error result", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const errorCleanupProcessor = {
@@ -494,11 +488,11 @@ describe("cleanupProcessors", () => {
 
         registry.get = originalGet;
         registry.has = originalHas;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("handles cleanup with errors in result", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
         const context = createMockContext();
 
         const partialErrorProcessor = {
@@ -542,6 +536,6 @@ describe("cleanupProcessors", () => {
 
         registry.get = originalGet;
         registry.has = originalHas;
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 });

@@ -59,7 +59,7 @@ export async function syncCategories(
             salesChannel.navigationCategoryId,
             salesChannel.id
         );
-        logger.cli(`  Created ${categoryIdMap.size} categories`);
+        logger.info(`  Created ${categoryIdMap.size} categories`, { cli: true });
         return categoryIdMap;
     }
 
@@ -114,7 +114,7 @@ export async function syncCategories(
         salesChannel.navigationCategoryId,
         salesChannel.id
     );
-    logger.cli(`  Synced ${categoryIdMap.size} categories`);
+    logger.info(`  Synced ${categoryIdMap.size} categories`, { cli: true });
     return categoryIdMap;
 }
 
@@ -258,13 +258,19 @@ export async function syncPropertyGroups(
         updated++;
 
         if (needsDisplayTypeUpdate) {
-            logger.cli(`  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`);
+            logger.info(
+                `  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`,
+                { cli: true }
+            );
         } else if (missingOptions.length > 0) {
-            logger.cli(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`);
+            logger.info(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`, {
+                cli: true,
+            });
         }
         if (optionsNeedingHexUpdate.length > 0 && !needsDisplayTypeUpdate) {
-            logger.cli(
-                `  ⊕ Updating ${optionsNeedingHexUpdate.length} color hex codes in "${existing.name}"`
+            logger.info(
+                `  ⊕ Updating ${optionsNeedingHexUpdate.length} color hex codes in "${existing.name}"`,
+                { cli: true }
             );
         }
     }
@@ -274,7 +280,10 @@ export async function syncPropertyGroups(
         await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToSync);
     }
 
-    logger.cli(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`);
+    logger.info(
+        `  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`,
+        { cli: true }
+    );
 
     // Upload images for color options that can't use hex codes (Multicolor, Rainbow, etc.)
     await uploadColorImages(dataHydrator, blueprint);
@@ -304,7 +313,9 @@ async function uploadColorImages(
     const imageOptions = colorGroup.options.filter((o) => colorHasImage(o.name));
     if (imageOptions.length === 0) return;
 
-    logger.cli(`  Uploading images for ${imageOptions.length} color options...`);
+    logger.info(`  Uploading images for ${imageOptions.length} color options...`, {
+        cli: true,
+    });
 
     // Get or create media folder for property images
     const folderId = await dataHydrator.getOrCreateMediaFolder("Property Images");
@@ -444,7 +455,7 @@ export async function syncProducts(
         salesChannel.id,
         salesChannel.navigationCategoryId
     );
-    logger.cli(`  Synced ${productsToCreate.length} products`);
+    logger.info(`  Synced ${productsToCreate.length} products`, { cli: true });
 }
 
 // =============================================================================

@@ -11,56 +11,68 @@ import { ShopwareCleanup } from "../../../src/shopware/cleanup.js";
 // =============================================================================
 
 /**
- * Create a mock apiClient for testing
+ * Create a mock AdminApiClient for testing.
+ * Routes invoke() calls based on the operation string.
  */
-function createMockApiClient() {
-    const postResponses = new Map<string, unknown>();
-    const deleteResponses = new Map<string, unknown>();
-    const calls: Array<{ method: string; endpoint: string; body?: unknown }> = [];
+function createMockAdminClient() {
+    const searchResponses = new Map<string, unknown>();
+    const deleteErrors = new Map<string, Error>();
+    const calls: Array<{ operation: string; params?: Record<string, unknown> }> = [];
+
+    const invoke = mock(
+        async (operation: string, params?: Record<string, unknown>): Promise<unknown> => {
+            calls.push({ operation, params });
+
+            // Handle delete operations
+            if (operation.includes(" delete /")) {
+                const pathParams = (params as { pathParams?: { id?: string } })?.pathParams;
+                if (pathParams?.id) {
+                    const error = deleteErrors.get(pathParams.id);
+                    if (error) throw error;
+                }
+                return undefined;
+            }
+
+            // Handle sync operations
+            if (operation.includes("sync post")) {
+                return {};
+            }
+
+            // Handle search operations - match by path segment
+            // invoke() returns { data: responseBody }; for search, responseBody is { data: T[], total: N }
+            for (const [key, value] of searchResponses) {
+                if (operation.includes(`/search/${key}`) || operation.includes(`/${key}`)) {
+                    return { data: value };
+                }
+            }
+
+            // Default: empty search result (wrapped for invoke return shape)
+            return { data: { data: [], total: 0 } };
+        }
+    );
 
     return {
+        invoke,
         calls,
-        postResponses,
-        deleteResponses,
+        getSessionData: () => ({ accessToken: "test-token", expirationTime: Date.now() + 3600000 }),
 
-        post: mock(async <T>(endpoint: string, body?: unknown): Promise<{ data: T }> => {
-            calls.push({ method: "post", endpoint, body });
-            const response = postResponses.get(endpoint);
-            if (response !== undefined) {
-                return { data: response as T };
-            }
-            // Default empty response
-            return { data: { total: 0, data: [] } as T };
-        }),
-
-        delete: mock(async (endpoint: string): Promise<void> => {
-            calls.push({ method: "delete", endpoint });
-            const error = deleteResponses.get(endpoint);
-            if (error instanceof Error) {
-                throw error;
-            }
-        }),
-
-        // Helper to set response for a specific endpoint
-        mockResponse(endpoint: string, response: unknown) {
-            postResponses.set(endpoint, response);
+        // Helpers for setting up mock responses
+        mockSearchResponse(entity: string, response: unknown) {
+            searchResponses.set(entity, response);
         },
 
-        // Helper to set delete error
-        mockDeleteError(endpoint: string, error: Error) {
-            deleteResponses.set(endpoint, error);
+        mockDeleteError(entityId: string, error: Error) {
+            deleteErrors.set(entityId, error);
         },
 
-        // Get calls by endpoint
-        getCallsByEndpoint(pattern: string) {
-            return calls.filter((c) => c.endpoint.includes(pattern));
+        getCallsByOperation(pattern: string) {
+            return calls.filter((c) => c.operation.includes(pattern));
         },
 
-        // Reset
         reset() {
             calls.length = 0;
-            postResponses.clear();
-            deleteResponses.clear();
+            searchResponses.clear();
+            deleteErrors.clear();
         },
     };
 }
@@ -69,19 +81,10 @@ function createMockApiClient() {
  * Create a testable ShopwareCleanup instance with mocked internals
  */
 function createTestableCleanup() {
-    const cleanup = new ShopwareCleanup();
-    const mockClient = createMockApiClient();
+    const mockClient = createMockAdminClient();
 
-    // Override the apiClient with our mock
-    (cleanup as unknown as { apiClient: typeof mockClient }).apiClient = mockClient;
-
-    // Override isAuthenticated to return true
-    (cleanup as unknown as { isAuthenticated: () => boolean }).isAuthenticated = () => true;
-
-    // Override capitalizeString (it's a protected method on ShopwareClient)
-    (cleanup as unknown as { capitalizeString: (s: string) => string }).capitalizeString = (
-        s: string
-    ) => s.charAt(0).toUpperCase() + s.slice(1);
+    // Create cleanup with the mock client
+    const cleanup = new ShopwareCleanup(mockClient as never);
 
     // Override getProductMediaFolderId
     (
@@ -100,9 +103,9 @@ describe("ShopwareCleanup", () => {
         test("finds SalesChannel with normalized name", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/sales-channel", {
-                total: 1,
+            mockClient.mockSearchResponse("sales-channel", {
                 data: [{ id: "sc-123", navigationCategoryId: "cat-root" }],
+                total: 1,
             });
 
             const result = await cleanup.getSalesChannelByName("digital_invitations");
@@ -115,7 +118,7 @@ describe("ShopwareCleanup", () => {
         test("returns null when SalesChannel not found", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/sales-channel", { total: 0, data: [] });
+            mockClient.mockSearchResponse("sales-channel", { data: [], total: 0 });
 
             const result = await cleanup.getSalesChannelByName("nonexistent");
 
@@ -124,7 +127,6 @@ describe("ShopwareCleanup", () => {
 
         test("returns null when not authenticated", async () => {
             const cleanup = new ShopwareCleanup();
-            // Not authenticated by default
 
             const result = await cleanup.getSalesChannelByName("test");
 
@@ -140,13 +142,13 @@ describe("ShopwareCleanup", () => {
         test("deletes products with visibility in SalesChannel", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/product", {
-                total: 3,
+            mockClient.mockSearchResponse("product", {
                 data: [
                     { id: "prod-1", name: "Product 1" },
                     { id: "prod-2", name: "Product 2" },
                     { id: "prod-3", name: "Product 3" },
                 ],
+                total: 3,
             });
 
             const count = await cleanup.deleteProductsInSalesChannel("sc-123");
@@ -154,31 +156,31 @@ describe("ShopwareCleanup", () => {
             expect(count).toBe(3);
 
             // Verify sync was called with delete payload
-            const syncCalls = mockClient.getCallsByEndpoint("_action/sync");
+            const syncCalls = mockClient.getCallsByOperation("sync post");
             expect(syncCalls.length).toBe(1);
 
-            const syncBody = syncCalls[0]?.body as Record<string, unknown>;
-            const deleteProducts = syncBody?.deleteProducts as {
+            const syncBody = (syncCalls[0]?.params as { body?: unknown[] })?.body;
+            const deleteOp = syncBody?.[0] as {
                 entity: string;
                 action: string;
                 payload: Array<{ id: string }>;
             };
-            expect(deleteProducts.entity).toBe("product");
-            expect(deleteProducts.action).toBe("delete");
-            expect(deleteProducts.payload).toHaveLength(3);
+            expect(deleteOp.entity).toBe("product");
+            expect(deleteOp.action).toBe("delete");
+            expect(deleteOp.payload).toHaveLength(3);
         });
 
         test("returns 0 when no products found", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/product", { total: 0, data: [] });
+            mockClient.mockSearchResponse("product", { data: [], total: 0 });
 
             const count = await cleanup.deleteProductsInSalesChannel("sc-123");
 
             expect(count).toBe(0);
 
             // No sync call should be made
-            const syncCalls = mockClient.getCallsByEndpoint("_action/sync");
+            const syncCalls = mockClient.getCallsByOperation("sync post");
             expect(syncCalls.length).toBe(0);
         });
     });
@@ -191,8 +193,7 @@ describe("ShopwareCleanup", () => {
         test("deletes all child categories", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/category", {
-                total: 5,
+            mockClient.mockSearchResponse("category", {
                 data: [
                     { id: "cat-1", name: "Category 1", parentId: "root" },
                     { id: "cat-2", name: "Category 2", parentId: "root" },
@@ -200,21 +201,21 @@ describe("ShopwareCleanup", () => {
                     { id: "cat-4", name: "Category 4", parentId: "cat-1" },
                     { id: "cat-5", name: "Category 5", parentId: "cat-2" },
                 ],
+                total: 5,
             });
 
             const count = await cleanup.deleteCategoriesUnderRoot("root");
 
             expect(count).toBe(5);
 
-            // Verify sync was called with delete payload
-            const syncCalls = mockClient.getCallsByEndpoint("_action/sync");
+            const syncCalls = mockClient.getCallsByOperation("sync post");
             expect(syncCalls.length).toBe(1);
         });
 
         test("returns 0 when no child categories", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/category", { total: 0, data: [] });
+            mockClient.mockSearchResponse("category", { data: [], total: 0 });
 
             const count = await cleanup.deleteCategoriesUnderRoot("root");
 
@@ -230,9 +231,7 @@ describe("ShopwareCleanup", () => {
         test("dry run reports orphaned media without deleting", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            // Mock media search - some with productMedia, some without
-            mockClient.mockResponse("search/media", {
-                total: 3,
+            mockClient.mockSearchResponse("media", {
                 data: [
                     {
                         id: "media-1",
@@ -253,6 +252,7 @@ describe("ShopwareCleanup", () => {
                         productMedia: [],
                     },
                 ],
+                total: 3,
             });
 
             const count = await cleanup.deleteOrphanedProductMedia(true);
@@ -261,15 +261,14 @@ describe("ShopwareCleanup", () => {
             expect(count).toBe(2);
 
             // No delete calls should be made in dry run
-            const deleteCalls = mockClient.calls.filter((c) => c.method === "delete");
+            const deleteCalls = mockClient.getCallsByOperation("delete /");
             expect(deleteCalls.length).toBe(0);
         });
 
         test("actual run deletes orphaned media", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/media", {
-                total: 2,
+            mockClient.mockSearchResponse("media", {
                 data: [
                     {
                         id: "media-1",
@@ -277,16 +276,22 @@ describe("ShopwareCleanup", () => {
                         mediaFolderId: "folder-1",
                         productMedia: [],
                     },
-                    { id: "media-2", fileName: "orphan-2", mediaFolderId: null, productMedia: [] },
+                    {
+                        id: "media-2",
+                        fileName: "orphan-2",
+                        mediaFolderId: null,
+                        productMedia: [],
+                    },
                 ],
+                total: 2,
             });
 
             const count = await cleanup.deleteOrphanedProductMedia(false);
 
             expect(count).toBe(2);
 
-            // Verify delete calls were made
-            const deleteCalls = mockClient.calls.filter((c) => c.method === "delete");
+            // Verify delete calls were made via invoke
+            const deleteCalls = mockClient.getCallsByOperation("deleteMedia delete");
             expect(deleteCalls.length).toBe(2);
         });
     });
@@ -299,29 +304,24 @@ describe("ShopwareCleanup", () => {
         test("cleans up products and categories for SalesChannel", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            // Mock getSalesChannelByName
-            mockClient.mockResponse("search/sales-channel", {
-                total: 1,
+            mockClient.mockSearchResponse("sales-channel", {
                 data: [{ id: "sc-123", navigationCategoryId: "cat-root" }],
+                total: 1,
             });
-
-            // Mock products
-            mockClient.mockResponse("search/product", {
-                total: 2,
+            mockClient.mockSearchResponse("product", {
                 data: [
                     { id: "prod-1", name: "Product 1" },
                     { id: "prod-2", name: "Product 2" },
                 ],
+                total: 2,
             });
-
-            // Mock categories
-            mockClient.mockResponse("search/category", {
-                total: 3,
+            mockClient.mockSearchResponse("category", {
                 data: [
                     { id: "cat-1", name: "Cat 1", parentId: "cat-root" },
                     { id: "cat-2", name: "Cat 2", parentId: "cat-root" },
                     { id: "cat-3", name: "Cat 3", parentId: "cat-1" },
                 ],
+                total: 3,
             });
 
             const result = await cleanup.cleanupSalesChannel("test-store");
@@ -335,7 +335,7 @@ describe("ShopwareCleanup", () => {
         test("returns zeros when SalesChannel not found", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/sales-channel", { total: 0, data: [] });
+            mockClient.mockSearchResponse("sales-channel", { data: [], total: 0 });
 
             const result = await cleanup.cleanupSalesChannel("nonexistent");
 
@@ -347,12 +347,12 @@ describe("ShopwareCleanup", () => {
         test("deletes SalesChannel when option is set", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/sales-channel", {
-                total: 1,
+            mockClient.mockSearchResponse("sales-channel", {
                 data: [{ id: "sc-123", navigationCategoryId: "cat-root" }],
+                total: 1,
             });
-            mockClient.mockResponse("search/product", { total: 0, data: [] });
-            mockClient.mockResponse("search/category", { total: 0, data: [] });
+            mockClient.mockSearchResponse("product", { data: [], total: 0 });
+            mockClient.mockSearchResponse("category", { data: [], total: 0 });
 
             const result = await cleanup.cleanupSalesChannel("test-store", {
                 deleteSalesChannel: true,
@@ -361,10 +361,20 @@ describe("ShopwareCleanup", () => {
             expect(result.salesChannelDeleted).toBe(true);
             expect(result.rootCategoryDeleted).toBe(true);
 
-            // Verify delete calls
-            const deleteCalls = mockClient.calls.filter((c) => c.method === "delete");
-            expect(deleteCalls.some((c) => c.endpoint.includes("sales-channel/sc-123"))).toBe(true);
-            expect(deleteCalls.some((c) => c.endpoint.includes("category/cat-root"))).toBe(true);
+            // Verify delete calls via invoke
+            const deleteCalls = mockClient.getCallsByOperation(" delete /");
+            expect(
+                deleteCalls.some((c) => {
+                    const pathParams = (c.params as { pathParams?: { id?: string } })?.pathParams;
+                    return pathParams?.id === "sc-123";
+                })
+            ).toBe(true);
+            expect(
+                deleteCalls.some((c) => {
+                    const pathParams = (c.params as { pathParams?: { id?: string } })?.pathParams;
+                    return pathParams?.id === "cat-root";
+                })
+            ).toBe(true);
         });
     });
 
@@ -376,22 +386,21 @@ describe("ShopwareCleanup", () => {
         test("deletes property groups by name", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/property-group", {
-                total: 2,
+            mockClient.mockSearchResponse("property-group", {
                 data: [{ id: "pg-1" }, { id: "pg-2" }],
+                total: 2,
             });
 
             const count = await cleanup.deletePropertyGroups(["Color", "Size"]);
 
             // Called twice, 2 groups found each time = 4 total
-            // Actually, our mock returns the same response for all calls
             expect(count).toBe(4);
         });
 
         test("returns 0 when no property groups found", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockResponse("search/property-group", { total: 0, data: [] });
+            mockClient.mockSearchResponse("property-group", { data: [], total: 0 });
 
             const count = await cleanup.deletePropertyGroups(["NonexistentGroup"]);
 
@@ -411,14 +420,17 @@ describe("ShopwareCleanup", () => {
 
             expect(result).toBe(true);
 
-            const deleteCalls = mockClient.calls.filter((c) => c.method === "delete");
-            expect(deleteCalls.some((c) => c.endpoint === "sales-channel/sc-123")).toBe(true);
+            const deleteCalls = mockClient.getCallsByOperation("deleteSalesChannel delete");
+            expect(deleteCalls.length).toBe(1);
+            const pathParams = (deleteCalls[0]?.params as { pathParams?: { id?: string } })
+                ?.pathParams;
+            expect(pathParams?.id).toBe("sc-123");
         });
 
         test("returns false on delete error", async () => {
             const { cleanup, mockClient } = createTestableCleanup();
 
-            mockClient.mockDeleteError("sales-channel/sc-123", new Error("Cannot delete"));
+            mockClient.mockDeleteError("sc-123", new Error("Cannot delete"));
 
             const result = await cleanup.deleteSalesChannel("sc-123");
 

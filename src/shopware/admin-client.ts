@@ -8,6 +8,9 @@
 import { createAdminAPIClient } from "@shopware/api-client";
 import type { operations } from "@shopware/api-client/admin-api-types";
 
+/** Re-export official types so the rest of the codebase imports them from here */
+export type { operations, Schemas } from "@shopware/api-client/admin-api-types";
+
 /** Configuration for creating the admin client */
 export interface AdminClientConfig {
     /** Base URL of the Shopware instance (e.g., "http://localhost:8000") */
@@ -53,6 +56,7 @@ export function createShopwareAdminClient(config: AdminClientConfig): AdminApiCl
     const client = createAdminAPIClient<operations>({
         baseURL: `${config.baseURL}/api`,
         credentials,
+        defaultHeaders: { Accept: "application/json" },
     });
 
     return client;

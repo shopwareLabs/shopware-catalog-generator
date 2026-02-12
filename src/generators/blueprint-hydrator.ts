@@ -202,12 +202,14 @@ export class BlueprintHydrator {
         blueprint: Blueprint,
         existingProperties: ExistingProperty[] = []
     ): Promise<HydratedBlueprint> {
-        logger.cli("Hydrating blueprint with AI...");
+        logger.info("Hydrating blueprint with AI...", { cli: true });
         logger.info("Starting blueprint hydration", {
-            salesChannel: blueprint.salesChannel.name,
-            categories: blueprint.categories.length,
-            products: blueprint.products.length,
-            existingProperties: existingProperties.length,
+            data: {
+                salesChannel: blueprint.salesChannel.name,
+                categories: blueprint.categories.length,
+                products: blueprint.products.length,
+                existingProperties: existingProperties.length,
+            },
         });
 
         // Clear batch progress state from previous hydrations
@@ -226,7 +228,7 @@ export class BlueprintHydrator {
         };
 
         // Step 1: Hydrate SalesChannel and categories
-        logger.cli("  [1/2] Generating category names and descriptions...");
+        logger.info("  [1/2] Generating category names and descriptions...", { cli: true });
         logger.info("Hydrating categories...");
         const hydratedCategories = await this.hydrateCategories(
             blueprint.salesChannel.name,
@@ -234,11 +236,11 @@ export class BlueprintHydrator {
             blueprint.categories
         );
         logger.info("Categories hydrated", {
-            count: hydratedCategories.categories.length,
+            data: { count: hydratedCategories.categories.length },
         });
 
         // Step 2: Hydrate products per top-level branch
-        logger.cli("  [2/2] Generating product content...");
+        logger.info("  [2/2] Generating product content...", { cli: true });
         logger.info("Hydrating products...");
         const hydratedProducts = await this.hydrateProducts(
             blueprint.products,
@@ -247,7 +249,7 @@ export class BlueprintHydrator {
             existingProperties,
             storeContext
         );
-        logger.info("Products hydrated", { count: hydratedProducts.length });
+        logger.info("Products hydrated", { data: { count: hydratedProducts.length } });
 
         // Build hydrated blueprint
         const hydrated: HydratedBlueprint = {
@@ -265,7 +267,7 @@ export class BlueprintHydrator {
             hydratedAt: new Date().toISOString(),
         };
 
-        logger.cli("  Blueprint hydrated successfully");
+        logger.info("  Blueprint hydrated successfully", { cli: true });
         logger.info("Blueprint hydration complete");
         return hydrated;
     }
@@ -278,20 +280,22 @@ export class BlueprintHydrator {
     async hydrateCategoriesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
         logger.info("Hydrating categories only (preserving product data)...");
         logger.info("Starting categories-only hydration", {
-            salesChannel: existingBlueprint.salesChannel.name,
-            categories: existingBlueprint.categories.length,
-            products: existingBlueprint.products.length,
+            data: {
+                salesChannel: existingBlueprint.salesChannel.name,
+                categories: existingBlueprint.categories.length,
+                products: existingBlueprint.products.length,
+            },
         });
 
         // Hydrate SalesChannel and categories
-        logger.cli("  Generating category names and descriptions...");
+        logger.info("  Generating category names and descriptions...", { cli: true });
         const hydratedCategories = await this.hydrateCategories(
             existingBlueprint.salesChannel.name,
             existingBlueprint.salesChannel.description,
             existingBlueprint.categories
         );
         logger.info("Categories hydrated", {
-            count: hydratedCategories.categories.length,
+            data: { count: hydratedCategories.categories.length },
         });
 
         // Build updated blueprint preserving products
@@ -311,7 +315,7 @@ export class BlueprintHydrator {
             hydratedAt: new Date().toISOString(),
         };
 
-        logger.cli("  Categories hydrated successfully (products preserved)");
+        logger.info("  Categories hydrated successfully (products preserved)", { cli: true });
         logger.info("Categories-only hydration complete");
         return hydrated;
     }
@@ -328,8 +332,10 @@ export class BlueprintHydrator {
     ): Promise<HydratedBlueprint> {
         logger.info("Hydrating properties only (preserving product names)...");
         logger.info("Starting properties-only hydration", {
-            salesChannel: existingBlueprint.salesChannel.name,
-            products: existingBlueprint.products.length,
+            data: {
+                salesChannel: existingBlueprint.salesChannel.name,
+                products: existingBlueprint.products.length,
+            },
         });
 
         // Create store-scoped PropertyCache for this sales channel
@@ -415,7 +421,7 @@ export class BlueprintHydrator {
             hydratedAt: new Date().toISOString(),
         };
 
-        logger.cli("  Properties hydrated successfully (names preserved)");
+        logger.info("  Properties hydrated successfully (names preserved)", { cli: true });
         logger.info("Properties-only hydration complete");
         return hydrated;
     }
@@ -543,7 +549,7 @@ Return JSON in this exact format:
         const flatCategories = this.flattenCategories(categories);
 
         logger.debug(`Generating content for ${flatCategories.length} categories`, {
-            salesChannelName,
+            data: { salesChannelName },
         });
 
         const prompt = this.buildCategoryPrompt(
@@ -552,14 +558,16 @@ Return JSON in this exact format:
             flatCategories
         );
 
-        logger.debug("Category prompt built", { promptLength: prompt.length });
+        logger.debug("Category prompt built", { data: { promptLength: prompt.length } });
 
         const startTime = Date.now();
         let response: string;
 
         try {
             response = await executeWithRetry(async () => {
-                logger.debug(`[AI Provider: ${this.textProvider.name}] Generating categories...`);
+                logger.debug(
+                    `[AI Provider: ${this.textProvider.name}] Generating categories...`
+                );
                 return this.textProvider.generateCompletion(
                     [
                         {
@@ -576,8 +584,10 @@ Return JSON in this exact format:
         } catch (error) {
             const elapsed = Date.now() - startTime;
             logger.error(`[AI Provider] Category generation failed after ${elapsed}ms`, {
-                provider: this.textProvider.name,
-                error: error instanceof Error ? error.message : String(error),
+                data: {
+                    provider: this.textProvider.name,
+                    error: error instanceof Error ? error.message : String(error),
+                },
             });
             throw error;
         }
@@ -585,9 +595,7 @@ Return JSON in this exact format:
         const elapsed = Date.now() - startTime;
         logger.info(
             `[AI Provider: ${this.textProvider.name}] Categories generated in ${elapsed}ms`,
-            {
-                responseLength: response.length,
-            }
+            { data: { responseLength: response.length } }
         );
 
         try {
@@ -597,8 +605,10 @@ Return JSON in this exact format:
             return validated;
         } catch (error) {
             logger.error("Failed to parse category AI response", {
-                error: error instanceof Error ? error.message : String(error),
-                responsePreview: response.slice(0, 500),
+                data: {
+                    error: error instanceof Error ? error.message : String(error),
+                    responsePreview: response.slice(0, 500),
+                },
             });
             throw new Error("Failed to parse category AI response");
         }
@@ -685,11 +695,21 @@ Return JSON in this exact format:
 
         // Log parallelization strategy
         if (maxConcurrency > 1) {
-            logger.cli(`    Using parallel processing (max ${maxConcurrency} concurrent branches)`);
-            logger.info(`Parallel branch processing enabled`, { maxConcurrency, totalBranches });
+            logger.info(
+                `    Using parallel processing (max ${maxConcurrency} concurrent branches)`,
+                { cli: true }
+            );
+            logger.info(`Parallel branch processing enabled`, {
+                data: { maxConcurrency, totalBranches },
+            });
         } else {
-            logger.cli(`    Using sequential processing (provider: ${this.textProvider.name})`);
-            logger.info(`Sequential branch processing`, { provider: this.textProvider.name });
+            logger.info(
+                `    Using sequential processing (provider: ${this.textProvider.name})`,
+                { cli: true }
+            );
+            logger.info(`Sequential branch processing`, {
+                data: { provider: this.textProvider.name },
+            });
         }
 
         // Create concurrency limiter for parallel processing
@@ -711,8 +731,9 @@ Return JSON in this exact format:
                 const subCatText = subCatPreview
                     ? ` → ${subCatPreview}${availableSubcategories.length > 3 ? "..." : ""}`
                     : "";
-                logger.cli(
-                    `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`
+                logger.info(
+                    `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`,
+                    { cli: true }
                 );
 
                 const hydrated = await this.hydrateBranchProducts(
@@ -726,8 +747,9 @@ Return JSON in this exact format:
                 );
 
                 completedBranches++;
-                logger.cli(
-                    `    ✓ ${storeContext.name} > ${branchName} complete (${completedBranches}/${totalBranches} branches)`
+                logger.info(
+                    `    ✓ ${storeContext.name} > ${branchName} complete (${completedBranches}/${totalBranches} branches)`,
+                    { cli: true }
                 );
 
                 return hydrated;
@@ -755,13 +777,12 @@ Return JSON in this exact format:
                         ? result.reason
                         : new Error(String(result.reason));
                 failedBranches.push({ branchIndex: i, error });
-                logger.cli(
+                logger.error(
                     `    ✗ ${storeContext.name} > ${branchName} failed: ${error.message}`,
-                    "error"
+                    { cli: true }
                 );
                 logger.error(`Branch ${branchName} failed`, {
-                    error: error.message,
-                    branchIndex: i,
+                    data: { error: error.message, branchIndex: i },
                 });
             }
         }
@@ -769,15 +790,17 @@ Return JSON in this exact format:
         // If some branches failed, log summary but return partial results
         if (failedBranches.length > 0) {
             const successCount = settledResults.length - failedBranches.length;
-            logger.cli(
+            logger.warn(
                 `\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
                     `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`,
-                "warn"
+                { cli: true }
             );
             logger.warn(`Partial hydration: ${failedBranches.length} branches failed`, {
-                failedCount: failedBranches.length,
-                successCount,
-                productsHydrated: fulfilledProducts.length,
+                data: {
+                    failedCount: failedBranches.length,
+                    successCount,
+                    productsHydrated: fulfilledProducts.length,
+                },
             });
         }
 
@@ -952,8 +975,9 @@ Return JSON in this exact format:
         const counter = this.batchCounter.get(branchName);
         if (counter) {
             counter.current++;
-            logger.cli(
-                `      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`
+            logger.info(
+                `      [Batch ${counter.current}/${counter.total}] Generating ${products.length} products...`,
+                { cli: true }
             );
         }
 
@@ -969,9 +993,11 @@ Return JSON in this exact format:
         logger.debug(
             `[AI Provider: ${this.textProvider.name}] ${storeContext.name} > ${branchName} (${subCatPreview}) - ${products.length} products`,
             {
-                productIds: products.map((p) => p.id.slice(0, 8)),
-                promptLength: prompt.length,
-                availableSubcategories,
+                data: {
+                    productIds: products.map((p) => p.id.slice(0, 8)),
+                    promptLength: prompt.length,
+                    availableSubcategories,
+                },
             }
         );
 
@@ -999,7 +1025,7 @@ Return JSON in this exact format:
             return await executeWithRetry(async () => {
                 logger.debug(
                     `[AI Provider: ${this.textProvider.name}] Generating products for "${branchName}"...`,
-                    { promptLength: prompt.length }
+                    { data: { promptLength: prompt.length } }
                 );
                 return this.textProvider.generateCompletion(
                     [
@@ -1019,8 +1045,10 @@ Return JSON in this exact format:
             logger.error(
                 `[AI Provider] Product generation failed for "${branchName}" after ${elapsed}ms`,
                 {
-                    provider: this.textProvider.name,
-                    error: error instanceof Error ? error.message : String(error),
+                    data: {
+                        provider: this.textProvider.name,
+                        error: error instanceof Error ? error.message : String(error),
+                    },
                 }
             );
             throw error;
@@ -1042,14 +1070,15 @@ Return JSON in this exact format:
         const elapsedSec = (elapsed / 1000).toFixed(1);
         logger.info(
             `[AI Provider: ${this.textProvider.name}] Products generated for "${branchName}" in ${elapsed}ms`,
-            { responseLength: response.length }
+            { data: { responseLength: response.length } }
         );
 
         try {
             const parsed = JSON.parse(response) as ProductResponse;
             const validated = ProductResponseSchema.parse(parsed);
-            logger.cli(
-                `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`
+            logger.info(
+                `        ✓ Generated ${validated.products.length} products (${elapsedSec}s)`,
+                { cli: true }
             );
             logger.debug(`Parsed ${validated.products.length} products for "${branchName}"`);
             return await this.applyProductHydration(
@@ -1061,8 +1090,10 @@ Return JSON in this exact format:
             );
         } catch (error) {
             logger.error(`Failed to parse AI response for "${branchName}"`, {
-                error: error instanceof Error ? error.message : String(error),
-                responsePreview: response.slice(0, 500),
+                data: {
+                    error: error instanceof Error ? error.message : String(error),
+                    responsePreview: response.slice(0, 500),
+                },
             });
             throw new Error(`Failed to parse product AI response for branch ${branchName}`);
         }
@@ -1458,7 +1489,7 @@ Return JSON in this exact format:
         }
 
         logger.debug(`Property cache hit for "${originalName}" -> "${cached.name}"`, {
-            options: finalOptions.length,
+            data: { options: finalOptions.length },
         });
 
         return {
@@ -1507,7 +1538,7 @@ Return JSON in this exact format:
         try {
             return await this.generatePropertyOptions(groupName, productContext);
         } catch (error) {
-            logger.error(`Failed to generate options for "${groupName}"`, error);
+            logger.error(`Failed to generate options for "${groupName}"`, { data: error });
             return null;
         }
     }
@@ -1623,7 +1654,7 @@ Return JSON:
         this.propertyCache.save(cachedGroup);
 
         logger.info(`Generated and cached new property group "${groupName}"`, {
-            options: validated.options.length,
+            data: { options: validated.options.length },
         });
 
         // Select 40-60% of options for this product
@@ -1799,7 +1830,7 @@ RESPOND ONLY WITH JSON. No explanation, no markdown. Just the JSON object:`;
 
             return applyFixes(blueprint.categories);
         } catch (error) {
-            logger.error("Failed to fix placeholder categories", error);
+            logger.error("Failed to fix placeholder categories", { data: error });
             throw error;
         }
     }
@@ -1916,7 +1947,7 @@ RESPOND ONLY WITH JSON:
                 logger.info(`  Batch ${batchIdx + 1}: Fixed ${validated.products.length} products`);
                 return validated.products;
             } catch (error) {
-                logger.error(`Failed to fix product batch ${batchIdx + 1}`, error);
+                logger.error(`Failed to fix product batch ${batchIdx + 1}`, { data: error });
                 return []; // Continue with other batches
             }
         };

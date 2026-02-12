@@ -28,8 +28,12 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
         const landingPageName = this.getLandingPageName(context);
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create CMS layout "${this.pageFixture.name}"`);
-            logger.cli(`    [DRY RUN] Would create Landing Page "${this.pageFixture.name}"`);
+            logger.info(`    [DRY RUN] Would create CMS layout "${this.pageFixture.name}"`, {
+                cli: true,
+            });
+            logger.info(`    [DRY RUN] Would create Landing Page "${this.pageFixture.name}"`, {
+                cli: true,
+            });
             return {
                 name: this.name,
                 processed: 1,
@@ -43,7 +47,10 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
             // Get media IDs from products in this SalesChannel
             const mediaIds = await this.getMediaIds(context);
             if (mediaIds.length === 0) {
-                logger.cli(`    ⚠ No media found in SalesChannel, image blocks will be empty`);
+                logger.warn(
+                    `    ⚠ No media found in SalesChannel, image blocks will be empty`,
+                    { cli: true }
+                );
             }
 
             // Create a modified fixture with media IDs populated
@@ -58,11 +65,14 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                     errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(
-                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${mediaIds.length} images`
+                logger.info(
+                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${mediaIds.length} images`,
+                    { cli: true }
                 );
             } else {
-                logger.cli(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`);
+                logger.info(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`, {
+                    cli: true,
+                });
             }
 
             // Step 2: Check if Landing Page already exists for this SalesChannel
@@ -74,7 +84,9 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                     errors.push(`Failed to create Landing Page "${landingPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(`    ✓ Created Landing Page "${this.pageFixture.name}"`);
+                logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, {
+                    cli: true,
+                });
             } else {
                 await this.ensureSalesChannelAssociated(
                     context,
@@ -155,7 +167,7 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                 }
             }
         } catch (error) {
-            logger.warn("Failed to get product media for images page", { error });
+            logger.warn("Failed to get product media for images page", { data: error });
         }
 
         // If we don't have enough media, query the media endpoint directly
@@ -179,7 +191,7 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                     }
                 }
             } catch (error) {
-                logger.warn("Failed to get media from media endpoint", { error });
+                logger.warn("Failed to get media from media endpoint", { data: error });
             }
         }
 

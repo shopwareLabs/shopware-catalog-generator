@@ -1,9 +1,12 @@
 /**
  * Shopware API Helpers
  *
- * Provides convenience methods that wrap the official @shopware/api-client,
- * offering a simpler interface for common operations like searching, syncing,
- * and deleting entities.
+ * Provides convenience methods for common operations like searching, syncing,
+ * and deleting entities. Uses the AdminApiClient's session for authentication.
+ *
+ * This class exists alongside the typed invoke() calls in the client hierarchy:
+ * - ShopwareClient/Hydrator/Cleanup use typed invoke() for core operations
+ * - ShopwareApiHelpers provides a generic entity-based interface for post-processors
  */
 
 import type { AdminApiClient } from "./admin-client.js";
@@ -51,26 +54,25 @@ export type TokenGetter = () => Promise<string>;
 /**
  * Shopware API Helpers class
  *
- * Provides convenience methods for common Shopware API operations.
- * Uses the official @shopware/api-client under the hood.
+ * Uses the AdminApiClient's session data for authentication.
+ * Falls back to a custom TokenGetter if the client has no session yet.
  */
 export class ShopwareApiHelpers {
+    private client: AdminApiClient;
     private baseURL: string;
-    private getAccessToken: TokenGetter;
+    private customTokenGetter: TokenGetter | undefined;
 
-    constructor(_client: AdminApiClient, baseURL: string, getAccessToken?: TokenGetter) {
-        // Note: _client parameter reserved for future use with official client's invoke method
-        void _client;
+    constructor(client: AdminApiClient, baseURL: string, getAccessToken?: TokenGetter) {
+        this.client = client;
         this.baseURL = baseURL.replace(/\/$/, "");
-        // Default token getter uses the client's internal state
-        this.getAccessToken = getAccessToken ?? (async () => "");
+        this.customTokenGetter = getAccessToken;
     }
 
     /**
      * Set the token getter function
      */
     setTokenGetter(getter: TokenGetter): void {
-        this.getAccessToken = getter;
+        this.customTokenGetter = getter;
     }
 
     /**
@@ -82,11 +84,6 @@ export class ShopwareApiHelpers {
 
     /**
      * Search for entities with filters and associations
-     *
-     * @param entity - Entity name (e.g., "product", "category")
-     * @param filters - Array of filter objects
-     * @param options - Additional search options
-     * @returns Array of matching entities
      */
     async searchEntities<T = Record<string, unknown>>(
         entity: string,
@@ -139,11 +136,6 @@ export class ShopwareApiHelpers {
 
     /**
      * Find entity by name
-     *
-     * @param entity - Entity name
-     * @param name - Name to search for
-     * @param additionalFilters - Additional filters to apply
-     * @returns Entity ID if found, null otherwise
      */
     async findByName(
         entity: string,
@@ -155,14 +147,14 @@ export class ShopwareApiHelpers {
             ...additionalFilters,
         ];
 
-        const results = await this.searchEntities<{ id: string }>(entity, filters, { limit: 1 });
+        const results = await this.searchEntities<{ id: string }>(entity, filters, {
+            limit: 1,
+        });
         return results[0]?.id ?? null;
     }
 
     /**
      * Batch sync entities (create/update/delete)
-     *
-     * @param operations - Array of sync operations
      */
     async syncEntities(operations: Record<string, SyncOperation>): Promise<void> {
         await this.post("_action/sync", operations);
@@ -170,9 +162,6 @@ export class ShopwareApiHelpers {
 
     /**
      * Create or update a single entity
-     *
-     * @param entity - Entity name
-     * @param payload - Entity data (must include id for update)
      */
     async upsertEntity(entity: string, payload: Record<string, unknown>): Promise<void> {
         await this.syncEntities({
@@ -186,14 +175,10 @@ export class ShopwareApiHelpers {
 
     /**
      * Delete a single entity by ID
-     *
-     * @param entity - Entity name (e.g., "category", "product")
-     * @param id - Entity ID
-     * @returns true if deleted successfully
      */
     async deleteEntity(entity: string, id: string): Promise<boolean> {
         try {
-            await this.delete(`${entity}/${id}`);
+            await this.httpDelete(`${entity}/${id}`);
             return true;
         } catch {
             return false;
@@ -202,9 +187,6 @@ export class ShopwareApiHelpers {
 
     /**
      * Batch delete entities by IDs
-     *
-     * @param entity - Entity name (use underscores, e.g., "product_media")
-     * @param ids - Array of entity IDs
      */
     async deleteEntities(entity: string, ids: string[]): Promise<void> {
         if (ids.length === 0) return;
@@ -222,11 +204,6 @@ export class ShopwareApiHelpers {
 
     /**
      * Upload media file
-     *
-     * @param mediaId - ID of the media entity
-     * @param file - File content as Buffer
-     * @param fileName - Filename without extension
-     * @param extension - File extension (e.g., "webp", "jpg")
      */
     async uploadMedia(
         mediaId: string,
@@ -268,7 +245,9 @@ export class ShopwareApiHelpers {
      * Get standard tax ID
      */
     async getStandardTaxId(): Promise<string> {
-        const results = await this.searchEntities<{ id: string }>("tax", [], { limit: 1 });
+        const results = await this.searchEntities<{ id: string }>("tax", [], {
+            limit: 1,
+        });
 
         if (!results[0]) {
             throw new Error("No tax rate found");
@@ -291,9 +270,7 @@ export class ShopwareApiHelpers {
         }>(
             "sales-channel",
             [{ type: "equals", field: "name", value: this.capitalizeString(name) }],
-            {
-                limit: 1,
-            }
+            { limit: 1 }
         );
 
         return results[0] ?? null;
@@ -303,18 +280,17 @@ export class ShopwareApiHelpers {
      * Get Product Media folder ID
      */
     async getProductMediaFolderId(): Promise<string | null> {
-        // Try default folder configuration first
-        const defaultFolders = await this.searchEntities<{ folder?: { id: string } }>(
-            "media-default-folder",
-            [{ type: "equals", field: "entity", value: "product" }],
-            { associations: { folder: {} }, limit: 1 }
-        );
+        const defaultFolders = await this.searchEntities<{
+            folder?: { id: string };
+        }>("media-default-folder", [{ type: "equals", field: "entity", value: "product" }], {
+            associations: { folder: {} },
+            limit: 1,
+        });
 
         if (defaultFolders[0]?.folder?.id) {
             return defaultFolders[0].folder.id;
         }
 
-        // Fallback: search by name
         const folders = await this.searchEntities<{ id: string }>(
             "media-folder",
             [{ type: "equals", field: "name", value: "Product Media" }],
@@ -328,11 +304,12 @@ export class ShopwareApiHelpers {
      * Get Category Media folder ID
      */
     async getCategoryMediaFolderId(): Promise<string | null> {
-        const defaultFolders = await this.searchEntities<{ folder?: { id: string } }>(
-            "media-default-folder",
-            [{ type: "equals", field: "entity", value: "category" }],
-            { associations: { folder: {} }, limit: 1 }
-        );
+        const defaultFolders = await this.searchEntities<{
+            folder?: { id: string };
+        }>("media-default-folder", [{ type: "equals", field: "entity", value: "category" }], {
+            associations: { folder: {} },
+            limit: 1,
+        });
 
         if (defaultFolders[0]?.folder?.id) {
             return defaultFolders[0].folder.id;
@@ -378,7 +355,7 @@ export class ShopwareApiHelpers {
     }
 
     // =========================================================================
-    // Low-level HTTP methods (for custom endpoints)
+    // Low-level HTTP methods
     // =========================================================================
 
     /**
@@ -452,7 +429,7 @@ export class ShopwareApiHelpers {
     /**
      * Make a DELETE request to the API
      */
-    async delete(endpoint: string): Promise<void> {
+    async httpDelete(endpoint: string): Promise<void> {
         const authHeaders = await this.getAuthHeadersAsync();
         const response = await fetch(`${this.baseURL}/api/${endpoint}`, {
             method: "DELETE",
@@ -493,23 +470,30 @@ export class ShopwareApiHelpers {
     }
 
     /**
-     * Get authorization headers asynchronously
+     * Get authorization headers.
+     * Reads from the AdminApiClient session, falls back to custom token getter.
      */
     private async getAuthHeadersAsync(): Promise<Record<string, string>> {
-        const token = await this.getAccessToken();
-        if (token) {
-            return { Authorization: `Bearer ${token}` };
+        // Try client session first
+        const sessionToken = this.client.getSessionData().accessToken;
+        if (sessionToken) {
+            return { Authorization: `Bearer ${sessionToken}` };
         }
+
+        // Fall back to custom token getter (e.g., from DataHydrator)
+        if (this.customTokenGetter) {
+            const token = await this.customTokenGetter();
+            if (token) {
+                return { Authorization: `Bearer ${token}` };
+            }
+        }
+
         return {};
     }
 }
 
 /**
  * Create API helpers instance
- *
- * @param client - Admin API client
- * @param baseURL - Base URL of Shopware instance
- * @param getAccessToken - Optional function to get fresh access token
  */
 export function createApiHelpers(
     client: AdminApiClient,

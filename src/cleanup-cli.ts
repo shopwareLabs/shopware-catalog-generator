@@ -302,7 +302,7 @@ async function main(): Promise<void> {
             api: apiHelpers,
             options: {
                 batchSize: 5,
-                dryRun: false,
+                dryRun,
             },
         };
 
@@ -342,6 +342,12 @@ async function main(): Promise<void> {
                 console.log(`SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`);
                 console.log(`Root category deleted: ${result.rootCategoryDeleted ? "Yes" : "No"}`);
             }
+            if (result.errors.length > 0) {
+                console.error(`\nErrors during cleanup:`);
+                for (const err of result.errors) {
+                    console.error(`  - ${err}`);
+                }
+            }
         }
     } else if (salesChannel) {
         // SalesChannel cleanup
@@ -370,6 +376,12 @@ async function main(): Promise<void> {
         if (deleteSalesChannel) {
             console.log(`SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`);
             console.log(`Root category deleted: ${result.rootCategoryDeleted ? "Yes" : "No"}`);
+        }
+        if (result.errors.length > 0) {
+            console.error(`\nErrors during cleanup:`);
+            for (const err of result.errors) {
+                console.error(`  - ${err}`);
+            }
         }
 
         // Hint about cache (only if cache folder exists)

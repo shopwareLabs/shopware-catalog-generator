@@ -50,7 +50,7 @@ export {
 // Concurrency utilities
 export { ConcurrencyLimiter } from "./concurrency.js";
 // Logger utilities
-export type { LogLevel } from "./logger.js";
+export type { LogLevel, LogOptions } from "./logger.js";
 export { logger } from "./logger.js";
 export type { ExistingProperty, ExistingPropertyOption } from "./property-collector.js";
 // Property collector (v2)

@@ -64,12 +64,14 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         const errors: string[] = [];
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create Testing category hierarchy`);
-            logger.cli(
-                `    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`
+            logger.info(`    [DRY RUN] Would create Testing category hierarchy`, { cli: true });
+            logger.info(
+                `    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`,
+                { cli: true }
             );
-            logger.cli(
-                `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`
+            logger.info(
+                `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`,
+                { cli: true }
             );
             return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
         }
@@ -154,7 +156,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
      */
     override async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
         if (context.options.dryRun) {
-            logger.cli(`    [DRY RUN] Would delete "Testing" category hierarchy`);
+            logger.info(`    [DRY RUN] Would delete "Testing" category hierarchy`, { cli: true });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -178,7 +180,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 rootCategoryId
             );
             if (!testingCategoryId) {
-                logger.cli(`    ⊘ "Testing" category not found`);
+                logger.info(`    ⊘ "Testing" category not found`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
@@ -247,9 +249,11 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push("Failed to create Testing CMS page");
                 return null;
             }
-            logger.cli(`    ✓ Created Testing CMS layout "${fixture.name}"`);
+            logger.info(`    ✓ Created Testing CMS layout "${fixture.name}"`, { cli: true });
         } else {
-            logger.cli(`    ⊘ Testing CMS layout "${fixture.name}" already exists`);
+            logger.info(`    ⊘ Testing CMS layout "${fixture.name}" already exists`, {
+                cli: true,
+            });
         }
 
         // Create landing page
@@ -260,7 +264,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push("Failed to create Testing landing page");
                 return null;
             }
-            logger.cli(`    ✓ Created Testing landing page "${fixture.name}"`);
+            logger.info(`    ✓ Created Testing landing page "${fixture.name}"`, { cli: true });
         } else {
             await this.ensureSalesChannelAssociated(context, landingPageId, fixture.name, errors);
         }
@@ -290,9 +294,13 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push("Failed to create CMS showcase page");
                 return null;
             }
-            logger.cli(`    ✓ Created CMS showcase layout "${populatedFixture.name}"`);
+            logger.info(`    ✓ Created CMS showcase layout "${populatedFixture.name}"`, {
+                cli: true,
+            });
         } else {
-            logger.cli(`    ⊘ CMS showcase layout "${populatedFixture.name}" already exists`);
+            logger.info(`    ⊘ CMS showcase layout "${populatedFixture.name}" already exists`, {
+                cli: true,
+            });
         }
 
         // Create landing page
@@ -303,7 +311,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push("Failed to create CMS showcase landing page");
                 return null;
             }
-            logger.cli(`    ✓ Created CMS showcase landing page "${populatedFixture.name}"`);
+            logger.info(`    ✓ Created CMS showcase landing page "${populatedFixture.name}"`, {
+                cli: true,
+            });
         } else {
             await this.ensureSalesChannelAssociated(
                 context,
@@ -338,9 +348,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push(`Failed to create "${name}" category`);
                 return null;
             }
-            logger.cli(`    ✓ Created "${name}" category`);
+            logger.info(`    ✓ Created "${name}" category`, { cli: true });
         } else {
-            logger.cli(`    ⊘ "${name}" category already exists`);
+            logger.info(`    ⊘ "${name}" category already exists`, { cli: true });
         }
 
         return categoryId;
@@ -363,9 +373,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 errors.push(`Failed to create "${name}" navigation category`);
                 return null;
             }
-            logger.cli(`    ✓ Created "${name}" category`);
+            logger.info(`    ✓ Created "${name}" category`, { cli: true });
         } else {
-            logger.cli(`    ⊘ "${name}" category already exists`);
+            logger.info(`    ⊘ "${name}" category already exists`, { cli: true });
         }
 
         return categoryId;
@@ -384,8 +394,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         for (const cat of CMS_CATEGORIES) {
             const landingPageId = landingPages[cat.processor];
             if (!landingPageId) {
-                logger.cli(
-                    `    ⚠ No landing page found for "${cat.name}" (processor: ${cat.processor})`
+                logger.warn(
+                    `    ⚠ No landing page found for "${cat.name}" (processor: ${cat.processor})`,
+                    { cli: true }
                 );
                 continue;
             }
@@ -399,12 +410,12 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                     landingPageId
                 );
                 if (subCategoryId) {
-                    logger.cli(`    ✓ Created "${cat.name}" CMS sub-category`);
+                    logger.info(`    ✓ Created "${cat.name}" CMS sub-category`, { cli: true });
                 } else {
                     errors.push(`Failed to create "${cat.name}" sub-category`);
                 }
             } else {
-                logger.cli(`    ⊘ "${cat.name}" CMS sub-category already exists`);
+                logger.info(`    ⊘ "${cat.name}" CMS sub-category already exists`, { cli: true });
             }
         }
     }
@@ -420,7 +431,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         for (const cat of PRODUCT_CATEGORIES) {
             const productId = await this.getProductByType(context, cat.type);
             if (!productId) {
-                logger.cli(`    ⚠ No ${cat.type} product found for "${cat.name}"`);
+                logger.warn(`    ⚠ No ${cat.type} product found for "${cat.name}"`, {
+                    cli: true,
+                });
                 continue;
             }
 
@@ -437,12 +450,12 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                     productId
                 );
                 if (subCategoryId) {
-                    logger.cli(`    ✓ Created "${cat.name}" product link`);
+                    logger.info(`    ✓ Created "${cat.name}" product link`, { cli: true });
                 } else {
                     errors.push(`Failed to create "${cat.name}" product link`);
                 }
             } else {
-                logger.cli(`    ⊘ "${cat.name}" product link already exists`);
+                logger.info(`    ⊘ "${cat.name}" product link already exists`, { cli: true });
             }
         }
     }
@@ -474,7 +487,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 );
             }
         } catch (error) {
-            logger.warn("Failed to get navigation category from sales channel", { error });
+            logger.warn("Failed to get navigation category from sales channel", { data: error });
         }
 
         return null;
@@ -506,7 +519,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return data.data?.[0]?.id || null;
             }
         } catch (error) {
-            logger.warn(`Failed to find category "${name}"`, { error });
+            logger.warn(`Failed to find category "${name}"`, { data: error });
         }
 
         return null;
@@ -649,7 +662,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         if (categoryId) {
             const success = await this.deleteEntity(context, "category", categoryId);
             if (success) {
-                logger.cli(`    ✓ Deleted "${name}" sub-category`);
+                logger.info(`    ✓ Deleted "${name}" sub-category`, { cli: true });
                 return 1;
             }
         }
@@ -666,7 +679,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<number> {
         const success = await this.deleteEntity(context, "category", categoryId);
         if (success) {
-            logger.cli(`    ✓ Deleted "${name}" category`);
+            logger.info(`    ✓ Deleted "${name}" category`, { cli: true });
             return 1;
         }
         return 0;
@@ -685,24 +698,34 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<void> {
         const scopedName = this.getStoreScopedName(context, fixturePageName);
 
-        const landingPageId = await this.findLandingPageByName(context, scopedName);
-        if (landingPageId) {
-            const success = await this.deleteEntity(context, "landing-page", landingPageId);
-            if (success) {
-                logger.cli(`    ✓ Deleted "${fixturePageName}" landing page`);
-            } else {
-                errors.push(`Failed to delete "${fixturePageName}" landing page`);
+        try {
+            const landingPageId = await this.findLandingPageByName(context, scopedName);
+            if (landingPageId) {
+                const success = await this.deleteEntity(context, "landing-page", landingPageId);
+                if (success) {
+                    logger.info(`    ✓ Deleted "${fixturePageName}" landing page`, { cli: true });
+                } else {
+                    errors.push(`Failed to delete "${fixturePageName}" landing page`);
+                }
             }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Landing page lookup failed for "${fixturePageName}": ${message}`);
         }
 
-        const cmsPageId = await this.findCmsPageByName(context, scopedName);
-        if (cmsPageId) {
-            const success = await this.deleteEntity(context, "cms-page", cmsPageId);
-            if (success) {
-                logger.cli(`    ✓ Deleted "${fixturePageName}" CMS layout`);
-            } else {
-                errors.push(`Failed to delete "${fixturePageName}" CMS layout`);
+        try {
+            const cmsPageId = await this.findCmsPageByName(context, scopedName);
+            if (cmsPageId) {
+                const success = await this.deleteEntity(context, "cms-page", cmsPageId);
+                if (success) {
+                    logger.info(`    ✓ Deleted "${fixturePageName}" CMS layout`, { cli: true });
+                } else {
+                    errors.push(`Failed to delete "${fixturePageName}" CMS layout`);
+                }
             }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`CMS page lookup failed for "${fixturePageName}": ${message}`);
         }
     }
 
@@ -735,7 +758,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return data.data?.map((p) => p.id) || [];
             }
         } catch (error) {
-            logger.warn("Failed to get products for welcome page", { error });
+            logger.warn("Failed to get products for welcome page", { data: error });
         }
 
         return [];
@@ -812,7 +835,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return data.data?.[0]?.id || null;
             }
         } catch (error) {
-            logger.warn("Failed to find variant product", { error });
+            logger.warn("Failed to find variant product", { data: error });
         }
 
         return null;
@@ -853,7 +876,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return data.data?.[0]?.id || null;
             }
         } catch (error) {
-            logger.warn("Failed to find simple product", { error });
+            logger.warn("Failed to find simple product", { data: error });
         }
 
         return null;

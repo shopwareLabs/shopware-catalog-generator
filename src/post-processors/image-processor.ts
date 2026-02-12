@@ -132,7 +132,7 @@ class ImageProcessorImpl implements PostProcessor {
         const totalImages = totalProductImages + totalCategoryImages;
 
         if (totalImages === 0 && productsNeedingImages.length === 0) {
-            logger.cli(`    No images to generate or upload`);
+            logger.info(`    No images to generate or upload`, { cli: true });
             return {
                 name: this.name,
                 processed: 0,
@@ -142,14 +142,17 @@ class ImageProcessorImpl implements PostProcessor {
             };
         }
 
-        logger.cli(`    Image generation: ${totalImages} images to generate`);
-        logger.cli(
-            `      - ${totalProductImages} product images (${productsNeedingImages.length} products)`
+        logger.info(`    Image generation: ${totalImages} images to generate`, { cli: true });
+        logger.info(
+            `      - ${totalProductImages} product images (${productsNeedingImages.length} products)`,
+            { cli: true }
         );
         if (totalStaleImages > 0) {
-            logger.cli(`      - ${totalStaleImages} stale images (product name changed)`);
+            logger.info(`      - ${totalStaleImages} stale images (product name changed)`, {
+                cli: true,
+            });
         }
-        logger.cli(`      - ${totalCategoryImages} category banners`);
+        logger.info(`      - ${totalCategoryImages} category banners`, { cli: true });
 
         if (options.dryRun) {
             for (const {
@@ -159,13 +162,16 @@ class ImageProcessorImpl implements PostProcessor {
                 staleCount,
             } of productsNeedingImages) {
                 const staleInfo = staleCount > 0 ? ` (${staleCount} stale)` : "";
-                logger.cli(
-                    `    [DRY RUN] ${product.name}: ${missingCount} to generate${staleInfo}, ${cachedCount} cached`
+                logger.info(
+                    `    [DRY RUN] ${product.name}: ${missingCount} to generate${staleInfo}, ${cachedCount} cached`,
+                    { cli: true }
                 );
                 processed++;
             }
             for (const category of categoriesNeedingImages) {
-                logger.cli(`    [DRY RUN] Category ${category.name}: banner to generate`);
+                logger.info(`    [DRY RUN] Category ${category.name}: banner to generate`, {
+                    cli: true,
+                });
             }
             return {
                 name: this.name,
@@ -222,8 +228,9 @@ class ImageProcessorImpl implements PostProcessor {
 
         // Process all images with concurrency limiting
         if (imageTasks.length > 0) {
-            logger.cli(
-                `    Generating ${imageTasks.length} images (${maxConcurrency} parallel, ${imageProvider.name})...`
+            logger.info(
+                `    Generating ${imageTasks.length} images (${maxConcurrency} parallel, ${imageProvider.name})...`,
+                { cli: true }
             );
             const taskStartTime = Date.now();
 
@@ -231,8 +238,9 @@ class ImageProcessorImpl implements PostProcessor {
                 imageTasks.map((task, index) => async () => {
                     const shortName = this.truncateName(task.name);
                     const taskNum = index + 1;
-                    logger.cli(
-                        `      [${taskNum}/${imageTasks.length}] ${task.type === "category" ? "📁" : "📦"} ${shortName} (${task.view})`
+                    logger.info(
+                        `      [${taskNum}/${imageTasks.length}] ${task.type === "category" ? "📁" : "📦"} ${shortName} (${task.view})`,
+                        { cli: true }
                     );
 
                     try {
@@ -271,13 +279,14 @@ class ImageProcessorImpl implements PostProcessor {
 
             const successCount = results.filter((r) => r.success).length;
             const elapsed = ((Date.now() - taskStartTime) / 1000).toFixed(1);
-            logger.cli(
-                `    ✓ Generated ${successCount}/${imageTasks.length} images in ${elapsed}s`
+            logger.info(
+                `    ✓ Generated ${successCount}/${imageTasks.length} images in ${elapsed}s`,
+                { cli: true }
             );
         }
 
         // Now upload product images to Shopware (parallel across products)
-        logger.cli(`    Uploading product images to Shopware...`);
+        logger.info(`    Uploading product images to Shopware...`, { cli: true });
         let uploadedProducts = 0;
         const uploadLimiter = new ConcurrencyLimiter(3);
 
@@ -335,11 +344,11 @@ class ImageProcessorImpl implements PostProcessor {
             if (result.uploaded) uploadedProducts++;
         }
 
-        logger.cli(`    ✓ Uploaded images for ${uploadedProducts} products`);
+        logger.info(`    ✓ Uploaded images for ${uploadedProducts} products`, { cli: true });
 
         // Now upload category banners to Shopware (parallel)
         if (categoriesWithImages.length > 0) {
-            logger.cli(`    Uploading category banners to Shopware...`);
+            logger.info(`    Uploading category banners to Shopware...`, { cli: true });
             let uploadedCategories = 0;
             const categoriesToRebuild = new Set(categoriesNeedingImages.map((c) => c.id));
             const categoryLimiter = new ConcurrencyLimiter(3);
@@ -373,7 +382,9 @@ class ImageProcessorImpl implements PostProcessor {
             );
 
             uploadedCategories = categoryResults.filter(Boolean).length;
-            logger.cli(`    ✓ Uploaded banners for ${uploadedCategories} categories`);
+            logger.info(`    ✓ Uploaded banners for ${uploadedCategories} categories`, {
+                cli: true,
+            });
         }
 
         return {
@@ -424,7 +435,7 @@ class ImageProcessorImpl implements PostProcessor {
             await this.cleanupProductImages(context, productId, productName);
         }
         if (hasExistingImages && !shouldCleanup) {
-            logger.cli(`      ⊘ Product already has images in Shopware, skipped`);
+            logger.info(`      ⊘ Product already has images in Shopware, skipped`, { cli: true });
             return;
         }
 
@@ -572,9 +583,9 @@ class ImageProcessorImpl implements PostProcessor {
                             view: img.view,
                             error: errorText,
                         });
-                        logger.cli(
+                        logger.error(
                             `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`,
-                            "error"
+                            { cli: true }
                         );
                         return "error" as const;
                     }
@@ -582,13 +593,15 @@ class ImageProcessorImpl implements PostProcessor {
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
                     logger.error(`Failed to upload image after retries`, {
-                        mediaId: img.mediaId,
-                        view: img.view,
-                        error: message,
+                        data: {
+                            mediaId: img.mediaId,
+                            view: img.view,
+                            error: message,
+                        },
                     });
-                    logger.cli(
+                    logger.error(
                         `      ✗ ${shortName} (${img.view}) upload failed: ${message}`,
-                        "error"
+                        { cli: true }
                     );
                     return "error" as const;
                 }
@@ -604,11 +617,14 @@ class ImageProcessorImpl implements PostProcessor {
         const reusedMedia = mediaToLink.filter((m) => !m.isNew);
         const reusedCount = reusedMedia.length + duplicateCount;
         if (uploadedCount > 0 && reusedCount > 0) {
-            logger.cli(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`);
+            logger.info(
+                `      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`,
+                { cli: true }
+            );
         } else if (uploadedCount > 0) {
-            logger.cli(`      ✓ ${shortName}: ${uploadedCount} uploaded`);
+            logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded`, { cli: true });
         } else if (reusedCount > 0) {
-            logger.cli(`      ⊘ ${shortName}: ${reusedCount} images reused`);
+            logger.info(`      ⊘ ${shortName}: ${reusedCount} images reused`, { cli: true });
         }
     }
 
@@ -714,12 +730,12 @@ class ImageProcessorImpl implements PostProcessor {
                 const firstFolder = data.data?.[0];
                 if (firstFolder) {
                     this.productMediaFolderId = firstFolder.id;
-                    logger.cli(`    Found Product Media folder`);
+                    logger.info(`    Found Product Media folder`, { cli: true });
                     return this.productMediaFolderId;
                 }
             }
         } catch (error) {
-            logger.warn("Could not find Product Media folder", { error });
+            logger.warn("Could not find Product Media folder", { data: error });
         }
 
         return null;
@@ -770,7 +786,7 @@ class ImageProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.warn("Could not find Category Media folder", { error });
+            logger.warn("Could not find Category Media folder", { data: error });
         }
 
         return null;
@@ -836,7 +852,9 @@ class ImageProcessorImpl implements PostProcessor {
             );
         }
         if (existingCategoryMediaId && !shouldCleanup) {
-            logger.cli(`      ⊘ Category "${categoryName}" already has image, skipped`);
+            logger.info(`      ⊘ Category "${categoryName}" already has image, skipped`, {
+                cli: true,
+            });
             return false;
         }
 
@@ -934,9 +952,9 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         if (isExistingMedia) {
-            logger.cli(`      ⊘ Linked existing banner for "${categoryName}"`);
+            logger.info(`      ⊘ Linked existing banner for "${categoryName}"`, { cli: true });
         } else {
-            logger.cli(`      ✓ Uploaded banner for "${categoryName}"`);
+            logger.info(`      ✓ Uploaded banner for "${categoryName}"`, { cli: true });
         }
         return true;
     }
@@ -950,7 +968,9 @@ class ImageProcessorImpl implements PostProcessor {
         productName: string
     ): Promise<void> {
         if (!context.api) {
-            logger.cli(`      ⊘ ${this.truncateName(productName)}: cleanup skipped (no API)`);
+            logger.info(`      ⊘ ${this.truncateName(productName)}: cleanup skipped (no API)`, {
+                cli: true,
+            });
             return;
         }
 
@@ -978,8 +998,9 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         this.productsWithImages.delete(productId);
-        logger.cli(
-            `      ✓ ${this.truncateName(productName)}: cleaned up ${productMediaIds.length} images`
+        logger.info(
+            `      ✓ ${this.truncateName(productName)}: cleaned up ${productMediaIds.length} images`,
+            { cli: true }
         );
     }
 
@@ -993,7 +1014,9 @@ class ImageProcessorImpl implements PostProcessor {
         mediaId: string
     ): Promise<void> {
         if (!context.api) {
-            logger.cli(`      ⊘ Category "${categoryName}": cleanup skipped (no API)`);
+            logger.info(`      ⊘ Category "${categoryName}": cleanup skipped (no API)`, {
+                cli: true,
+            });
             return;
         }
 
@@ -1017,7 +1040,7 @@ class ImageProcessorImpl implements PostProcessor {
         }
 
         this.categoryMediaIds.delete(categoryId);
-        logger.cli(`      ✓ Cleared existing banner for "${categoryName}"`);
+        logger.info(`      ✓ Cleared existing banner for "${categoryName}"`, { cli: true });
     }
 
     /**
@@ -1103,7 +1126,9 @@ class ImageProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            logger.cli(`    [DRY RUN] Would delete images for products in SalesChannel`);
+            logger.info(`    [DRY RUN] Would delete images for products in SalesChannel`, {
+                cli: true,
+            });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -1127,12 +1152,12 @@ class ImageProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                logger.cli(`    No products found in SalesChannel`);
+                logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const productIds = products.map((p) => p.id);
-            logger.cli(`    Found ${productIds.length} products in SalesChannel`);
+            logger.info(`    Found ${productIds.length} products in SalesChannel`, { cli: true });
 
             // Step 2: Find all product_media entries for these products
             const productMedia = await context.api.searchEntities<{ id: string; mediaId: string }>(
@@ -1142,7 +1167,9 @@ class ImageProcessorImpl implements PostProcessor {
             );
 
             if (productMedia.length > 0) {
-                logger.cli(`    Found ${productMedia.length} product media entries`);
+                logger.info(`    Found ${productMedia.length} product media entries`, {
+                    cli: true,
+                });
 
                 // Collect media IDs before deleting product_media
                 const mediaIds = productMedia.map((pm) => pm.mediaId);
@@ -1151,7 +1178,9 @@ class ImageProcessorImpl implements PostProcessor {
                 const productMediaIds = productMedia.map((pm) => pm.id);
                 await context.api.deleteEntities("product_media", productMediaIds);
                 deleted += productMediaIds.length;
-                logger.cli(`    ✓ Deleted ${productMediaIds.length} product_media entries`);
+                logger.info(`    ✓ Deleted ${productMediaIds.length} product_media entries`, {
+                    cli: true,
+                });
 
                 // Step 4: Delete the actual media entities (only if not used elsewhere)
                 for (const mediaId of mediaIds) {
@@ -1163,7 +1192,7 @@ class ImageProcessorImpl implements PostProcessor {
                     }
                 }
             } else {
-                logger.cli(`    No product media found`);
+                logger.info(`    No product media found`, { cli: true });
             }
 
             // Step 5: Get SalesChannel to find root category
@@ -1209,7 +1238,10 @@ class ImageProcessorImpl implements PostProcessor {
                             payload: categoryUpdates,
                         },
                     });
-                    logger.cli(`    ✓ Cleared media from ${categoriesWithMedia.length} categories`);
+                    logger.info(
+                        `    ✓ Cleared media from ${categoriesWithMedia.length} categories`,
+                        { cli: true }
+                    );
                 }
             }
         } catch (error) {

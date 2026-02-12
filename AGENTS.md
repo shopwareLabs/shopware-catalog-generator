@@ -197,21 +197,21 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 
 **Expected times for 90 products (text generation only):**
 
-| Provider                | Processing    | Time    |
-| ----------------------- | ------------- | ------- |
-| OpenAI                  | Parallel (5x) | ~5 min  |
-| Pollinations (sk\_\*)   | Parallel (5x) | ~5 min  |
-| GitHub Models           | Limited (2x)  | ~10 min |
-| Pollinations (pk\_\*)   | Sequential    | ~13 min |
+| Provider              | Processing    | Time    |
+| --------------------- | ------------- | ------- |
+| OpenAI                | Parallel (5x) | ~5 min  |
+| Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
+| GitHub Models         | Limited (2x)  | ~10 min |
+| Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full generation with images (~270 images at 3 views per product):**
 
-| Provider                | Image Model   | Processing     | Time       |
-| ----------------------- | ------------- | -------------- | ---------- |
-| OpenAI                  | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
-| Pollinations (sk\_\*)   | flux          | Parallel (5x)  | ~15-20 min |
-| Pollinations (sk\_\*)   | turbo         | Parallel (5x)  | ~10-15 min |
-| Pollinations (pk\_\*)   | flux          | Limited (2x)   | ~40-50 min |
+| Provider              | Image Model   | Processing     | Time       |
+| --------------------- | ------------- | -------------- | ---------- |
+| OpenAI                | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
+| Pollinations (sk\_\*) | flux          | Parallel (5x)  | ~15-20 min |
+| Pollinations (sk\_\*) | turbo         | Parallel (5x)  | ~10-15 min |
+| Pollinations (pk\_\*) | flux          | Limited (2x)   | ~40-50 min |
 
 > Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~8-10s per image with 10 parallel requests.
 
@@ -314,12 +314,12 @@ interface TextProvider {
 
 **Provider concurrency settings:**
 
-| Provider               | maxConcurrency | Notes                           |
-| ---------------------- | -------------- | ------------------------------- |
-| OpenAI                 | 5              | High rate limits                |
-| GitHub Models          | 2              | 2 concurrent request limit      |
-| Pollinations (sk\_\*)  | 5              | Secret keys have no rate limits |
-| Pollinations (pk\_\*)  | 1              | Sequential processing           |
+| Provider              | maxConcurrency | Notes                           |
+| --------------------- | -------------- | ------------------------------- |
+| OpenAI                | 5              | High rate limits                |
+| GitHub Models         | 2              | 2 concurrent request limit      |
+| Pollinations (sk\_\*) | 5              | Secret keys have no rate limits |
+| Pollinations (pk\_\*) | 1              | Sequential processing           |
 
 Factory in `providers/factory.ts` creates providers from env vars:
 
@@ -1126,21 +1126,24 @@ Handles GitHub Models' 10 requests/60s limit.
 
 ### Logging
 
-**Convention: Never use `console.*` in library modules.** Use `logger.cli()` for user-facing output and `logger.info/warn/error()` for diagnostics.
+**Convention: Never use `console.*` in library modules.** Use `logger.info/warn/error("msg", { cli: true })` for user-facing output and `logger.info/warn/error()` for diagnostics.
 
 ```typescript
 import { logger } from "./utils/index.js";
 
 // User-facing output (file + console, respects MCP mode)
-logger.cli("✓ Created SalesChannel"); // info level
-logger.cli("⚠ Rate limited", "warn"); // warn level
-logger.cli("✗ Failed", "error"); // error level
+logger.info("✓ Created SalesChannel", { cli: true });
+logger.warn("⚠ Rate limited", { cli: true });
+logger.error("✗ Failed", { cli: true });
 
 // Diagnostic logging (file only)
-logger.debug("Debug info", { data });
+logger.debug("Debug info", { data: someData });
 logger.info("Info message");
-logger.warn("Recoverable issue");
-logger.error("Operation failed", { error });
+logger.warn("Recoverable issue", { data: context });
+logger.error("Operation failed", { data: error });
+
+// File + console with data
+logger.info("Created entity", { cli: true, data: { id, name } });
 
 // Shopware API errors (file + console unless MCP mode)
 logger.apiError("endpoint", 500, response);

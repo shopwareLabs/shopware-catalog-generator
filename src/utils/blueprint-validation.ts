@@ -164,7 +164,7 @@ function fixDuplicateProductNames(
             if (product) {
                 const newName = `${name} (${i + 1})`;
                 if (logFixes) {
-                    logger.cli(`  Fixed duplicate: "${name}" → "${newName}"`);
+                    logger.info(`  Fixed duplicate: "${name}" → "${newName}"`, { cli: true });
                 }
                 product.name = newName;
                 fixCount++;
@@ -196,7 +196,7 @@ function validateProducts(
         if (autoFix) {
             fixesApplied = fixDuplicateProductNames(blueprint, duplicateProducts, logFixes);
             if (logFixes) {
-                logger.cli(`  ✓ Fixed ${fixesApplied} duplicate product names`);
+                logger.info(`  ✓ Fixed ${fixesApplied} duplicate product names`, { cli: true });
             }
         } else {
             for (const [name, ids] of duplicateProducts) {
@@ -623,7 +623,7 @@ export function validateBlueprint(
     const { autoFix = false, logFixes = true } = options;
 
     if (logFixes && autoFix) {
-        logger.cli("Validating blueprint...");
+        logger.info("Validating blueprint...", { cli: true });
     }
 
     // Run all validations

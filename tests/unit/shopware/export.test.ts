@@ -4,37 +4,58 @@ import type { ExportValidation, SalesChannelFull } from "../../../src/types/inde
 
 import { ShopwareExporter } from "../../../src/shopware/export.js";
 
-// Mock API responses
-interface MockApiResponse<T> {
-    data: T;
-    status: number;
-    ok: boolean;
+/**
+ * Create a mock AdminApiClient with invoke() support.
+ */
+function createMockAdminClient() {
+    const responses: Array<unknown> = [];
+    let callIndex = 0;
+
+    const invoke = mock(async (_operation: string, _params?: unknown): Promise<unknown> => {
+        const responseBody = responses[callIndex] ?? responses[responses.length - 1];
+        callIndex++;
+        // invoke() returns { data: responseBody, status: 200 }
+        return { data: responseBody };
+    });
+
+    return {
+        invoke,
+        getSessionData: () => ({ accessToken: "test-token", expirationTime: Date.now() + 3600000 }),
+
+        /** Set a single mock response body (will be wrapped in { data: body } by invoke) */
+        setMockResponse(response: unknown) {
+            responses.length = 0;
+            responses.push(response);
+            callIndex = 0;
+        },
+
+        /** Set sequential mock response bodies (each wrapped in { data: body } by invoke) */
+        setMockResponses(newResponses: unknown[]) {
+            responses.length = 0;
+            responses.push(...newResponses);
+            callIndex = 0;
+        },
+    };
 }
 
 /**
  * Create a testable exporter with mocked API client
  */
 class TestableExporter extends ShopwareExporter {
-    public mockPost: ReturnType<typeof mock>;
+    public mockAdminClient: ReturnType<typeof createMockAdminClient>;
 
     constructor() {
-        super();
-        this.mockPost = mock(() => Promise.resolve({ data: { data: [] }, ok: true, status: 200 }));
-        // Override the apiClient.post method
-        (this.apiClient as unknown as { post: ReturnType<typeof mock> }).post = this.mockPost;
+        const mockClient = createMockAdminClient();
+        super(mockClient as never);
+        this.mockAdminClient = mockClient;
     }
 
-    setMockResponse<T>(response: MockApiResponse<T>): void {
-        this.mockPost.mockResolvedValue(response);
+    setMockResponse(response: unknown): void {
+        this.mockAdminClient.setMockResponse(response);
     }
 
-    setMockResponses(responses: MockApiResponse<unknown>[]): void {
-        let callIndex = 0;
-        this.mockPost.mockImplementation(() => {
-            const response = responses[callIndex] || responses[responses.length - 1];
-            callIndex++;
-            return Promise.resolve(response);
-        });
+    setMockResponses(responses: unknown[]): void {
+        this.mockAdminClient.setMockResponses(responses);
     }
 }
 
@@ -56,36 +77,33 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "cat-1",
-                            name: "Furniture",
-                            description: "All furniture items",
-                            parentId: "root-123",
-                            childCount: 2,
-                            mediaId: null,
-                        },
-                        {
-                            id: "cat-2",
-                            name: "Beds",
-                            description: "Comfortable beds",
-                            parentId: "cat-1",
-                            childCount: 0,
-                            mediaId: null,
-                        },
-                        {
-                            id: "cat-3",
-                            name: "Tables",
-                            description: "Wooden tables",
-                            parentId: "cat-1",
-                            childCount: 0,
-                            mediaId: "media-123",
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "cat-1",
+                        name: "Furniture",
+                        description: "All furniture items",
+                        parentId: "root-123",
+                        childCount: 2,
+                        mediaId: null,
+                    },
+                    {
+                        id: "cat-2",
+                        name: "Beds",
+                        description: "Comfortable beds",
+                        parentId: "cat-1",
+                        childCount: 0,
+                        mediaId: null,
+                    },
+                    {
+                        id: "cat-3",
+                        name: "Tables",
+                        description: "Wooden tables",
+                        parentId: "cat-1",
+                        childCount: 0,
+                        mediaId: "media-123",
+                    },
+                ],
+                total: 3,
             });
 
             const categories = await exporter.exportCategories("root-123", validation);
@@ -109,28 +127,25 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "cat-1",
-                            name: "Empty Category",
-                            description: null,
-                            parentId: "root-123",
-                            childCount: 0,
-                            mediaId: null,
-                        },
-                        {
-                            id: "cat-2",
-                            name: "Whitespace Only",
-                            description: "   ",
-                            parentId: "root-123",
-                            childCount: 0,
-                            mediaId: null,
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "cat-1",
+                        name: "Empty Category",
+                        description: null,
+                        parentId: "root-123",
+                        childCount: 0,
+                        mediaId: null,
+                    },
+                    {
+                        id: "cat-2",
+                        name: "Whitespace Only",
+                        description: "   ",
+                        parentId: "root-123",
+                        childCount: 0,
+                        mediaId: null,
+                    },
+                ],
+                total: 2,
             });
 
             const categories = await exporter.exportCategories("root-123", validation);
@@ -151,20 +166,17 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "cat-1",
-                            name: "  Extra   Spaces  ",
-                            description: "Test",
-                            parentId: "root-123",
-                            childCount: 0,
-                            mediaId: null,
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "cat-1",
+                        name: "  Extra   Spaces  ",
+                        description: "Test",
+                        parentId: "root-123",
+                        childCount: 0,
+                        mediaId: null,
+                    },
+                ],
+                total: 1,
             });
 
             const categories = await exporter.exportCategories("root-123", validation);
@@ -172,7 +184,7 @@ describe("ShopwareExporter", () => {
             expect(categories[0]?.name).toBe("Extra Spaces");
         });
 
-        test("returns empty array on API error", async () => {
+        test("returns empty array when no data", async () => {
             const validation: ExportValidation = {
                 categoriesWithoutDescription: 0,
                 categoriesWithImages: 0,
@@ -181,11 +193,7 @@ describe("ShopwareExporter", () => {
                 propertyGroupsWithoutOptions: 0,
             };
 
-            exporter.setMockResponse({
-                data: { error: "Not found" },
-                ok: false,
-                status: 404,
-            });
+            exporter.setMockResponse({ data: undefined, total: 0 });
 
             const categories = await exporter.exportCategories("root-123", validation);
 
@@ -204,20 +212,17 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "Oak Table",
-                            description: "Beautiful oak table",
-                            stock: 10,
-                            price: [{ gross: 299.99, net: 251.25 }],
-                            options: [{ id: "opt-1", name: "Brown", colorHexCode: "#8B4513" }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "Oak Table",
+                        description: "Beautiful oak table",
+                        stock: 10,
+                        price: [{ gross: 299.99, net: 251.25 }],
+                        options: [{ id: "opt-1", name: "Brown", colorHexCode: "#8B4513" }],
+                    },
+                ],
+                total: 1,
             });
 
             const products = await exporter.exportProductsInCategory("cat-1", "Tables", validation);
@@ -243,19 +248,16 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "Mystery Product",
-                            description: null,
-                            stock: 5,
-                            price: [{ gross: 50, net: 42 }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "Mystery Product",
+                        description: null,
+                        stock: 5,
+                        price: [{ gross: 50, net: 42 }],
+                    },
+                ],
+                total: 1,
             });
 
             const products = await exporter.exportProductsInCategory(
@@ -280,26 +282,23 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "Free Item",
-                            description: "A free product",
-                            stock: 100,
-                            price: [{ gross: 0, net: 0 }],
-                        },
-                        {
-                            id: "prod-2",
-                            name: "No Price",
-                            description: "Missing price",
-                            stock: 50,
-                            price: [],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "Free Item",
+                        description: "A free product",
+                        stock: 100,
+                        price: [{ gross: 0, net: 0 }],
+                    },
+                    {
+                        id: "prod-2",
+                        name: "No Price",
+                        description: "Missing price",
+                        stock: 50,
+                        price: [],
+                    },
+                ],
+                total: 2,
             });
 
             const products = await exporter.exportProductsInCategory("cat-1", "Misc", validation);
@@ -319,19 +318,16 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "Negative Stock",
-                            description: "Test",
-                            stock: -5,
-                            price: [{ gross: 10, net: 8.4 }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "Negative Stock",
+                        description: "Test",
+                        stock: -5,
+                        price: [{ gross: 10, net: 8.4 }],
+                    },
+                ],
+                total: 1,
             });
 
             const products = await exporter.exportProductsInCategory("cat-1", "Test", validation);
@@ -349,20 +345,17 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "HTML Product",
-                            description:
-                                "<p>This is a <strong>bold</strong> description with &nbsp; entities.</p>",
-                            stock: 10,
-                            price: [{ gross: 99.99, net: 84 }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "HTML Product",
+                        description:
+                            "<p>This is a <strong>bold</strong> description with &nbsp; entities.</p>",
+                        stock: 10,
+                        price: [{ gross: 99.99, net: 84 }],
+                    },
+                ],
+                total: 1,
             });
 
             const products = await exporter.exportProductsInCategory("cat-1", "Test", validation);
@@ -380,19 +373,16 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            name: "Precision Price",
-                            description: "Test",
-                            stock: 1,
-                            price: [{ gross: 19.999999, net: 16.8 }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "prod-1",
+                        name: "Precision Price",
+                        description: "Test",
+                        stock: 1,
+                        price: [{ gross: 19.999999, net: 16.8 }],
+                    },
+                ],
+                total: 1,
             });
 
             const products = await exporter.exportProductsInCategory("cat-1", "Test", validation);
@@ -412,34 +402,31 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "pg-1",
-                            name: "Color",
-                            description: "Product colors",
-                            displayType: "color",
-                            sortingType: "alphanumeric",
-                            options: [
-                                { id: "opt-1", name: "Red", colorHexCode: "#FF0000", position: 1 },
-                                { id: "opt-2", name: "Blue", colorHexCode: "#0000FF", position: 2 },
-                            ],
-                        },
-                        {
-                            id: "pg-2",
-                            name: "Size",
-                            description: null,
-                            displayType: "text",
-                            sortingType: "alphanumeric",
-                            options: [
-                                { id: "opt-3", name: "Small", position: 1 },
-                                { id: "opt-4", name: "Large", position: 2 },
-                            ],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "pg-1",
+                        name: "Color",
+                        description: "Product colors",
+                        displayType: "color",
+                        sortingType: "alphanumeric",
+                        options: [
+                            { id: "opt-1", name: "Red", colorHexCode: "#FF0000", position: 1 },
+                            { id: "opt-2", name: "Blue", colorHexCode: "#0000FF", position: 2 },
+                        ],
+                    },
+                    {
+                        id: "pg-2",
+                        name: "Size",
+                        description: null,
+                        displayType: "text",
+                        sortingType: "alphanumeric",
+                        options: [
+                            { id: "opt-3", name: "Small", position: 1 },
+                            { id: "opt-4", name: "Large", position: 2 },
+                        ],
+                    },
+                ],
+                total: 2,
             });
 
             const groups = await exporter.exportPropertyGroups(validation);
@@ -465,28 +452,25 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "pg-1",
-                            name: "Empty Group",
-                            description: "No options",
-                            displayType: "text",
-                            sortingType: "alphanumeric",
-                            options: [],
-                        },
-                        {
-                            id: "pg-2",
-                            name: "Null Options",
-                            description: "Null",
-                            displayType: "text",
-                            sortingType: "alphanumeric",
-                            options: null,
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "pg-1",
+                        name: "Empty Group",
+                        description: "No options",
+                        displayType: "text",
+                        sortingType: "alphanumeric",
+                        options: [],
+                    },
+                    {
+                        id: "pg-2",
+                        name: "Null Options",
+                        description: "Null",
+                        displayType: "text",
+                        sortingType: "alphanumeric",
+                        options: null,
+                    },
+                ],
+                total: 2,
             });
 
             const groups = await exporter.exportPropertyGroups(validation);
@@ -505,34 +489,31 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "pg-1",
-                            name: "Unknown Type",
-                            description: "Test",
-                            displayType: "unknown",
-                            sortingType: "alphanumeric",
-                            options: [{ id: "opt-1", name: "Option", position: 1 }],
-                        },
-                        {
-                            id: "pg-2",
-                            name: "Image Type",
-                            description: "Test",
-                            displayType: "IMAGE",
-                            sortingType: "alphanumeric",
-                            options: [{ id: "opt-2", name: "Option", position: 1 }],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "pg-1",
+                        name: "Unknown Type",
+                        description: "Test",
+                        displayType: "unknown",
+                        sortingType: "alphanumeric",
+                        options: [{ id: "opt-1", name: "Option", position: 1 }],
+                    },
+                    {
+                        id: "pg-2",
+                        name: "Image Type",
+                        description: "Test",
+                        displayType: "IMAGE",
+                        sortingType: "alphanumeric",
+                        options: [{ id: "opt-2", name: "Option", position: 1 }],
+                    },
+                ],
+                total: 2,
             });
 
             const groups = await exporter.exportPropertyGroups(validation);
 
-            expect(groups[0]?.displayType).toBe("text"); // fallback for unknown
-            expect(groups[1]?.displayType).toBe("image"); // normalized from IMAGE
+            expect(groups[0]?.displayType).toBe("text");
+            expect(groups[1]?.displayType).toBe("image");
         });
 
         test("defaults colorHexCode for color type without hex", async () => {
@@ -545,22 +526,17 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponse({
-                data: {
-                    data: [
-                        {
-                            id: "pg-1",
-                            name: "Color",
-                            description: "Colors",
-                            displayType: "color",
-                            sortingType: "alphanumeric",
-                            options: [
-                                { id: "opt-1", name: "Black", position: 1 }, // No colorHexCode
-                            ],
-                        },
-                    ],
-                },
-                ok: true,
-                status: 200,
+                data: [
+                    {
+                        id: "pg-1",
+                        name: "Color",
+                        description: "Colors",
+                        displayType: "color",
+                        sortingType: "alphanumeric",
+                        options: [{ id: "opt-1", name: "Black", position: 1 }],
+                    },
+                ],
+                total: 1,
             });
 
             const groups = await exporter.exportPropertyGroups(validation);
@@ -584,57 +560,47 @@ describe("ShopwareExporter", () => {
                 currencyId: "curr-1",
             };
 
-            // Set up sequential mock responses
             exporter.setMockResponses([
-                // Categories response
+                // Categories
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "cat-1",
-                                name: "Beds",
-                                description: "Comfortable beds",
-                                parentId: "root-123",
-                                childCount: 0,
-                                mediaId: null,
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "cat-1",
+                            name: "Beds",
+                            description: "Comfortable beds",
+                            parentId: "root-123",
+                            childCount: 0,
+                            mediaId: null,
+                        },
+                    ],
+                    total: 1,
                 },
-                // Products response
+                // Products
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "prod-1",
-                                name: "King Bed",
-                                description: "Luxurious king bed",
-                                stock: 5,
-                                price: [{ gross: 999.99, net: 840 }],
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "prod-1",
+                            name: "King Bed",
+                            description: "Luxurious king bed",
+                            stock: 5,
+                            price: [{ gross: 999.99, net: 840 }],
+                        },
+                    ],
+                    total: 1,
                 },
-                // Property groups response
+                // Property groups
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "pg-1",
-                                name: "Material",
-                                description: "Bed materials",
-                                displayType: "text",
-                                sortingType: "alphanumeric",
-                                options: [{ id: "opt-1", name: "Wood", position: 1 }],
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "pg-1",
+                            name: "Material",
+                            description: "Bed materials",
+                            displayType: "text",
+                            sortingType: "alphanumeric",
+                            options: [{ id: "opt-1", name: "Wood", position: 1 }],
+                        },
+                    ],
+                    total: 1,
                 },
             ]);
 
@@ -663,55 +629,46 @@ describe("ShopwareExporter", () => {
             };
 
             exporter.setMockResponses([
-                // Categories - one without description, one with image
+                // Categories
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "cat-1",
-                                name: "No Desc",
-                                description: null,
-                                parentId: "root-123",
-                                childCount: 0,
-                                mediaId: "media-1",
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "cat-1",
+                            name: "No Desc",
+                            description: null,
+                            parentId: "root-123",
+                            childCount: 0,
+                            mediaId: "media-1",
+                        },
+                    ],
+                    total: 1,
                 },
-                // Products - one without description, one with zero price
+                // Products
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "prod-1",
-                                name: "No Desc Product",
-                                description: null,
-                                stock: 1,
-                                price: [{ gross: 0, net: 0 }],
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "prod-1",
+                            name: "No Desc Product",
+                            description: null,
+                            stock: 1,
+                            price: [{ gross: 0, net: 0 }],
+                        },
+                    ],
+                    total: 1,
                 },
-                // Property groups - one without options
+                // Property groups
                 {
-                    data: {
-                        data: [
-                            {
-                                id: "pg-1",
-                                name: "Empty",
-                                description: "No options",
-                                displayType: "text",
-                                sortingType: "alphanumeric",
-                                options: [],
-                            },
-                        ],
-                    },
-                    ok: true,
-                    status: 200,
+                    data: [
+                        {
+                            id: "pg-1",
+                            name: "Empty",
+                            description: "No options",
+                            displayType: "text",
+                            sortingType: "alphanumeric",
+                            options: [],
+                        },
+                    ],
+                    total: 1,
                 },
             ]);
 

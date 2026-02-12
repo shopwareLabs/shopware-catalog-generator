@@ -71,8 +71,10 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         const landingPageName = this.getLandingPageName(context);
 
         if (options.dryRun) {
-            logger.cli(`    [DRY RUN] Would create CMS layout "${cmsPageName}"`);
-            logger.cli(`    [DRY RUN] Would create Landing Page "${landingPageName}"`);
+            logger.info(`    [DRY RUN] Would create CMS layout "${cmsPageName}"`, { cli: true });
+            logger.info(`    [DRY RUN] Would create Landing Page "${landingPageName}"`, {
+                cli: true,
+            });
             return {
                 name: this.name,
                 processed: 1,
@@ -93,9 +95,11 @@ export abstract class BaseCmsProcessor implements PostProcessor {
                     errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(`    ✓ Created CMS layout "${this.pageFixture.name}"`);
+                logger.info(`    ✓ Created CMS layout "${this.pageFixture.name}"`, { cli: true });
             } else {
-                logger.cli(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`);
+                logger.info(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`, {
+                    cli: true,
+                });
             }
 
             // Step 2: Check if Landing Page already exists for this SalesChannel
@@ -108,7 +112,9 @@ export abstract class BaseCmsProcessor implements PostProcessor {
                     errors.push(`Failed to create Landing Page "${landingPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
-                logger.cli(`    ✓ Created Landing Page "${this.pageFixture.name}"`);
+                logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, {
+                    cli: true,
+                });
             } else {
                 await this.ensureSalesChannelAssociated(
                     context,
@@ -146,8 +152,12 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         const cmsPageName = this.getCmsPageName(context);
 
         if (context.options.dryRun) {
-            logger.cli(`    [DRY RUN] Would delete "${this.pageFixture.name}" landing page`);
-            logger.cli(`    [DRY RUN] Would delete "${this.pageFixture.name}" CMS layout`);
+            logger.info(`    [DRY RUN] Would delete "${this.pageFixture.name}" landing page`, {
+                cli: true,
+            });
+            logger.info(`    [DRY RUN] Would delete "${this.pageFixture.name}" CMS layout`, {
+                cli: true,
+            });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -155,29 +165,47 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         const errors: string[] = [];
 
         // Delete the store-scoped landing page
-        const landingPageId = await this.findLandingPageByName(context, landingPageName);
-        if (landingPageId) {
-            const lpSuccess = await this.deleteEntity(context, "landing-page", landingPageId);
-            if (lpSuccess) {
-                logger.cli(`    ✓ Deleted "${this.pageFixture.name}" landing page`);
-                deleted++;
+        try {
+            const landingPageId = await this.findLandingPageByName(context, landingPageName);
+            if (landingPageId) {
+                const lpSuccess = await this.deleteEntity(context, "landing-page", landingPageId);
+                if (lpSuccess) {
+                    logger.info(`    ✓ Deleted "${this.pageFixture.name}" landing page`, {
+                        cli: true,
+                    });
+                    deleted++;
+                } else {
+                    errors.push(`Failed to delete landing page "${landingPageName}"`);
+                }
             } else {
-                errors.push(`Failed to delete landing page "${landingPageName}"`);
+                logger.info(`    ⊘ "${this.pageFixture.name}" landing page not found, skipping`, {
+                    cli: true,
+                });
             }
-        } else {
-            logger.cli(`    ⊘ "${this.pageFixture.name}" landing page not found, skipping`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Landing page lookup failed: ${message}`);
+            logger.error(`    ✗ ${message}`, { cli: true });
         }
 
         // Delete the store-scoped CMS page
-        const cmsPageId = await this.findCmsPageByName(context, cmsPageName);
-        if (cmsPageId) {
-            const cmsSuccess = await this.deleteEntity(context, "cms-page", cmsPageId);
-            if (cmsSuccess) {
-                logger.cli(`    ✓ Deleted "${this.pageFixture.name}" CMS layout`);
-                deleted++;
-            } else {
-                errors.push(`Failed to delete CMS page "${cmsPageName}"`);
+        try {
+            const cmsPageId = await this.findCmsPageByName(context, cmsPageName);
+            if (cmsPageId) {
+                const cmsSuccess = await this.deleteEntity(context, "cms-page", cmsPageId);
+                if (cmsSuccess) {
+                    logger.info(`    ✓ Deleted "${this.pageFixture.name}" CMS layout`, {
+                        cli: true,
+                    });
+                    deleted++;
+                } else {
+                    errors.push(`Failed to delete CMS page "${cmsPageName}"`);
+                }
             }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`CMS page lookup failed: ${message}`);
+            logger.error(`    ✗ ${message}`, { cli: true });
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
@@ -276,25 +304,24 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         context: PostProcessorContext,
         name: string
     ): Promise<string | null> {
-        try {
-            interface CmsPageResponse {
-                data?: Array<{ id: string }>;
-            }
-
-            const response = await apiPost(context, "search/cms-page", {
-                filter: [{ type: "equals", field: "name", value: name }],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as CmsPageResponse;
-                return data.data?.[0]?.id || null;
-            }
-        } catch (error) {
-            logger.warn(`Failed to find CMS page "${name}"`, { error });
+        interface CmsPageResponse {
+            data?: Array<{ id: string }>;
         }
 
-        return null;
+        const response = await apiPost(context, "search/cms-page", {
+            filter: [{ type: "equals", field: "name", value: name }],
+            limit: 1,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(
+                `Search for CMS page "${name}" failed: ${response.status} - ${errorText}`
+            );
+        }
+
+        const data = (await response.json()) as CmsPageResponse;
+        return data.data?.[0]?.id || null;
     }
 
     // =========================================================================
@@ -352,25 +379,24 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         context: PostProcessorContext,
         name: string
     ): Promise<string | null> {
-        try {
-            interface LandingPageResponse {
-                data?: Array<{ id: string }>;
-            }
-
-            const response = await apiPost(context, "search/landing-page", {
-                filter: [{ type: "equals", field: "name", value: name }],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as LandingPageResponse;
-                return data.data?.[0]?.id || null;
-            }
-        } catch (error) {
-            logger.warn(`Failed to find Landing Page "${name}"`, { error });
+        interface LandingPageResponse {
+            data?: Array<{ id: string }>;
         }
 
-        return null;
+        const response = await apiPost(context, "search/landing-page", {
+            filter: [{ type: "equals", field: "name", value: name }],
+            limit: 1,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(
+                `Search for Landing Page "${name}" failed: ${response.status} - ${errorText}`
+            );
+        }
+
+        const data = (await response.json()) as LandingPageResponse;
+        return data.data?.[0]?.id || null;
     }
 
     /**
@@ -434,7 +460,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
                 }
             }
         } catch (error) {
-            logger.warn(`Failed to get Landing Page with associations`, { error });
+            logger.warn(`Failed to get Landing Page with associations`, { data: error });
         }
 
         return null;
@@ -469,7 +495,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
 
             return true;
         } catch (error) {
-            logger.warn(`Failed to add SalesChannel to Landing Page`, { error });
+            logger.warn(`Failed to add SalesChannel to Landing Page`, { data: error });
             return false;
         }
     }
@@ -487,12 +513,14 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         const landingPageData = await this.getLandingPageWithSalesChannels(context, landingPageId);
 
         if (!landingPageData) {
-            logger.cli(`    ⊘ Landing Page "${pageName}" already exists`);
+            logger.info(`    ⊘ Landing Page "${pageName}" already exists`, { cli: true });
             return;
         }
 
         if (landingPageData.salesChannelIds.includes(context.salesChannelId)) {
-            logger.cli(`    ⊘ Landing Page "${pageName}" already includes SalesChannel`);
+            logger.info(`    ⊘ Landing Page "${pageName}" already includes SalesChannel`, {
+                cli: true,
+            });
             return;
         }
 
@@ -506,7 +534,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
             return;
         }
 
-        logger.cli(`    ✓ Added SalesChannel to Landing Page "${pageName}"`);
+        logger.info(`    ✓ Added SalesChannel to Landing Page "${pageName}"`, { cli: true });
     }
 
     /**
@@ -538,7 +566,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
 
             return true;
         } catch (error) {
-            logger.warn(`Failed to remove SalesChannel from Landing Page`, { error });
+            logger.warn(`Failed to remove SalesChannel from Landing Page`, { data: error });
             return false;
         }
     }
@@ -613,7 +641,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
             });
             return response.ok || response.status === 204;
         } catch (error) {
-            logger.warn(`Failed to delete ${entityType}/${entityId}`, { error });
+            logger.warn(`Failed to delete ${entityType}/${entityId}`, { data: error });
             return false;
         }
     }

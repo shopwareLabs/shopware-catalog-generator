@@ -1,124 +1,54 @@
+import type { AdminApiClient, Schemas } from "./admin-client.js";
+import type { SearchResult, SyncOperation } from "./api-types.js";
+
 import {
     capitalizeString as capitalizeStringUtil,
     generateAccessKey as generateAccessKeyUtil,
     logger,
 } from "../utils/index.js";
 
-/**
- * Response wrapper to match axios-like interface
- */
-interface ApiResponse<T = unknown> {
-    data: T;
-    status: number;
-    ok: boolean;
-}
+import { createShopwareAdminClient } from "./admin-client.js";
 
 /**
- * Simple fetch-based API client
- */
-class FetchClient {
-    private baseURL: string = "";
-    private headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-    };
-
-    setBaseURL(url: string): void {
-        this.baseURL = url.endsWith("/") ? url : `${url}/`;
-    }
-
-    setAuthHeader(token: string): void {
-        this.headers.Authorization = `Bearer ${token}`;
-    }
-
-    clearAuthHeader(): void {
-        delete this.headers.Authorization;
-    }
-
-    private async request<T>(
-        method: string,
-        endpoint: string,
-        body?: unknown,
-        customHeaders?: Record<string, string>
-    ): Promise<ApiResponse<T>> {
-        const url = `${this.baseURL}${endpoint}`;
-        const headers = { ...this.headers, ...customHeaders };
-
-        const options: RequestInit = {
-            method,
-            headers,
-        };
-
-        if (body !== undefined) {
-            if (body instanceof Buffer || body instanceof Uint8Array) {
-                options.body = body;
-            } else {
-                options.body = JSON.stringify(body);
-            }
-        }
-
-        const response = await fetch(url, options);
-
-        let data: T;
-        const contentType = response.headers.get("content-type") || "";
-
-        if (contentType.includes("application/json")) {
-            data = (await response.json()) as T;
-        } else {
-            data = (await response.text()) as unknown as T;
-        }
-
-        return {
-            data,
-            status: response.status,
-            ok: response.ok,
-        };
-    }
-
-    async post<T = unknown>(
-        endpoint: string,
-        body?: unknown,
-        options?: { headers?: Record<string, string> }
-    ): Promise<ApiResponse<T>> {
-        return this.request<T>("POST", endpoint, body, options?.headers);
-    }
-
-    async get<T = unknown>(endpoint: string): Promise<ApiResponse<T>> {
-        return this.request<T>("GET", endpoint);
-    }
-
-    async delete<T = unknown>(endpoint: string): Promise<ApiResponse<T>> {
-        return this.request<T>("DELETE", endpoint);
-    }
-
-    async patch<T = unknown>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
-        return this.request<T>("PATCH", endpoint, body);
-    }
-}
-
-/**
- * Base Shopware API client with authentication
+ * Base Shopware API client using the official @shopware/api-client.
+ *
+ * Authentication is handled by the official client automatically.
+ * Create via authenticateWithClientCredentials() or authenticateWithUserCredentials(),
+ * or pass a pre-configured AdminApiClient to the constructor.
+ *
+ * Uses the frontends pattern for all API calls:
+ *   const { data } = await this.getClient().invoke(operationName, { body });
+ *   const response = data as SearchResult<Schemas["Entity"]>;
  */
 export class ShopwareClient {
-    public apiClient: FetchClient;
+    protected client: AdminApiClient | null;
     public envPath: string | undefined;
-    public authenticationType: string | undefined;
 
-    private apiClientId: string | undefined;
-    private apiClientSecret: string | undefined;
-    protected apiClientAccessToken: string | null | undefined;
+    constructor(client?: AdminApiClient) {
+        this.client = client ?? null;
+    }
 
-    /** User credentials for token refresh (user auth only) */
-    private userCredentials: { username: string; password: string } | undefined;
+    /**
+     * Get the underlying AdminApiClient.
+     * Throws if not authenticated.
+     */
+    protected getClient(): AdminApiClient {
+        if (!this.client) {
+            throw new Error(
+                "ShopwareClient is not authenticated. Call authenticateWithClientCredentials() or authenticateWithUserCredentials() first."
+            );
+        }
+        return this.client;
+    }
 
-    /** Token expiration timestamp (in milliseconds since epoch) */
-    private tokenExpiresAt: number = 0;
-
-    /** Buffer time before expiration to refresh (5 minutes) */
-    private static readonly TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-
-    constructor() {
-        this.apiClient = new FetchClient();
+    /**
+     * Execute the sync endpoint with typed payload.
+     * GenericRecord from @shopware/api-client omits boolean, but the Shopware API
+     * fully supports it for fields like active, visible, private, etc.
+     */
+    protected async sync(ops: SyncOperation[]): Promise<void> {
+        // @ts-expect-error GenericRecord omits boolean; Shopware API accepts it
+        await this.getClient().invoke("sync post /_action/sync", { body: ops });
     }
 
     /** Capitalize first letter of string */
@@ -128,63 +58,21 @@ export class ShopwareClient {
 
     /** Check if client is authenticated */
     isAuthenticated(): boolean {
-        return !!this.apiClientAccessToken;
+        return this.client !== null;
     }
 
     /**
-     * Get a fresh access token, refreshing if needed
-     * This should be called before each API request in long-running operations
+     * Get a fresh access token from the session.
+     * The official client handles token refresh automatically.
      */
     async getAccessToken(): Promise<string> {
-        // Check if token is expired or about to expire
-        if (this.isTokenExpired()) {
-            logger.info("    Token expired or expiring soon, refreshing...");
-            await this.refreshToken();
-        }
-        return this.apiClientAccessToken || "";
+        if (!this.client) return "";
+        return this.client.getSessionData().accessToken || "";
     }
 
     /**
-     * Check if the token is expired or will expire soon
-     */
-    private isTokenExpired(): boolean {
-        if (!this.apiClientAccessToken) {
-            return true;
-        }
-        const now = Date.now();
-        return now >= this.tokenExpiresAt - ShopwareClient.TOKEN_REFRESH_BUFFER_MS;
-    }
-
-    /**
-     * Refresh the authentication token.
-     * Re-authenticates using the same method and credentials used initially.
-     */
-    private async refreshToken(): Promise<boolean> {
-        const envPath = this.envPath || "http://localhost:8000";
-
-        if (this.authenticationType === "client") {
-            // Re-authenticate with client credentials (or dev fallback if none stored)
-            return this.authenticateWithClientCredentials(
-                envPath,
-                this.apiClientId,
-                this.apiClientSecret
-            );
-        }
-
-        if (this.authenticationType === "user" && this.userCredentials) {
-            return this.authenticateWithUserCredentials(
-                envPath,
-                this.userCredentials.username,
-                this.userCredentials.password
-            );
-        }
-
-        logger.warn("Cannot refresh token: authentication method not supported for refresh");
-        return false;
-    }
-
-    /**
-     * Authenticate with client credentials (integration)
+     * Authenticate with client credentials (integration).
+     * Creates an AdminApiClient configured for client_credentials grant.
      */
     async authenticateWithClientCredentials(
         envPath: string,
@@ -192,56 +80,24 @@ export class ShopwareClient {
         clientSecret: string | undefined
     ): Promise<boolean> {
         this.envPath = envPath || "http://localhost:8000";
-        this.apiClientId = clientId;
-        this.apiClientSecret = clientSecret;
-        this.authenticationType = "client";
 
-        this.apiClient = new FetchClient();
-        this.apiClient.setBaseURL(`${this.envPath}/api/`);
-
-        let authPayload: Record<string, string>;
-
-        if (this.apiClientId && this.apiClientSecret) {
-            authPayload = {
-                grant_type: "client_credentials",
-                client_id: this.apiClientId,
-                client_secret: this.apiClientSecret,
-                scope: "write",
-            };
-        } else {
-            // Fallback for dev mode to standard admin user
-            authPayload = {
-                client_id: "administration",
-                grant_type: "password",
-                username: "admin",
-                password: "shopware",
-                scope: "write",
-            };
-        }
-
-        const authResponse = await this.apiClient.post<{
-            access_token?: string;
-            expires_in?: number;
-        }>("oauth/token", authPayload);
-
-        if (!authResponse.data.access_token) {
-            this.apiClientAccessToken = null;
-            this.tokenExpiresAt = 0;
+        try {
+            this.client = createShopwareAdminClient({
+                baseURL: this.envPath,
+                clientId,
+                clientSecret,
+            });
+            return true;
+        } catch (error) {
+            logger.error("Failed to create admin client:", { data: error });
+            this.client = null;
             return false;
         }
-
-        this.apiClientAccessToken = authResponse.data.access_token;
-        this.apiClient.setAuthHeader(this.apiClientAccessToken);
-
-        // Store token expiration time (default to 10 minutes if not provided)
-        const expiresIn = authResponse.data.expires_in || 600;
-        this.tokenExpiresAt = Date.now() + expiresIn * 1000;
-
-        return true;
     }
 
     /**
-     * Authenticate with user credentials (admin user)
+     * Authenticate with user credentials (admin user).
+     * Creates an AdminApiClient configured for password grant.
      */
     async authenticateWithUserCredentials(
         envPath: string,
@@ -249,44 +105,24 @@ export class ShopwareClient {
         password: string
     ): Promise<boolean> {
         if (!userName || !password) {
-            this.apiClientAccessToken = null;
+            this.client = null;
             return false;
         }
 
         this.envPath = envPath || "http://localhost:8000";
-        this.authenticationType = "user";
 
-        // Store credentials for token refresh
-        this.userCredentials = { username: userName, password: password };
-
-        this.apiClient = new FetchClient();
-        this.apiClient.setBaseURL(`${this.envPath}/api/`);
-
-        const authResponse = await this.apiClient.post<{
-            access_token?: string;
-            expires_in?: number;
-        }>("oauth/token", {
-            client_id: "administration",
-            grant_type: "password",
-            username: userName,
-            password: password,
-            scope: "write",
-        });
-
-        if (!authResponse.data.access_token) {
-            this.apiClientAccessToken = null;
-            this.tokenExpiresAt = 0;
+        try {
+            this.client = createShopwareAdminClient({
+                baseURL: this.envPath,
+                username: userName,
+                password,
+            });
+            return true;
+        } catch (error) {
+            logger.error("Failed to create admin client:", { data: error });
+            this.client = null;
             return false;
         }
-
-        this.apiClientAccessToken = authResponse.data.access_token;
-        this.apiClient.setAuthHeader(this.apiClientAccessToken);
-
-        // Store token expiration time (default to 10 minutes if not provided)
-        const expiresIn = authResponse.data.expires_in || 600;
-        this.tokenExpiresAt = Date.now() + expiresIn * 1000;
-
-        return true;
     }
 
     // =========================================================================
@@ -295,13 +131,17 @@ export class ShopwareClient {
 
     /** Get currency ID by ISO code */
     async getCurrencyId(currency = "EUR"): Promise<string> {
-        const currencyResponse = await this.apiClient.post<{
-            data: { id: string }[];
-        }>("search/currency", {
-            limit: 1,
-            filter: [{ type: "equals", field: "isoCode", value: currency }],
-        });
-        const currencyData = currencyResponse.data.data[0];
+        const { data } = await this.getClient().invoke(
+            "searchCurrency post /search/currency",
+            {
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "isoCode", value: currency }],
+                },
+            }
+        );
+        const response = data as SearchResult<Schemas["Currency"]>;
+        const currencyData = response.data?.[0];
         if (!currencyData) {
             throw new Error(`Currency "${currency}" not found`);
         }
@@ -310,17 +150,13 @@ export class ShopwareClient {
 
     /** Get standard tax ID */
     async getStandardTaxId(): Promise<string> {
-        const taxResponse = await this.apiClient.post<{
-            data: { id: string }[];
-        }>("search/tax", { limit: 1 });
-
-        if (!taxResponse.ok) {
-            throw new Error(`Failed to search tax: ${JSON.stringify(taxResponse.data)}`);
-        }
-
-        const taxData = taxResponse.data?.data?.[0];
+        const { data } = await this.getClient().invoke("searchTax post /search/tax", {
+            body: { limit: 1 },
+        });
+        const response = data as SearchResult<Schemas["Tax"]>;
+        const taxData = response.data?.[0];
         if (!taxData) {
-            throw new Error(`No tax rate found. Response: ${JSON.stringify(taxResponse.data)}`);
+            throw new Error("No tax rate found");
         }
         return taxData.id;
     }
@@ -334,11 +170,7 @@ export class ShopwareClient {
         navigationCategoryId: string;
         currencyId?: string;
     }> {
-        return this.findSalesChannel<{
-            id: string;
-            navigationCategoryId: string;
-            currencyId?: string;
-        }>(salesChannelName);
+        return this.findSalesChannel(salesChannelName);
     }
 
     /** Get full sales channel details for cloning, with fallback to any Storefront-type channel */
@@ -355,58 +187,100 @@ export class ShopwareClient {
         navigationCategoryId: string;
         snippetSetId?: string;
     }> {
-        interface SalesChannelSearchItem {
-            id: string;
-            name: string;
-            typeId: string;
-            languageId: string;
-            currencyId: string;
-            paymentMethodId: string;
-            shippingMethodId: string;
-            countryId: string;
-            customerGroupId: string;
-            navigationCategoryId: string;
-            domains?: Array<{ snippetSetId: string }>;
+        const { data } = await this.getClient().invoke(
+            "searchSalesChannel post /search/sales-channel",
+            {
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "name", value: salesChannelName }],
+                    associations: { domains: {} },
+                },
+            }
+        );
+        const response = data as SearchResult<Schemas["SalesChannel"]>;
+
+        let channel = response.data?.[0];
+
+        if (!channel) {
+            // Fallback: find any Storefront-type sales channel
+            logger.warn(
+                `Sales channel "${salesChannelName}" not found by name, falling back to Storefront type lookup`
+            );
+
+            const { data: fallbackData } = await this.getClient().invoke(
+                "searchSalesChannel post /search/sales-channel",
+                {
+                    body: {
+                        limit: 1,
+                        filter: [
+                            {
+                                type: "equals",
+                                field: "typeId",
+                                value: ShopwareClient.STOREFRONT_TYPE_ID,
+                            },
+                        ],
+                        associations: { domains: {} },
+                    },
+                }
+            );
+            const fallbackResponse = fallbackData as SearchResult<Schemas["SalesChannel"]>;
+
+            channel = fallbackResponse.data?.[0];
+            if (!channel) {
+                throw new Error(
+                    `No sales channel found: tried name "${salesChannelName}" and Storefront type ID "${ShopwareClient.STOREFRONT_TYPE_ID}". ` +
+                        `Ensure at least one Storefront-type sales channel exists in Shopware.`
+                );
+            }
+
+            logger.warn(
+                `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`,
+                { cli: true }
+            );
         }
 
-        const channel = await this.findSalesChannel<SalesChannelSearchItem>(
-            salesChannelName,
-            { domains: {} }
-        );
-
         return {
-            ...channel,
+            id: channel.id,
+            name: channel.name ?? "",
+            typeId: channel.typeId ?? "",
+            languageId: channel.languageId ?? "",
+            currencyId: channel.currencyId ?? "",
+            paymentMethodId: channel.paymentMethodId ?? "",
+            shippingMethodId: channel.shippingMethodId ?? "",
+            countryId: channel.countryId ?? "",
+            customerGroupId: channel.customerGroupId ?? "",
+            navigationCategoryId: channel.navigationCategoryId ?? "",
             snippetSetId: channel.domains?.[0]?.snippetSetId,
         };
     }
 
     /**
      * Find a sales channel by name, with fallback to any Storefront-type channel.
-     * Shared lookup logic: tries exact name match first, then falls back to type ID.
      */
-    private async findSalesChannel<T>(
-        salesChannelName: string,
-        associations?: Record<string, object>
-    ): Promise<T> {
+    private async findSalesChannel(salesChannelName: string): Promise<{
+        id: string;
+        navigationCategoryId: string;
+        currencyId?: string;
+    }> {
         // Step 1: Try exact name match
-        const response = await this.apiClient.post<{ data: T[] }>(
-            "search/sales-channel",
+        const { data } = await this.getClient().invoke(
+            "searchSalesChannel post /search/sales-channel",
             {
-                limit: 1,
-                filter: [{ type: "equals", field: "name", value: salesChannelName }],
-                ...(associations && { associations }),
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "name", value: salesChannelName }],
+                },
             }
         );
+        const response = data as SearchResult<Schemas["SalesChannel"]>;
 
-        if (!response.ok) {
-            throw new Error(
-                `Failed to search sales channel: ${JSON.stringify(response.data)}`
-            );
-        }
-
-        const salesChannel = response.data?.data?.[0];
+        const salesChannel = response.data?.[0];
         if (salesChannel) {
-            return salesChannel;
+            return {
+                id: salesChannel.id,
+                navigationCategoryId: salesChannel.navigationCategoryId ?? "",
+                currencyId: salesChannel.currencyId,
+            };
         }
 
         // Step 2: Fallback - find any Storefront-type sales channel
@@ -414,28 +288,24 @@ export class ShopwareClient {
             `Sales channel "${salesChannelName}" not found by name, falling back to Storefront type lookup`
         );
 
-        const fallbackResponse = await this.apiClient.post<{ data: T[] }>(
-            "search/sales-channel",
+        const { data: fallbackData } = await this.getClient().invoke(
+            "searchSalesChannel post /search/sales-channel",
             {
-                limit: 1,
-                filter: [
-                    {
-                        type: "equals",
-                        field: "typeId",
-                        value: ShopwareClient.STOREFRONT_TYPE_ID,
-                    },
-                ],
-                ...(associations && { associations }),
+                body: {
+                    limit: 1,
+                    filter: [
+                        {
+                            type: "equals",
+                            field: "typeId",
+                            value: ShopwareClient.STOREFRONT_TYPE_ID,
+                        },
+                    ],
+                },
             }
         );
+        const fallbackResponse = fallbackData as SearchResult<Schemas["SalesChannel"]>;
 
-        if (!fallbackResponse.ok) {
-            throw new Error(
-                `Failed to search sales channel by type: ${JSON.stringify(fallbackResponse.data)}`
-            );
-        }
-
-        const fallbackChannel = fallbackResponse.data?.data?.[0];
+        const fallbackChannel = fallbackResponse.data?.[0];
         if (!fallbackChannel) {
             throw new Error(
                 `No sales channel found: tried name "${salesChannelName}" and Storefront type ID "${ShopwareClient.STOREFRONT_TYPE_ID}". ` +
@@ -443,10 +313,15 @@ export class ShopwareClient {
             );
         }
 
-        logger.cli(
-            `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`
+        logger.warn(
+            `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`,
+            { cli: true }
         );
-        return fallbackChannel;
+        return {
+            id: fallbackChannel.id,
+            navigationCategoryId: fallbackChannel.navigationCategoryId ?? "",
+            currencyId: fallbackChannel.currencyId,
+        };
     }
 
     /** Generate a random access key for a SalesChannel */
@@ -468,34 +343,40 @@ export class ShopwareClient {
 
         try {
             // First, find the default folder configuration for product media
-            const defaultFolderResponse = await this.apiClient.post<{
-                total: number;
-                data: { folder?: { id: string; name: string } }[];
-            }>("search/media-default-folder", {
-                limit: 1,
-                filter: [{ type: "equals", field: "entity", value: "product" }],
-                associations: { folder: {} },
-            });
+            const { data: defaultFolderData } = await this.getClient().invoke(
+                "searchMediaDefaultFolder post /search/media-default-folder",
+                {
+                    body: {
+                        limit: 1,
+                        filter: [{ type: "equals", field: "entity", value: "product" }],
+                        associations: { folder: {} },
+                    },
+                }
+            );
+            const defaultFolderResponse = defaultFolderData as SearchResult<
+                Schemas["MediaDefaultFolder"]
+            >;
 
-            if (
-                defaultFolderResponse.data.total > 0 &&
-                defaultFolderResponse.data.data[0]?.folder?.id
-            ) {
-                this.productMediaFolderId = defaultFolderResponse.data.data[0].folder.id;
+            const defaultFolder = defaultFolderResponse.data?.[0];
+            if (defaultFolder?.folder?.id) {
+                this.productMediaFolderId = defaultFolder.folder.id;
                 return this.productMediaFolderId;
             }
 
             // Fallback: search for folder by name
-            const folderResponse = await this.apiClient.post<{
-                total: number;
-                data: { id: string }[];
-            }>("search/media-folder", {
-                limit: 1,
-                filter: [{ type: "equals", field: "name", value: "Product Media" }],
-            });
+            const { data: folderData } = await this.getClient().invoke(
+                "searchMediaFolder post /search/media-folder",
+                {
+                    body: {
+                        limit: 1,
+                        filter: [{ type: "equals", field: "name", value: "Product Media" }],
+                    },
+                }
+            );
+            const folderResponse = folderData as SearchResult<Schemas["MediaFolder"]>;
 
-            const folder = folderResponse.data.data[0];
-            if (folderResponse.data.total > 0 && folder) {
+            const folder = folderResponse.data?.[0];
+            if (folder) {
                 this.productMediaFolderId = folder.id;
                 return this.productMediaFolderId;
             }
@@ -503,30 +384,32 @@ export class ShopwareClient {
             this.productMediaFolderId = null;
             return null;
         } catch (error) {
-            logger.warn("Failed to get Product Media folder:", error);
+            logger.warn("Failed to get Product Media folder:", { data: error });
             this.productMediaFolderId = null;
             return null;
         }
     }
 
     /**
-     * Get the theme ID assigned to a SalesChannel
-     * @param salesChannelId - The SalesChannel ID
-     * @returns The theme ID or null if no theme is assigned
+     * Get the theme ID assigned to a SalesChannel.
+     * Searches themes with salesChannels association to find the matching one.
      */
     async getThemeForSalesChannel(salesChannelId: string): Promise<string | null> {
         try {
-            // First try to get theme from theme-sales-channel relationship
-            const response = await this.apiClient.post<{
-                total: number;
-                data: Array<{ id: string; themeId: string }>;
-            }>("search/theme-sales-channel", {
-                limit: 1,
-                filter: [{ type: "equals", field: "salesChannelId", value: salesChannelId }],
+            const { data } = await this.getClient().invoke("searchTheme post /search/theme", {
+                body: {
+                    limit: 50,
+                    filter: [{ type: "equals", field: "active", value: true }],
+                    associations: { salesChannels: {} },
+                },
             });
+            const response = data as SearchResult<Schemas["Theme"]>;
 
-            if (response.ok && response.data.total > 0) {
-                return response.data.data[0]?.themeId ?? null;
+            // Find theme linked to the specific SalesChannel
+            for (const theme of response.data ?? []) {
+                if (theme.salesChannels?.some((sc) => sc.id === salesChannelId)) {
+                    return theme.id;
+                }
             }
 
             // Fallback: search for the default Storefront theme
@@ -538,26 +421,26 @@ export class ShopwareClient {
     }
 
     /**
-     * Get the default Storefront theme ID
-     * Searches for a theme with technicalName "Storefront" or name containing "Storefront"
+     * Get the default Storefront theme ID.
+     * Searches for a theme with technicalName "Storefront" or name containing "Storefront".
      */
     async getDefaultStorefrontTheme(): Promise<string | null> {
         try {
-            // Search for active themes
-            const response = await this.apiClient.post<{
-                total: number;
-                data: Array<{ id: string; technicalName: string; name: string }>;
-            }>("search/theme", {
-                limit: 10,
-                filter: [{ type: "equals", field: "active", value: true }],
+            const { data } = await this.getClient().invoke("searchTheme post /search/theme", {
+                body: {
+                    limit: 10,
+                    filter: [{ type: "equals", field: "active", value: true }],
+                },
             });
+            const response = data as SearchResult<Schemas["Theme"]>;
+            const themes = response.data ?? [];
 
-            if (!response.ok || response.data.total === 0) {
+            if (themes.length === 0) {
                 return null;
             }
 
             // Look for "Storefront" theme by technicalName
-            const storefrontTheme = response.data.data.find(
+            const storefrontTheme = themes.find(
                 (t) => t.technicalName === "Storefront" || t.name === "Storefront"
             );
 
@@ -566,7 +449,7 @@ export class ShopwareClient {
             }
 
             // Return first active theme as fallback
-            return response.data.data[0]?.id ?? null;
+            return themes[0]?.id ?? null;
         } catch {
             return null;
         }
@@ -583,27 +466,27 @@ export class ShopwareClient {
      */
     async findCmsPageByName(name: string): Promise<string | null> {
         try {
-            const response = await this.apiClient.post<{
-                data?: Array<{ id: string }>;
-            }>("search/cms-page", {
-                filter: [{ type: "equals", field: "name", value: name }],
-                limit: 1,
-            });
+            const { data } = await this.getClient().invoke(
+                "searchCmsPage post /search/cms-page",
+                {
+                    body: {
+                        filter: [{ type: "equals", field: "name", value: name }],
+                        limit: 1,
+                    },
+                }
+            );
+            const response = data as SearchResult<Schemas["CmsPage"]>;
 
-            if (response.ok && response.data?.data?.[0]) {
-                return response.data.data[0].id;
-            }
+            return response.data?.[0]?.id ?? null;
         } catch (error) {
-            logger.warn(`Failed to find CMS page "${name}":`, error);
+            logger.warn(`Failed to find CMS page "${name}":`, { data: error });
+            return null;
         }
-
-        return null;
     }
 
     /**
-     * Get a CMS page by ID with full associations (sections, blocks, slots)
-     * @param id - The CMS page ID
-     * @returns The full CMS page data or null if not found
+     * Get a CMS page by ID with full associations (sections, blocks, slots).
+     * Uses the official client with nested associations (JSON format).
      */
     async getCmsPageById(id: string): Promise<{
         id: string;
@@ -627,144 +510,62 @@ export class ShopwareClient {
         }>;
     } | null> {
         try {
-            interface CmsPageResponse {
-                data?: Array<{
-                    id: string;
-                    attributes?: {
-                        name?: string;
-                        type?: string;
-                    };
-                    name?: string;
-                    type?: string;
-                }>;
-                included?: Array<{
-                    id: string;
-                    type: string;
-                    attributes?: Record<string, unknown>;
-                }>;
-            }
-
-            const response = await this.apiClient.post<CmsPageResponse>("search/cms-page", {
-                ids: [id],
-                associations: {
-                    sections: {
+            const { data } = await this.getClient().invoke(
+                "searchCmsPage post /search/cms-page",
+                {
+                    body: {
+                        ids: [id],
                         associations: {
-                            blocks: {
+                            sections: {
                                 associations: {
-                                    slots: {},
+                                    blocks: {
+                                        associations: {
+                                            slots: {},
+                                        },
+                                    },
                                 },
                             },
                         },
                     },
-                },
-            });
+                }
+            );
+            const response = data as SearchResult<Schemas["CmsPage"]>;
 
-            if (!response.ok || !response.data?.data?.[0]) {
+            const page = response.data?.[0];
+            if (!page) {
                 return null;
             }
 
-            const pageData = response.data.data[0];
-            const included = response.data.included || [];
-
-            // Parse the included data to build the full structure
-            const sectionsMap = new Map<
-                string,
-                {
-                    id: string;
-                    type: string;
-                    position: number;
-                    blocks: Array<{
-                        id: string;
-                        type: string;
-                        position: number;
-                        slots: Array<{
-                            id: string;
-                            type: string;
-                            slot: string;
-                            config: Record<string, unknown>;
-                        }>;
-                    }>;
-                }
-            >();
-
-            const blocksMap = new Map<
-                string,
-                {
-                    id: string;
-                    type: string;
-                    position: number;
-                    sectionId: string;
-                    slots: Array<{
-                        id: string;
-                        type: string;
-                        slot: string;
-                        config: Record<string, unknown>;
-                    }>;
-                }
-            >();
-
-            // First pass: collect all items
-            for (const item of included) {
-                const attrs = item.attributes || {};
-                if (item.type === "cms_section") {
-                    sectionsMap.set(item.id, {
-                        id: item.id,
-                        type: (attrs.type as string) || "default",
-                        position: (attrs.position as number) || 0,
-                        blocks: [],
-                    });
-                } else if (item.type === "cms_block") {
-                    blocksMap.set(item.id, {
-                        id: item.id,
-                        type: (attrs.type as string) || "",
-                        position: (attrs.position as number) || 0,
-                        sectionId: (attrs.sectionId as string) || "",
-                        slots: [],
-                    });
-                } else if (item.type === "cms_slot") {
-                    const blockId = (attrs.blockId as string) || "";
-                    const block = blocksMap.get(blockId);
-                    if (block) {
-                        block.slots.push({
-                            id: item.id,
-                            type: (attrs.type as string) || "",
-                            slot: (attrs.slot as string) || "",
-                            config: (attrs.config as Record<string, unknown>) || {},
-                        });
-                    }
-                }
-            }
-
-            // Second pass: link blocks to sections
-            for (const block of blocksMap.values()) {
-                const section = sectionsMap.get(block.sectionId);
-                if (section) {
-                    section.blocks.push({
-                        id: block.id,
-                        type: block.type,
-                        position: block.position,
-                        slots: block.slots,
-                    });
-                }
-            }
-
-            // Sort sections and blocks by position
-            const sections = Array.from(sectionsMap.values())
-                .sort((a, b) => a.position - b.position)
+            // Map sections with nested blocks and slots from JSON response
+            const sections = (page.sections ?? [])
+                .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                 .map((section) => ({
-                    ...section,
-                    blocks: section.blocks.sort((a, b) => a.position - b.position),
+                    id: section.id,
+                    type: section.type ?? "default",
+                    position: section.position ?? 0,
+                    blocks: (section.blocks ?? [])
+                        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+                        .map((block) => ({
+                            id: block.id,
+                            type: block.type ?? "",
+                            position: block.position ?? 0,
+                            slots: (block.slots ?? []).map((slot) => ({
+                                id: slot.id,
+                                type: slot.type ?? "",
+                                slot: slot.slot ?? "",
+                                config: (slot.config as Record<string, unknown>) ?? {},
+                            })),
+                        })),
                 }));
 
-            const attrs = pageData.attributes || pageData;
             return {
-                id: pageData.id,
-                name: (attrs.name as string) || "",
-                type: (attrs.type as string) || "",
+                id: page.id,
+                name: page.name ?? "",
+                type: page.type ?? "",
                 sections,
             };
         } catch (error) {
-            logger.warn(`Failed to get CMS page "${id}":`, error);
+            logger.warn(`Failed to get CMS page "${id}":`, { data: error });
             return null;
         }
     }
@@ -777,55 +578,94 @@ export class ShopwareClient {
      */
     async findCategoryByName(name: string, parentId: string): Promise<string | null> {
         try {
-            const response = await this.apiClient.post<{
-                data?: Array<{ id: string }>;
-            }>("search/category", {
-                filter: [
-                    { type: "equals", field: "name", value: name },
-                    { type: "equals", field: "parentId", value: parentId },
-                ],
-                limit: 1,
-            });
+            const { data } = await this.getClient().invoke(
+                "searchCategory post /search/category",
+                {
+                    body: {
+                        filter: [
+                            { type: "equals", field: "name", value: name },
+                            { type: "equals", field: "parentId", value: parentId },
+                        ],
+                        limit: 1,
+                    },
+                }
+            );
+            const response = data as SearchResult<Schemas["Category"]>;
 
-            if (response.ok && response.data?.data?.[0]) {
-                return response.data.data[0].id;
-            }
+            return response.data?.[0]?.id ?? null;
         } catch (error) {
-            logger.warn(`Failed to find category "${name}":`, error);
+            logger.warn(`Failed to find category "${name}":`, { data: error });
+            return null;
         }
-
-        return null;
     }
 
     /**
      * Assign a theme to a SalesChannel
-     * @param salesChannelId - The SalesChannel ID
-     * @param themeId - The theme ID to assign
      */
     async assignThemeToSalesChannel(salesChannelId: string, themeId: string): Promise<boolean> {
         try {
-            // Use the theme API action to assign the theme
-            const response = await this.apiClient.post(
-                `_action/theme/${themeId}/assign/${salesChannelId}`,
-                {}
+            await this.getClient().invoke(
+                "assignTheme post /_action/theme/{themeId}/assign/{salesChannelId}",
+                {
+                    pathParams: { themeId, salesChannelId },
+                }
             );
-
-            if (response.ok) {
-                logger.info(`Theme assigned to SalesChannel`);
-                return true;
-            }
-
-            // Fallback: try creating a direct entry
-            await this.apiClient.post("theme-sales-channel", {
-                themeId,
-                salesChannelId,
-            });
-
-            logger.info(`Theme assigned to SalesChannel (via direct entry)`);
+            logger.info(`Theme assigned to SalesChannel`);
             return true;
         } catch (error) {
-            logger.warn("Failed to assign theme to SalesChannel:", error);
+            logger.warn("Failed to assign theme to SalesChannel:", { data: error });
             return false;
+        }
+    }
+
+    // =========================================================================
+    // Low-level helpers for operations not fully covered by typed invoke()
+    // =========================================================================
+
+    /**
+     * Upload a binary file to an existing media entity.
+     * Uses raw fetch because the official client's typed invoke() doesn't
+     * handle binary bodies well (typed as GenericRecord).
+     */
+    async uploadMediaBuffer(
+        mediaId: string,
+        buffer: Buffer | Uint8Array,
+        fileName: string,
+        extension: string
+    ): Promise<void> {
+        if (!this.client) {
+            throw new Error("Client not authenticated");
+        }
+
+        const token = this.client.getSessionData().accessToken;
+        const baseURL = this.envPath || "http://localhost:8000";
+
+        const contentType =
+            extension === "webp"
+                ? "image/webp"
+                : extension === "jpg" || extension === "jpeg"
+                  ? "image/jpeg"
+                  : extension === "png"
+                    ? "image/png"
+                    : extension === "svg"
+                      ? "image/svg+xml"
+                      : "application/octet-stream";
+
+        const url = `${baseURL}/api/_action/media/${mediaId}/upload?extension=${extension}&fileName=${encodeURIComponent(fileName)}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": contentType,
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: buffer,
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`Media upload failed: ${response.status} - ${text}`);
         }
     }
 }

@@ -65,8 +65,9 @@ class ReviewProcessorImpl implements PostProcessor {
                 }
 
                 if (options.dryRun) {
-                    logger.cli(
-                        `    [DRY RUN] Would generate ${reviewCount} reviews for ${product.name}`
+                    logger.info(
+                        `    [DRY RUN] Would generate ${reviewCount} reviews for ${product.name}`,
+                        { cli: true }
                     );
                     totalReviews += reviewCount;
                     processed++;
@@ -136,7 +137,9 @@ class ReviewProcessorImpl implements PostProcessor {
             }
         }
 
-        logger.cli(`    Generated ${totalReviews} reviews for ${processed} products`);
+        logger.info(`    Generated ${totalReviews} reviews for ${processed} products`, {
+            cli: true,
+        });
 
         return {
             name: this.name,
@@ -155,7 +158,9 @@ class ReviewProcessorImpl implements PostProcessor {
         let deleted = 0;
 
         if (context.options.dryRun) {
-            logger.cli(`    [DRY RUN] Would delete reviews for products in SalesChannel`);
+            logger.info(`    [DRY RUN] Would delete reviews for products in SalesChannel`, {
+                cli: true,
+            });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
@@ -179,12 +184,12 @@ class ReviewProcessorImpl implements PostProcessor {
             );
 
             if (products.length === 0) {
-                logger.cli(`    No products found in SalesChannel`);
+                logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
             const productIds = products.map((p) => p.id);
-            logger.cli(`    Found ${productIds.length} products in SalesChannel`);
+            logger.info(`    Found ${productIds.length} products in SalesChannel`, { cli: true });
 
             // Step 2: Find all reviews for these products
             // Use equalsAny filter (cast needed as type is not fully exported)
@@ -195,18 +200,18 @@ class ReviewProcessorImpl implements PostProcessor {
             );
 
             if (reviews.length === 0) {
-                logger.cli(`    No reviews found for products`);
+                logger.info(`    No reviews found for products`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            logger.cli(`    Found ${reviews.length} reviews to delete`);
+            logger.info(`    Found ${reviews.length} reviews to delete`, { cli: true });
 
             // Step 3: Delete reviews
             const reviewIds = reviews.map((r) => r.id);
             await context.api.deleteEntities("product_review", reviewIds);
 
             deleted = reviewIds.length;
-            logger.cli(`    ✓ Deleted ${deleted} reviews`);
+            logger.info(`    ✓ Deleted ${deleted} reviews`, { cli: true });
         } catch (error) {
             errors.push(
                 `Review cleanup failed: ${error instanceof Error ? error.message : String(error)}`

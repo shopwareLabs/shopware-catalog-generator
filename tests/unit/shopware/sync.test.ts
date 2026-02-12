@@ -21,8 +21,6 @@ import {
 import { logger } from "../../../src/utils/index.js";
 
 // Suppress console output during tests
-const originalCli = logger.cli.bind(logger);
-const mockCli = mock(() => {});
 
 // =============================================================================
 // Mock DataHydrator
@@ -290,7 +288,7 @@ describe("syncPropertyIdsToBlueprint", () => {
 
 describe("syncCategories", () => {
     test("creates categories for new SalesChannel", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         const salesChannel = createMockSalesChannel();
@@ -318,11 +316,11 @@ describe("syncCategories", () => {
         expect(dataHydrator.createCategoryTree).toHaveBeenCalled();
         expect(result.size).toBeGreaterThan(0);
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("syncs existing categories for existing SalesChannel", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         (dataHydrator.getExistingCategoryMap as ReturnType<typeof mock>).mockImplementation(
@@ -390,13 +388,13 @@ describe("syncCategories", () => {
         expect(blueprint.products[0]?.primaryCategoryId).toBe("existing-phones-id");
         expect(blueprint.products[0]?.categoryIds).toContain("existing-phones-id");
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 });
 
 describe("syncPropertyGroups", () => {
     test("creates new property groups", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         const blueprint: HydratedBlueprint = {
@@ -420,11 +418,11 @@ describe("syncPropertyGroups", () => {
 
         expect(dataHydrator.hydrateEnvWithPropertyGroups).toHaveBeenCalled();
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("skips existing property groups with no missing options", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
@@ -464,11 +462,11 @@ describe("syncPropertyGroups", () => {
         // Should NOT call hydrateEnvWithPropertyGroups (nothing to sync)
         expect(dataHydrator.hydrateEnvWithPropertyGroups).not.toHaveBeenCalled();
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("adds missing options to existing property groups", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
@@ -507,13 +505,13 @@ describe("syncPropertyGroups", () => {
         // Should call hydrateEnvWithPropertyGroups with missing options
         expect(dataHydrator.hydrateEnvWithPropertyGroups).toHaveBeenCalled();
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 });
 
 describe("syncProducts", () => {
     test("syncs products to Shopware", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         const salesChannel = createMockSalesChannel();
@@ -568,11 +566,11 @@ describe("syncProducts", () => {
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("resolves category IDs via paths", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         const salesChannel = createMockSalesChannel();
@@ -642,11 +640,11 @@ describe("syncProducts", () => {
             salesChannel.navigationCategoryId
         );
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 
     test("handles products without properties", async () => {
-        logger.cli = mockCli;
+        logger.setMcpMode(true);
 
         const dataHydrator = createMockDataHydrator();
         const salesChannel = createMockSalesChannel();
@@ -682,6 +680,6 @@ describe("syncProducts", () => {
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 
-        logger.cli = originalCli;
+        logger.setMcpMode(false);
     });
 });

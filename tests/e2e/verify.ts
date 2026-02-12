@@ -10,11 +10,29 @@
  * - Manufacturers exist (if generated)
  */
 
-import type { ShopwareClient } from "../../src/shopware/client.js";
+import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
+import type { SearchResult } from "../../src/shopware/api-types.js";
 
 import { createCacheFromEnv } from "../../src/cache.js";
 import { DataHydrator } from "../../src/shopware/index.js";
 import { countCategories, isPlaceholder } from "../../src/utils/index.js";
+
+/**
+ * Typed search helper for E2E tests.
+ * Uses the frontends pattern: destructure { data } from invoke(), then narrow with SearchResult.
+ */
+async function search<T>(
+    client: AdminApiClient,
+    operation: string,
+    body: Record<string, unknown>
+): Promise<{ data: T[]; total: number }> {
+    const { data } = await client.invoke(operation as never, { body } as never);
+    const response = data as SearchResult<T>;
+    return {
+        data: response.data ?? [],
+        total: response.total ?? 0,
+    };
+}
 
 interface VerificationResult {
     salesChannel: { found: boolean; id?: string; navigationCategoryId?: string };
@@ -25,11 +43,6 @@ interface VerificationResult {
     images: { productsWithImages: number; totalProducts: number };
     passed: boolean;
     errors: string[];
-}
-
-interface SearchResponse {
-    total: number;
-    data?: Array<{ name?: string; translated?: { name?: string } }>;
 }
 
 interface ExpectedCounts {
@@ -90,34 +103,34 @@ async function verifyGeneration(
     console.log(`  ✓ SalesChannel: ${salesChannel.id}`);
     console.log(`  ✓ Navigation Category: ${salesChannel.navigationCategoryId}`);
 
-    // Get the API client from the hydrator
-    const client = hydrator as unknown as ShopwareClient;
+    // Get the AdminApiClient from the hydrator for direct queries
+    const client = (hydrator as unknown as { client: AdminApiClient }).client;
 
-    // Verify categories - count all categories under the navigation root
-    // Note: Shopware API requires higher limit to get accurate total count
+    // Verify categories
     console.log(`Verifying categories...`);
     try {
-        const categoryResponse = await client.apiClient.post<SearchResponse>("search/category", {
-            limit: 500,
-            filter: [
-                {
-                    type: "contains",
-                    field: "path",
-                    value: salesChannel.navigationCategoryId,
-                },
-            ],
-        });
+        const categoryResponse = await search<Schemas["Category"]>(
+            client,
+            "searchCategory post /search/category",
+            {
+                limit: 500,
+                filter: [
+                    {
+                        type: "contains",
+                        field: "path",
+                        value: salesChannel.navigationCategoryId,
+                    },
+                ],
+            }
+        );
 
-        result.categories.count = categoryResponse.data?.total || 0;
+        result.categories.count = categoryResponse.total;
         console.log(`  Found ${result.categories.count} categories under root`);
 
-        // Check for placeholder names
-        if (categoryResponse.data?.data) {
-            for (const cat of categoryResponse.data.data) {
-                const name = cat.translated?.name || cat.name || "";
-                if (isPlaceholder(name)) {
-                    result.categories.placeholders.push(name);
-                }
+        for (const cat of categoryResponse.data) {
+            const name = cat.name ?? "";
+            if (isPlaceholder(name)) {
+                result.categories.placeholders.push(name);
             }
         }
 
@@ -146,30 +159,31 @@ async function verifyGeneration(
         );
     }
 
-    // Verify products - count products visible in this SalesChannel
+    // Verify products
     console.log(`Verifying products...`);
     try {
-        const productResponse = await client.apiClient.post<SearchResponse>("search/product", {
-            limit: 500,
-            filter: [
-                {
-                    type: "equals",
-                    field: "visibilities.salesChannelId",
-                    value: salesChannel.id,
-                },
-            ],
-        });
+        const productResponse = await search<Schemas["Product"]>(
+            client,
+            "searchProduct post /search/product",
+            {
+                limit: 500,
+                filter: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: salesChannel.id,
+                    },
+                ],
+            }
+        );
 
-        result.products.count = productResponse.data?.total || 0;
+        result.products.count = productResponse.total;
         console.log(`  Found ${result.products.count} products in SalesChannel`);
 
-        // Check for placeholder names
-        if (productResponse.data?.data) {
-            for (const prod of productResponse.data.data) {
-                const name = prod.translated?.name || prod.name || "";
-                if (isPlaceholder(name)) {
-                    result.products.placeholders.push(name);
-                }
+        for (const prod of productResponse.data) {
+            const name = prod.name ?? "";
+            if (isPlaceholder(name)) {
+                result.products.placeholders.push(name);
             }
         }
 
@@ -196,17 +210,16 @@ async function verifyGeneration(
         );
     }
 
-    // Verify manufacturers (just count total, as they're global)
+    // Verify manufacturers
     console.log(`Verifying manufacturers...`);
     try {
-        const manufacturerResponse = await client.apiClient.post<SearchResponse>(
-            "search/product-manufacturer",
-            {
-                limit: 500,
-            }
+        const manufacturerResponse = await search<Schemas["ProductManufacturer"]>(
+            client,
+            "searchProductManufacturer post /search/product-manufacturer",
+            { limit: 500 }
         );
 
-        result.manufacturers.count = manufacturerResponse.data?.total || 0;
+        result.manufacturers.count = manufacturerResponse.total;
         console.log(`  ✓ Manufacturers: ${result.manufacturers.count}`);
     } catch (error) {
         console.log(
@@ -217,26 +230,20 @@ async function verifyGeneration(
     // Verify property groups
     console.log(`Verifying property groups...`);
     try {
-        interface PropertyGroupWithOptions {
-            id: string;
-            name: string;
-            displayType: string;
-            options?: Array<{ id: string; name: string; colorHexCode?: string }>;
-        }
-        const propertyResponse = await client.apiClient.post<{
-            total: number;
-            data: PropertyGroupWithOptions[];
-        }>("search/property-group", {
+        const propertyResponse = await search<Schemas["PropertyGroup"]>(
+            client,
+            "searchPropertyGroup post /search/property-group",
+            {
             limit: 500,
             associations: { options: {} },
         });
 
-        result.propertyGroups.count = propertyResponse.data?.total || 0;
+        result.propertyGroups.count = propertyResponse.total;
         console.log(`  ✓ Property groups: ${result.propertyGroups.count}`);
 
-        // Verify Color property group has correct displayType and hex codes
-        const colorGroup = propertyResponse.data?.data?.find(
-            (g) => g.name.toLowerCase() === "color"
+        // Verify Color property group
+        const colorGroup = propertyResponse.data.find(
+            (g) => (g.name ?? "").toLowerCase() === "color"
         );
         if (colorGroup) {
             if (colorGroup.displayType !== "color") {
@@ -248,7 +255,6 @@ async function verifyGeneration(
                 console.log(`  ✓ Color displayType: color`);
             }
 
-            // Check hex codes on options (excluding image-based colors like Multicolor, Rainbow, etc.)
             const imageColorNames = [
                 "multicolor",
                 "multi-color",
@@ -259,8 +265,12 @@ async function verifyGeneration(
                 "printed",
                 "gradient",
             ];
-            const optionsWithoutHex = (colorGroup.options || []).filter(
-                (o) => !o.colorHexCode && !imageColorNames.includes(o.name?.toLowerCase() || "")
+            const options = (colorGroup.options ?? []) as Array<{
+                name?: string;
+                colorHexCode?: string;
+            }>;
+            const optionsWithoutHex = options.filter(
+                (o) => !o.colorHexCode && !imageColorNames.includes((o.name ?? "").toLowerCase())
             );
             if (optionsWithoutHex.length > 0) {
                 result.errors.push(
@@ -270,32 +280,33 @@ async function verifyGeneration(
                     `  ✗ Color options missing hex: ${optionsWithoutHex.map((o) => o.name).join(", ")}`
                 );
             } else {
-                const imageColors = (colorGroup.options || []).filter((o) =>
-                    imageColorNames.includes(o.name?.toLowerCase() || "")
+                const imageColors = options.filter((o) =>
+                    imageColorNames.includes((o.name ?? "").toLowerCase())
                 );
-                const hexColors = (colorGroup.options || []).filter((o) => o.colorHexCode);
+                const hexColors = options.filter((o) => o.colorHexCode);
                 console.log(
                     `  ✓ Color options: ${hexColors.length} with hex, ${imageColors.length} with images`
                 );
             }
         }
 
-        // Check how many products have properties assigned
-        interface ProductWithProps {
-            properties?: Array<{ id: string }>;
-        }
-        const productsWithPropsResponse = await client.apiClient.post<{
-            total: number;
-            data: ProductWithProps[];
-        }>("search/product", {
+        // Check products with properties
+        const productsWithPropsResponse = await search<Schemas["Product"]>(
+            client,
+            "searchProduct post /search/product",
+            {
             limit: 500,
             filter: [
-                { type: "equals", field: "visibilities.salesChannelId", value: salesChannel.id },
+                {
+                    type: "equals",
+                    field: "visibilities.salesChannelId",
+                    value: salesChannel.id,
+                },
             ],
             associations: { properties: {} },
         });
 
-        const productsWithProps = (productsWithPropsResponse.data?.data || []).filter(
+        const productsWithProps = productsWithPropsResponse.data.filter(
             (p) => p.properties && p.properties.length > 0
         ).length;
         result.propertyGroups.productsWithProperties = productsWithProps;
@@ -309,24 +320,23 @@ async function verifyGeneration(
     // Verify product images
     console.log(`Verifying images...`);
     try {
-        interface ProductWithMedia {
-            id: string;
-            coverId?: string | null;
-            media?: Array<{ id: string }>;
-        }
-        const productsWithMediaResponse = await client.apiClient.post<{
-            total: number;
-            data: ProductWithMedia[];
-        }>("search/product", {
+        const productsWithMediaResponse = await search<Schemas["Product"]>(
+            client,
+            "searchProduct post /search/product",
+            {
             limit: 500,
             filter: [
-                { type: "equals", field: "visibilities.salesChannelId", value: salesChannel.id },
+                {
+                    type: "equals",
+                    field: "visibilities.salesChannelId",
+                    value: salesChannel.id,
+                },
             ],
             associations: { media: {} },
         });
 
-        const totalProducts = productsWithMediaResponse.data?.total || 0;
-        const productsWithImages = (productsWithMediaResponse.data?.data || []).filter(
+        const totalProducts = productsWithMediaResponse.total;
+        const productsWithImages = productsWithMediaResponse.data.filter(
             (p) => (p.media && p.media.length > 0) || p.coverId
         ).length;
 
@@ -376,7 +386,6 @@ async function main(): Promise<void> {
             `Loaded blueprint: ${expected.products} products, ${expected.categories} categories`
         );
     } else {
-        // Fallback to defaults if no blueprint found
         expected = { categories: 3, products: 10 };
         console.log("No blueprint found, using default expectations");
     }
