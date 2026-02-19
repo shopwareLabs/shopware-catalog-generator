@@ -20,6 +20,20 @@ import { DataHydrator } from "../shopware/index.js";
 import { countCategories, logger, PropertyCollector } from "../utils/index.js";
 import { CLIError, requireHydratedBlueprint, requireValidName } from "./shared.js";
 
+export function resolveCmsStoreDescription(
+    salesChannelName: string,
+    blueprintDescription?: string,
+    hydratedDescription?: string
+): string {
+    const normalizedHydrated = hydratedDescription?.trim();
+    if (normalizedHydrated) return normalizedHydrated;
+
+    const normalizedBlueprint = blueprintDescription?.trim();
+    if (normalizedBlueprint) return normalizedBlueprint;
+
+    return `${salesChannelName} webshop`;
+}
+
 export async function blueprintCreate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
     const description = args.description || `${salesChannelName} webshop`;
@@ -125,7 +139,11 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
     // CMS-only hydration: generate and hydrate CMS text blueprint + images
     if (hydrateOnly === "cms") {
         const cmsBlueprint = generateCmsBlueprint(salesChannelName);
-        const description = blueprint.salesChannel.description || `${salesChannelName} webshop`;
+        const description = resolveCmsStoreDescription(
+            salesChannelName,
+            blueprint.salesChannel.description,
+            existingHydratedBlueprint?.salesChannel.description
+        );
         const hydratedCms = await hydrateCmsBlueprint(cmsBlueprint, textProvider, description);
         cache.saveCmsBlueprint(salesChannelName, hydratedCms);
 
@@ -154,7 +172,11 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
     // Also hydrate CMS text + images (for full/force mode)
     if (!hydrateOnly) {
         const cmsBlueprint = generateCmsBlueprint(salesChannelName);
-        const description = blueprint.salesChannel.description || `${salesChannelName} webshop`;
+        const description = resolveCmsStoreDescription(
+            salesChannelName,
+            blueprint.salesChannel.description,
+            hydratedBlueprint.salesChannel.description
+        );
         const hydratedCms = await hydrateCmsBlueprint(cmsBlueprint, textProvider, description);
         cache.saveCmsBlueprint(salesChannelName, hydratedCms);
         console.log(`  CMS text: ${hydratedCms.pages.length} pages hydrated`);
