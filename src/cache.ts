@@ -6,8 +6,8 @@ import type {
     CacheOptions,
     CategoryNode,
     CategoryTreeCache,
+    CmsBlueprint,
     HydratedBlueprint,
-    ImageCacheMetadata,
     Manufacturer,
     ProductCacheMetadata,
     ProductInput,
@@ -17,8 +17,11 @@ import type {
     SalesChannelCacheMetadata,
 } from "./types/index.js";
 
+import { ImageCache } from "./image-cache.js";
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
 import { logger } from "./utils/logger.js";
+
+export { ImageCache, type MediaType } from "./image-cache.js";
 
 // Re-export types for convenience
 export type { CacheOptions, PropertyGroup, PropertyOption } from "./types/index.js";
@@ -32,10 +35,19 @@ export class DataCache {
     private readonly trashDir: string;
     private readonly options: CacheOptions;
 
+    /** Image cache for product and category images */
+    public readonly images: ImageCache;
+
     constructor(options: Partial<CacheOptions> = {}) {
         this.options = { ...DEFAULT_CACHE_OPTIONS, ...options };
         this.cacheDir = path.resolve(this.options.cacheDir);
         this.trashDir = path.resolve(this.options.cacheDir, "..", ".trash");
+        this.images = new ImageCache({
+            cacheDir: this.cacheDir,
+            enabled: this.options.enabled,
+            useCache: this.options.useCache,
+            saveToCache: this.options.saveToCache,
+        });
 
         if (this.options.enabled) {
             this.ensureDir(this.cacheDir);
@@ -164,7 +176,13 @@ export class DataCache {
         }
 
         fs.cpSync(trashPath, targetPath, { recursive: true });
-        logger.info(`Restored ${trashItemName} to ${targetPath}`);
+        fs.rmSync(trashPath, { recursive: true });
+
+        if (fs.existsSync(this.trashDir) && fs.readdirSync(this.trashDir).length === 0) {
+            fs.rmdirSync(this.trashDir);
+        }
+
+        logger.info(`Restored ${trashItemName} to ${targetPath} and removed from trash`);
         return true;
     }
 
@@ -326,6 +344,29 @@ export class DataCache {
         return this.hasCachedFile(hydratedFile);
     }
 
+    // =========================================================================
+    // CMS Blueprint Cache
+    // =========================================================================
+
+    saveCmsBlueprint(salesChannel: string, blueprint: CmsBlueprint): void {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "cms-blueprint.json");
+        this.saveJsonFile(file, blueprint);
+    }
+
+    loadCmsBlueprint(salesChannel: string): CmsBlueprint | null {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "cms-blueprint.json");
+        return this.loadJsonFile<CmsBlueprint>(file);
+    }
+
+    hasCmsBlueprint(salesChannel: string): boolean {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "cms-blueprint.json");
+        return this.hasCachedFile(file);
+    }
+
+    // =========================================================================
+    // Product Metadata Cache
+    // =========================================================================
+
     /**
      * Save product metadata for a specific product (keyed by UUID)
      */
@@ -398,135 +439,6 @@ export class DataCache {
             "manufacturers.json"
         );
         return this.loadJsonFile<Manufacturer[]>(manufacturersFile);
-    }
-
-    /**
-     * Save image for a product with view type (e.g., "front", "lifestyle")
-     */
-    saveImageWithView(
-        salesChannel: string,
-        productId: string,
-        view: string,
-        base64Data: string,
-        prompt: string,
-        imageModel?: string
-    ): void {
-        if (!this.shouldSaveToCache) return;
-
-        const imagesDir = this.getSalesChannelImagesDir(salesChannel);
-        this.ensureDir(imagesDir);
-
-        const imagePath = path.join(imagesDir, `${productId}-${view}.webp`);
-        const metadataPath = path.join(imagesDir, `${productId}-${view}.json`);
-
-        try {
-            const imageBuffer = Buffer.from(base64Data, "base64");
-            fs.writeFileSync(imagePath, imageBuffer);
-
-            const metadata: ImageCacheMetadata = {
-                productId,
-                productName: view, // Use view as identifier
-                prompt,
-                generatedAt: new Date().toISOString(),
-                imageModel,
-            };
-            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-        } catch {
-            // Silently fail
-        }
-    }
-
-    /**
-     * Check if an image with a specific view is cached
-     */
-    hasImageWithView(salesChannel: string, productId: string, view: string): boolean {
-        if (!this.shouldUseCache) return false;
-        const imagePath = path.join(
-            this.getSalesChannelImagesDir(salesChannel),
-            `${productId}-${view}.webp`
-        );
-        return fs.existsSync(imagePath);
-    }
-
-    /**
-     * Load image with a specific view
-     */
-    loadImageWithView(salesChannel: string, productId: string, view: string): string | null {
-        if (!this.shouldUseCache) return null;
-
-        const imagePath = path.join(
-            this.getSalesChannelImagesDir(salesChannel),
-            `${productId}-${view}.webp`
-        );
-
-        if (!fs.existsSync(imagePath)) {
-            return null;
-        }
-
-        try {
-            const imageBuffer = fs.readFileSync(imagePath);
-            return imageBuffer.toString("base64");
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Load image metadata for a specific view (contains the prompt used to generate)
-     */
-    loadImageMetadataWithView(
-        salesChannel: string,
-        productId: string,
-        view: string
-    ): ImageCacheMetadata | null {
-        if (!this.shouldUseCache) return null;
-
-        const metadataPath = path.join(
-            this.getSalesChannelImagesDir(salesChannel),
-            `${productId}-${view}.json`
-        );
-
-        return this.loadJsonFile<ImageCacheMetadata>(metadataPath);
-    }
-
-    /**
-     * Check if cached image prompt matches current product prompt
-     * Returns true if the image should be regenerated (prompt mismatch)
-     */
-    isImageStale(
-        salesChannel: string,
-        productId: string,
-        view: string,
-        currentBasePrompt: string
-    ): boolean {
-        const metadata = this.loadImageMetadataWithView(salesChannel, productId, view);
-        if (!metadata) return false; // No cached image, not stale (will be generated fresh)
-
-        // Extract the base prompt from the cached prompt (remove view-specific suffixes)
-        const cachedPrompt = metadata.prompt || "";
-        // The cached prompt includes view-specific suffix like ", close-up showing texture..."
-        // Extract just the product name part for comparison
-        const cachedBase = (cachedPrompt.split(",")[0] || "").trim();
-        const currentBase = (currentBasePrompt.split(",")[0] || "").trim();
-
-        // Compare base prompts (product names)
-        return cachedBase.toLowerCase() !== currentBase.toLowerCase();
-    }
-
-    /**
-     * Delete cached image and metadata for a specific view
-     */
-    deleteImageWithView(salesChannel: string, productId: string, view: string): void {
-        const imagesDir = this.getSalesChannelImagesDir(salesChannel);
-        const imagePath = path.join(imagesDir, `${productId}-${view}.webp`);
-        const metadataPath = path.join(imagesDir, `${productId}-${view}.json`);
-
-        try {
-            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-            if (fs.existsSync(metadataPath)) fs.unlinkSync(metadataPath);
-        } catch {
-            // Silently fail
-        }
     }
 
     /**
@@ -603,114 +515,6 @@ export class DataCache {
         } catch {
             return [];
         }
-    }
-
-    // =========================================================================
-    // SalesChannel-Scoped Image Cache Operations
-    // =========================================================================
-
-    /**
-     * Get image directory for a SalesChannel
-     */
-    private getSalesChannelImagesDir(salesChannel: string): string {
-        return path.join(this.getSalesChannelDir(salesChannel), "images");
-    }
-
-    /**
-     * Get image path for a product within a SalesChannel
-     */
-    private getSalesChannelImagePath(salesChannel: string, productId: string): string {
-        return path.join(this.getSalesChannelImagesDir(salesChannel), `${productId}.webp`);
-    }
-
-    /**
-     * Get image metadata path for a product within a SalesChannel
-     */
-    private getSalesChannelImageMetadataPath(salesChannel: string, productId: string): string {
-        return path.join(this.getSalesChannelImagesDir(salesChannel), `${productId}.json`);
-    }
-
-    /**
-     * Check if an image is cached for a product within a SalesChannel
-     */
-    hasImageForSalesChannel(salesChannel: string, productId: string): boolean {
-        if (!this.shouldUseCache) return false;
-        const imagePath = this.getSalesChannelImagePath(salesChannel, productId);
-        return fs.existsSync(imagePath);
-    }
-
-    /**
-     * Load cached image for a product within a SalesChannel
-     * @returns Base64-encoded image data, or null if not cached
-     */
-    loadImageForSalesChannel(salesChannel: string, productId: string): string | null {
-        if (!this.shouldUseCache) return null;
-
-        const imagePath = this.getSalesChannelImagePath(salesChannel, productId);
-
-        if (!fs.existsSync(imagePath)) {
-            return null;
-        }
-
-        try {
-            const imageBuffer = fs.readFileSync(imagePath);
-            const base64 = imageBuffer.toString("base64");
-            return base64;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Save image to cache within a SalesChannel
-     */
-    saveImageForSalesChannel(
-        salesChannel: string,
-        productId: string,
-        productName: string,
-        base64Data: string,
-        prompt: string,
-        imageModel?: string
-    ): void {
-        if (!this.shouldSaveToCache) return;
-
-        const imagesDir = this.getSalesChannelImagesDir(salesChannel);
-        this.ensureDir(imagesDir);
-
-        const imagePath = this.getSalesChannelImagePath(salesChannel, productId);
-        const metadataPath = this.getSalesChannelImageMetadataPath(salesChannel, productId);
-
-        try {
-            // Decode base64 and save as WebP
-            const imageBuffer = Buffer.from(base64Data, "base64");
-            fs.writeFileSync(imagePath, imageBuffer);
-
-            // Save metadata
-            const metadata: ImageCacheMetadata = {
-                productId,
-                productName,
-                prompt,
-                generatedAt: new Date().toISOString(),
-                imageModel,
-            };
-            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-        } catch {
-            // Silently fail - caching is not critical
-        }
-    }
-
-    /**
-     * Get the number of cached images for a SalesChannel
-     */
-    getImageCountForSalesChannel(salesChannel: string): number {
-        const imagesDir = this.getSalesChannelImagesDir(salesChannel);
-
-        if (!fs.existsSync(imagesDir)) {
-            return 0;
-        }
-
-        const files = fs.readdirSync(imagesDir);
-        return files.filter((f) => f.endsWith(".webp")).length;
     }
 
     /**

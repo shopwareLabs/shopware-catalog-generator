@@ -3,7 +3,6 @@
  */
 
 import { FORM_ELEMENTS_PAGE } from "../../fixtures/index.js";
-
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class FormProcessorImpl extends BaseCmsProcessor {

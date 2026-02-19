@@ -10,7 +10,6 @@ import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { COMMERCE_ELEMENTS_PAGE } from "../../fixtures/index.js";
 import { apiPost, logger } from "../../utils/index.js";
-
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class CommerceProcessorImpl extends BaseCmsProcessor {
@@ -18,6 +17,7 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
     readonly description =
         "Create Commerce Elements demo page (product-box, slider, gallery-buybox, nav)";
     readonly pageFixture = COMMERCE_ELEMENTS_PAGE;
+    override readonly dependsOn = ["images"];
 
     /**
      * Override process to populate product IDs before creating the page
@@ -172,54 +172,60 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
     }
 
     /**
-     * Populate product IDs and media in the fixture
+     * Populate product IDs and media in the fixture.
+     * Removes gallery-buybox block if no product media is available
+     * (Shopware crashes with empty sliderItems criteria).
      */
     private populateProductData(
         fixture: CmsPageFixture,
         products: ProductWithMedia[]
     ): CmsPageFixture {
-        // Deep clone the fixture
         const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
         const productIds = products.map((p) => p.id);
+        const firstProductMedia = products[0]?.mediaIds ?? [];
 
         for (const section of cloned.sections) {
+            // Filter out gallery-buybox blocks if no product media is available
+            if (firstProductMedia.length === 0) {
+                section.blocks = section.blocks.filter(
+                    (block) => block.type !== "gallery-buybox" && !this.isGalleryBuyboxIntro(block)
+                );
+            }
+
             for (const block of section.blocks) {
                 for (const slot of block.slots) {
-                    // Product box slots
                     if (slot.type === "product-box" && slot.config.product) {
                         const index = block.slots.indexOf(slot);
                         const productId = productIds[index] || productIds[0] || null;
                         slot.config.product = { source: "static", value: productId };
                     }
 
-                    // Product slider slot
                     if (slot.type === "product-slider" && slot.config.products) {
                         slot.config.products = { source: "static", value: productIds.slice(0, 8) };
                     }
 
-                    // Buy box slot
                     if (slot.type === "buy-box" && slot.config.product) {
                         slot.config.product = { source: "static", value: productIds[0] || null };
                     }
 
-                    // Image gallery slot (in gallery-buybox)
                     if (slot.type === "image-gallery" && slot.config.sliderItems) {
-                        // Use the first product's media for the gallery
-                        const firstProduct = products[0];
-                        if (firstProduct && firstProduct.mediaIds.length > 0) {
-                            const sliderItems = firstProduct.mediaIds.map((mediaId) => ({
-                                mediaId,
-                                url: null,
-                                newTab: false,
-                            }));
-                            slot.config.sliderItems = { source: "static", value: sliderItems };
-                        }
+                        const sliderItems = firstProductMedia.map((mediaId) => ({
+                            mediaId,
+                            url: null,
+                            newTab: false,
+                        }));
+                        slot.config.sliderItems = { source: "static", value: sliderItems };
                     }
                 }
             }
         }
 
         return cloned;
+    }
+
+    /** Check if a block is the text intro for gallery-buybox (position 5) */
+    private isGalleryBuyboxIntro(block: { position: number; type: string }): boolean {
+        return block.position === 5 && block.type === "text-teaser";
     }
 }
 

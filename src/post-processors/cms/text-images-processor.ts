@@ -1,16 +1,15 @@
 /**
  * Text & Images Elements Processor - Creates the Text & Images demo page
  *
- * Fetches media from products in the SalesChannel to populate
- * image slots in combined text/image blocks.
+ * Generates AI images matching the store's topic for combined text/image blocks:
+ * image-text, center-text, image-text-bubble, text-on-image.
  */
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
 import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { TEXT_IMAGES_ELEMENTS_PAGE } from "../../fixtures/index.js";
-import { apiPost, logger } from "../../utils/index.js";
-
+import { logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class TextImagesProcessorImpl extends BaseCmsProcessor {
@@ -19,9 +18,6 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
         "Create Text & Images demo page (image-text, center-text, bubble, text-on-image)";
     readonly pageFixture = TEXT_IMAGES_ELEMENTS_PAGE;
 
-    /**
-     * Override process to populate media IDs before creating the page
-     */
     override async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { options } = context;
         const errors: string[] = [];
@@ -45,19 +41,13 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
         }
 
         try {
-            // Get media IDs from products in this SalesChannel
-            const mediaIds = await this.getMediaIds(context);
-            if (mediaIds.length === 0) {
-                logger.warn(
-                    `    ⚠ No media found in SalesChannel, image blocks will be empty`,
-                    { cli: true }
-                );
-            }
+            const imageMap = await this.uploadCmsImages(context);
 
-            // Create a modified fixture with media IDs populated
-            const populatedFixture = this.populateMediaIds(this.pageFixture, mediaIds);
+            // Apply hydrated CMS text if available, then populate media IDs
+            const hydratedPage = this.getHydratedCmsPage(context);
+            const textFixture = this.applyHydratedText(this.pageFixture, hydratedPage);
+            const populatedFixture = this.populateMediaIds(textFixture, imageMap);
 
-            // Step 1: Check if CMS page already exists for this SalesChannel
             let cmsPageId = await this.findCmsPageByName(context, cmsPageName);
 
             if (!cmsPageId) {
@@ -66,8 +56,9 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
                     errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
                 }
+                const imageCount = Object.values(imageMap).filter(Boolean).length;
                 logger.info(
-                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${mediaIds.length} images`,
+                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${imageCount} images`,
                     { cli: true }
                 );
             } else {
@@ -76,7 +67,6 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
                 });
             }
 
-            // Step 2: Check if Landing Page already exists for this SalesChannel
             let landingPageId = await this.findLandingPageByName(context, landingPageName);
 
             if (!landingPageId) {
@@ -97,7 +87,6 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
                 );
             }
 
-            // Step 3: Store landing page ID for orchestrator
             await this.storeLandingPageId(context, landingPageId);
         } catch (error) {
             errors.push(
@@ -115,119 +104,66 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
     }
 
     /**
-     * Get media IDs from products in the SalesChannel
+     * Upload pre-cached CMS images for all text-image blocks.
+     * Images are pre-generated during blueprint hydration.
      */
-    private async getMediaIds(context: PostProcessorContext): Promise<string[]> {
-        const mediaIds: string[] = [];
+    private async uploadCmsImages(
+        context: PostProcessorContext
+    ): Promise<Record<string, string | null>> {
+        const keys = [
+            "ti-left",
+            "ti-right",
+            "ct-left",
+            "ct-right",
+            "bubble-left",
+            "bubble-center",
+            "bubble-right",
+            "toi-bg",
+        ];
 
-        try {
-            interface ProductResponse {
-                data?: Array<{
-                    id: string;
-                    coverId?: string;
-                    cover?: { id?: string; mediaId?: string; media?: { id?: string } };
-                    media?: Array<{ id?: string; mediaId?: string; media?: { id?: string } }>;
-                }>;
-            }
-
-            const response = await apiPost(context, "search/product", {
-                filter: [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                associations: {
-                    cover: { associations: { media: {} } },
-                    media: { associations: { media: {} } },
-                },
-                limit: 15,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as ProductResponse;
-
-                for (const product of data.data || []) {
-                    // Get cover media ID
-                    const coverMediaId = product.cover?.media?.id || product.cover?.mediaId;
-                    if (coverMediaId && !mediaIds.includes(coverMediaId)) {
-                        mediaIds.push(coverMediaId);
-                    }
-
-                    // Get additional media IDs
-                    if (product.media) {
-                        for (const pm of product.media) {
-                            const mediaId = pm.media?.id || pm.mediaId;
-                            if (mediaId && !mediaIds.includes(mediaId)) {
-                                mediaIds.push(mediaId);
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            logger.warn("Failed to get product media for text-images page", { data: error });
+        const images: Record<string, string | null> = {};
+        for (const key of keys) {
+            images[key] = await this.getOrCreateCmsMedia(context, key);
         }
-
-        // Fallback to media endpoint if we don't have enough
-        if (mediaIds.length < 8) {
-            try {
-                interface MediaResponse {
-                    data?: Array<{ id: string }>;
-                }
-
-                const response = await apiPost(context, "search/media", {
-                    filter: [{ type: "contains", field: "mimeType", value: "image/" }],
-                    limit: 15,
-                });
-
-                if (response.ok) {
-                    const data = (await response.json()) as MediaResponse;
-                    for (const media of data.data || []) {
-                        if (!mediaIds.includes(media.id)) {
-                            mediaIds.push(media.id);
-                        }
-                    }
-                }
-            } catch (error) {
-                logger.warn("Failed to get media from media endpoint", { data: error });
-            }
-        }
-
-        return mediaIds;
+        return images;
     }
 
-    /**
-     * Populate media IDs in the fixture
-     */
-    private populateMediaIds(fixture: CmsPageFixture, mediaIds: string[]): CmsPageFixture {
-        if (mediaIds.length === 0) {
-            return fixture;
-        }
-
-        // Deep clone the fixture
+    private populateMediaIds(
+        fixture: CmsPageFixture,
+        imageMap: Record<string, string | null>
+    ): CmsPageFixture {
         const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
-        let mediaIndex = 0;
 
-        const getNextMediaId = (): string | null => {
-            if (mediaIndex >= mediaIds.length) {
-                mediaIndex = 0; // Wrap around if we run out
-            }
-            return mediaIds[mediaIndex++] || null;
+        // Map: block index -> slot assignments
+        const slotAssignments: Record<number, Record<string, string | null>> = {
+            1: { left: imageMap["ti-left"] ?? null },
+            2: { right: imageMap["ti-right"] ?? null },
+            3: {
+                left: imageMap["ct-left"] ?? null,
+                right: imageMap["ct-right"] ?? null,
+            },
+            4: {
+                "left-image": imageMap["bubble-left"] ?? null,
+                "center-image": imageMap["bubble-center"] ?? null,
+                "right-image": imageMap["bubble-right"] ?? null,
+            },
         };
 
         for (const section of cloned.sections) {
             for (const block of section.blocks) {
-                // Handle text-on-image block (needs backgroundMediaId)
-                if (block.type === "text-on-image") {
-                    block.backgroundMediaId = getNextMediaId() || undefined;
+                // text-on-image background
+                if (block.type === "text-on-image" && imageMap["toi-bg"]) {
+                    block.backgroundMediaId = imageMap["toi-bg"];
                 }
 
-                // Handle image slots in regular blocks
+                const assignments = slotAssignments[block.position];
+                if (!assignments) continue;
+
                 for (const slot of block.slots) {
-                    if (slot.type === "image" && slot.config.media) {
-                        slot.config.media = { source: "static", value: getNextMediaId() };
+                    if (slot.type !== "image") continue;
+                    const mediaId = assignments[slot.slot];
+                    if (mediaId && slot.config.media) {
+                        slot.config.media = { source: "static", value: mediaId };
                     }
                 }
             }

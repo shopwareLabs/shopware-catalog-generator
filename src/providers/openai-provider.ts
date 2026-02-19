@@ -1,7 +1,14 @@
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+import type { z } from "zod";
+
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
-import type { z } from "zod";
+
+import type {
+    ChatMessage,
+    ImageGenerationOptions,
+    ImageProvider,
+    TextProvider,
+} from "../types/index.js";
 
 import { logger } from "../utils/index.js";
 
@@ -66,12 +73,13 @@ export class OpenAIImageProvider implements ImageProvider {
         this.model = model;
     }
 
-    async generateImage(prompt: string): Promise<string | null> {
+    async generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null> {
         try {
+            const size = this.mapToOpenAISize(options);
             const response = await this.client.images.generate({
                 model: this.model,
                 prompt,
-                size: "1536x1024", // Landscape ratio 1.5:1
+                size,
                 n: 1,
             });
 
@@ -93,5 +101,20 @@ export class OpenAIImageProvider implements ImageProvider {
             logger.warn(`OpenAI image generation failed:`, { data: error });
             return null;
         }
+    }
+
+    /**
+     * Map width/height to closest supported OpenAI size.
+     * Supported: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait)
+     */
+    private mapToOpenAISize(
+        options?: ImageGenerationOptions
+    ): "1024x1024" | "1536x1024" | "1024x1536" {
+        if (!options?.width || !options?.height) return "1536x1024";
+
+        const ratio = options.width / options.height;
+        if (ratio > 1.2) return "1536x1024";
+        if (ratio < 0.8) return "1024x1536";
+        return "1024x1024";
     }
 }

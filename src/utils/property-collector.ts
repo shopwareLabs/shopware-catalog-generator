@@ -20,7 +20,6 @@ import type {
 } from "../types/index.js";
 
 import { colorHasImage } from "../fixtures/index.js";
-
 import { getColorHex } from "./color-palette.js";
 import { generateUUID } from "./uuid.js";
 

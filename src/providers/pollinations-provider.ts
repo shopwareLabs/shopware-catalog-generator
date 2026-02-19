@@ -1,7 +1,14 @@
-import type { ChatMessage, ImageProvider, TextProvider } from "../types/index.js";
+import type { z } from "zod";
+
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
-import type { z } from "zod";
+
+import type {
+    ChatMessage,
+    ImageGenerationOptions,
+    ImageProvider,
+    TextProvider,
+} from "../types/index.js";
 
 import { logger } from "../utils/index.js";
 
@@ -134,14 +141,15 @@ export class PollinationsImageProvider implements ImageProvider {
         }
     }
 
-    async generateImage(prompt: string): Promise<string | null> {
+    async generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null> {
         try {
             // Truncate prompt to avoid URL length limits (URLs max ~2000 chars)
             // After URL encoding, characters can triple in size, so limit to ~500 chars
             const truncatedPrompt = prompt.length > 500 ? prompt.slice(0, 500) : prompt;
             const encodedPrompt = encodeURIComponent(truncatedPrompt);
-            // Landscape ratio ~1.75:1, matches Shopware product images (775x430)
-            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=1792&height=1024&model=${this.model}&key=${this.apiKey}`;
+            const width = options?.width ?? 1792;
+            const height = options?.height ?? 1024;
+            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${this.model}&key=${this.apiKey}`;
 
             // Add timeout (2 minutes for image generation)
             const controller = new AbortController();
@@ -162,9 +170,12 @@ export class PollinationsImageProvider implements ImageProvider {
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
                 logger.warn("Pollinations image generation timed out after 2 minutes");
-                logger.info("TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo", {
-                    cli: true,
-                });
+                logger.info(
+                    "TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo",
+                    {
+                        cli: true,
+                    }
+                );
             } else {
                 logger.warn("Pollinations image generation failed:", { data: error });
             }

@@ -5,6 +5,7 @@
  */
 
 import type { FastMCP } from "fastmcp";
+
 import { z } from "zod";
 
 import { DataCache } from "../../cache.js";
@@ -33,7 +34,7 @@ export function registerCleanupTools(server: FastMCP): void {
                     const metadata = cache.loadSalesChannelMetadata(sc);
                     const productCount = blueprint?.products?.length ?? 0;
                     const categoryCount = blueprint?.categories?.length ?? 0;
-                    const imageCount = cache.getImageCountForSalesChannel(sc);
+                    const imageCount = cache.images.getImageCountForSalesChannel(sc);
 
                     results.push(`  ${sc}`);
                     if (metadata?.shopwareId) {
@@ -223,9 +224,7 @@ export function registerCleanupTools(server: FastMCP): void {
                         results.push(`  Products deleted: ${result.products}`);
                         results.push(`  Categories deleted: ${result.categories}`);
                         if (args.deleteProps) {
-                            results.push(
-                                `  Property groups deleted: ${result.propertyGroups}`
-                            );
+                            results.push(`  Property groups deleted: ${result.propertyGroups}`);
                         }
                         if (args.deleteSalesChannel || args.full) {
                             results.push(

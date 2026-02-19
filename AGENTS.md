@@ -40,10 +40,24 @@ src/
 │   ├── pollinations-provider.ts   # Pollinations (text + images, free)
 │   └── noop-provider.ts      # Disabled image provider
 │
-├── generators/               # v2 Blueprint-based generation
-│   ├── index.ts              # Exports
-│   ├── blueprint-generator.ts    # Generate blueprint structure (no AI)
-│   └── blueprint-hydrator.ts     # AI fills blueprint with token limits
+├── cli/                      # CLI command modules (main.ts delegates here)
+│   ├── blueprint.ts          # blueprint create, hydrate, fix
+│   ├── generate.ts           # generate (full pipeline), process (post-processors)
+│   ├── image-fix.ts          # image fix - regenerate product images
+│   └── shared.ts             # CLIError, validation helpers, executePostProcessors
+│
+├── blueprint/                # v2 Blueprint-based generation
+│   ├── index.ts              # Re-exports all blueprint modules
+│   ├── generator.ts          # Generate blueprint structure (no AI)
+│   ├── hydrator.ts           # Orchestrates category + product hydration
+│   ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
+│   ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
+│   └── hydrators/            # Specialized hydration modules
+│       ├── index.ts          # Re-exports all hydrators
+│       ├── category.ts       # Category names/descriptions via AI
+│       ├── product.ts        # Product content via AI (parallel branches)
+│       ├── cms.ts            # CMS blueprint generation and AI text hydration
+│       └── image.ts          # CMS image pre-generation (20 images cached locally)
 │
 ├── post-processors/          # v2 Post-processors (parallel execution)
 │   ├── index.ts              # Interface, registry, ordered runner
@@ -51,6 +65,7 @@ src/
 │   │   ├── AGENTS.md         # CMS processor documentation
 │   │   ├── index.ts          # Re-exports all CMS processors
 │   │   ├── base-processor.ts # Abstract base class for CMS processors
+│   │   ├── home-processor.ts # Homepage layout (root category)
 │   │   ├── text-processor.ts # Text elements demo page
 │   │   ├── images-processor.ts # Image elements demo page
 │   │   ├── video-processor.ts # Video elements demo page
@@ -59,7 +74,9 @@ src/
 │   │   ├── form-processor.ts # Form elements demo page
 │   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
 │   ├── digital-product-processor.ts # Digital product with download
-│   ├── image-processor.ts    # Multi-view image generation
+│   ├── image-processor.ts    # Multi-view product image generation
+│   ├── category-image-processor.ts # Category banner images
+│   ├── image-utils.ts        # Shared image utilities
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── variant-processor.ts  # Simple v2.0 (marking only)
 │   └── review-processor.ts   # Variable review counts
@@ -76,7 +93,8 @@ src/
 │   │   ├── video.ts          # Video elements page
 │   │   ├── text-images.ts    # Text & Images page
 │   │   ├── commerce.ts       # Commerce elements page
-│   │   └── form.ts           # Form elements page
+│   │   ├── form.ts           # Form elements page
+│   │   └── home-listing.ts   # Home listing page (root category)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
 │
@@ -106,10 +124,12 @@ src/
 │       ├── index.ts          # Re-exports all tools
 │       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix
 │       ├── generate.ts       # generate, process
+│       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
 │       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
 │
 ├── cache.ts                  # DataCache class (+ blueprint storage)
+├── image-cache.ts            # ImageCache (product/category/CMS/property media)
 ├── property-cache.ts         # PropertyCache (store-scoped property caching)
 ├── main.ts                   # CLI entry point (v2 subcommand-based)
 ├── server.ts                 # HTTP server entry (Bun.serve)
@@ -121,8 +141,12 @@ scripts/
 
 tests/
 ├── unit/                     # Unit tests (mirrors src/ structure)
-│   ├── generators/           # Generator tests
-│   │   └── blueprint-generator.test.ts
+│   ├── blueprint/            # Blueprint tests
+│   │   ├── generator.test.ts
+│   │   ├── hydrator.test.ts
+│   │   └── hydrators/
+│   │       ├── cms.test.ts
+│   │       └── image.test.ts
 │   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
 │   │   ├── image-processor.test.ts
@@ -130,9 +154,11 @@ tests/
 │   │   ├── review-processor.test.ts
 │   │   ├── variant-processor.test.ts
 │   │   ├── digital-product-processor.test.ts
+│   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
 │   │   └── cms/              # CMS processor tests
 │   │       ├── base-processor.test.ts
 │   │       ├── commerce-processor.test.ts
+│   │       ├── home-processor.test.ts
 │   │       ├── images-processor.test.ts
 │   │       ├── testing-processor.test.ts
 │   │       └── simple-processors.test.ts
@@ -143,6 +169,7 @@ tests/
 │   ├── shopware/             # Shopware client tests
 │   │   ├── entities.test.ts
 │   │   ├── export.test.ts
+│   │   ├── hydrator-ordering.test.ts
 │   │   └── sync.test.ts
 │   ├── templates/            # Template tests
 │   │   └── fetcher.test.ts
@@ -192,10 +219,10 @@ Detailed documentation for each module is in their respective folders:
 The v2 architecture uses a 3-phase pipeline for faster generation:
 
 1. **Phase 1: Blueprint Generation** - Create structure WITHOUT AI (instant)
-2. **Phase 2: AI Hydration** - Fill blueprint with AI-generated content (parallel when supported)
-3. **Phase 3: Shopware Upload + Post-processors** - Upload and run parallel processors
+2. **Phase 2: AI Hydration** - Fill blueprint with AI-generated text AND images (parallel when supported)
+3. **Phase 3: Shopware Upload + Post-processors** - Upload cached data, run parallel processors (fast, no AI)
 
-**Expected times for 90 products (text generation only):**
+**Expected times for 90 products (text-only hydration):**
 
 | Provider              | Processing    | Time    |
 | --------------------- | ------------- | ------- |
@@ -204,7 +231,7 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 | GitHub Models         | Limited (2x)  | ~10 min |
 | Pollinations (pk\_\*) | Sequential    | ~13 min |
 
-**Full generation with images (~270 images at 3 views per product):**
+**Full hydration with images (~270 product + ~20 CMS + category banners):**
 
 | Provider              | Image Model   | Processing     | Time       |
 | --------------------- | ------------- | -------------- | ---------- |
@@ -213,7 +240,7 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 | Pollinations (sk\_\*) | turbo         | Parallel (5x)  | ~10-15 min |
 | Pollinations (pk\_\*) | flux          | Limited (2x)   | ~40-50 min |
 
-> Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~8-10s per image with 10 parallel requests.
+> All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
 
 ```
 flowchart LR
@@ -221,14 +248,16 @@ flowchart LR
         BP[Blueprint Generator] --> JSON[blueprint.json]
     end
 
-    subgraph Phase2[Phase 2: AI Hydration]
-        JSON --> AI[Multiple AI Calls]
+    subgraph Phase2["Phase 2: AI Hydration (text + images)"]
+        JSON --> AI[Text AI Calls]
         AI --> Hydrated[hydrated-blueprint.json]
+        Hydrated --> IMG[Image AI Calls]
+        IMG --> Cache[Image Cache]
     end
 
-    subgraph Phase3[Phase 3: Upload + Post-processors]
-        Hydrated --> SW[Upload to Shopware]
-        SW --> PP1[Image Processor]
+    subgraph Phase3["Phase 3: Upload (no AI)"]
+        Cache --> SW[Upload to Shopware]
+        SW --> PP1[Image Upload]
         SW --> PP2[Manufacturer Processor]
         SW --> PP3[Review Processor]
     end
@@ -274,20 +303,21 @@ interface PostProcessor {
 
 **Available processors:**
 
-| Processor         | Description                               | Dependencies            |
-| ----------------- | ----------------------------------------- | ----------------------- |
-| `cms-text`        | Text elements demo page                   | none                    |
-| `cms-images`      | Image elements demo page                  | none                    |
-| `cms-video`       | Video elements demo page                  | none                    |
-| `cms-text-images` | Text & Images demo page                   | none                    |
-| `cms-commerce`    | Commerce elements demo page               | none                    |
-| `cms-form`        | Form elements demo page                   | none                    |
-| `images`          | Multi-view product/category images        | none                    |
-| `manufacturers`   | Fictional manufacturer creation           | none                    |
-| `reviews`         | Variable review counts (0-10 per product) | none                    |
-| `variants`        | Variant product creation                  | manufacturers           |
-| `digital-product` | Digital product with download             | variants                |
-| `cms-testing`     | Testing category hierarchy                | cms-\*, digital-product |
+| Processor         | Description                                  | Dependencies            |
+| ----------------- | -------------------------------------------- | ----------------------- |
+| `cms-home`        | Homepage layout on root category             | none                    |
+| `cms-text`        | Text elements demo page                      | none                    |
+| `cms-images`      | Image elements demo page                     | none                    |
+| `cms-video`       | Video elements demo page                     | none                    |
+| `cms-text-images` | Text & Images demo page                      | none                    |
+| `cms-commerce`    | Commerce elements demo page                  | none                    |
+| `cms-form`        | Form elements demo page                      | none                    |
+| `images`          | Upload pre-generated product/category images | none                    |
+| `manufacturers`   | Fictional manufacturer creation              | none                    |
+| `reviews`         | Variable review counts (0-10 per product)    | none                    |
+| `variants`        | Variant product creation                     | manufacturers           |
+| `digital-product` | Digital product with download                | variants                |
+| `cms-testing`     | Testing category hierarchy                   | cms-\*, digital-product |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -310,7 +340,21 @@ interface TextProvider {
     readonly name: string;
     readonly tokenLimit: number; // For payload chunking
 }
+
+interface ImageProvider {
+    generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null>;
+    readonly isSequential: boolean;
+    readonly maxConcurrency: number;
+    readonly name: string;
+}
+
+interface ImageGenerationOptions {
+    width?: number; // Desired width in pixels
+    height?: number; // Desired height in pixels
+}
 ```
+
+Providers may ignore `width`/`height` if they use a fixed size or prefer their own defaults.
 
 **Provider concurrency settings:**
 
@@ -404,6 +448,7 @@ generated/
         ├── metadata.json           # SalesChannel info
         ├── blueprint.json          # Phase 1 output
         ├── hydrated-blueprint.json # Phase 2 output
+        ├── cms-blueprint.json      # AI-hydrated CMS text (used by CMS processors)
         ├── categories.json         # Category tree
         ├── property-groups.json    # Property groups synced from Shopware
         ├── properties/             # Store-specific AI-generated properties
@@ -412,8 +457,15 @@ generated/
         │   └── index.json
         ├── metadata/
         │   └── {productId}.json    # Per-product metadata
-        └── images/
-            └── {productId}.webp    # Product images
+        └── images/                 # Reorganized by media type
+            ├── product_media/
+            │   └── {productId}.webp
+            ├── category_media/
+            │   └── {categoryId}.webp
+            ├── cms_media/
+            │   └── *.webp          # CMS block images
+            └── property_images/
+                └── *.webp
 
 logs/
 └── generator-{timestamp}.log       # Detailed API logs (not in generated/)
@@ -464,11 +516,28 @@ Post-processors must be fast and deterministic. All AI-generated content should 
 2. Stored in cache or fixtures for reuse
 3. Loaded from fixtures/cache at runtime
 
+This applies to both **text** and **all images**:
+
+- **Text**: Hydrated via `BlueprintHydrator` (product/category) and `hydrateCmsBlueprint` (CMS pages)
+- **CMS images**: Pre-generated via `hydrateCmsImages()` in `src/blueprint/hydrators/image.ts` (20 CMS images)
+- **Product/category images**: Pre-generated via `hydrateProductImages()` in `src/blueprint/hydrators/image.ts`
+
+The image hydrator in `src/blueprint/hydrators/image.ts` centralizes ALL image generation.
+Post-processors only read from cache and upload to Shopware. An architectural test
+(`tests/unit/post-processors/no-ai-in-processors.test.ts`) enforces this rule by scanning
+post-processor source files for `.generateImage(` and `.generateCompletion(` calls.
+
 ```typescript
 // Bad: AI call in post-processor (slow, non-deterministic)
 async process(context) {
     const description = await this.textProvider.generate("Create gift card description");
     await this.createProduct({ description });
+}
+
+// Bad: Image generation in post-processor
+async process(context) {
+    const image = await context.imageProvider.generateImage(prompt);
+    await this.uploadImage(image);
 }
 
 // Good: Use pre-defined fixture content
@@ -479,6 +548,11 @@ async process(context) {
         name: GIFT_CARD_50.name,
         description: GIFT_CARD_50.description,
     });
+}
+
+// Good: Read pre-cached image (generated during hydration)
+async process(context) {
+    const mediaId = await this.getOrCreateCmsMedia(context, "img-slider-0");
 }
 ```
 
@@ -885,7 +959,7 @@ bun run blueprint create \
 ```bash
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
-  --only=MODE              # Selective: "categories" or "properties"
+  --only=MODE              # Selective: "categories", "properties", or "cms"
   --force                  # Force full re-hydration (changes names, triggers image regen)
 ```
 
@@ -894,6 +968,7 @@ Hydration modes:
 - **Default (new)**: Full hydration, generates everything
 - **--only=categories**: Only update category names/descriptions, preserve all product data
 - **--only=properties**: Only update product properties, preserve names (for image stability)
+- **--only=cms**: Only hydrate CMS blueprint text (`cms-blueprint.json`)
 - **--force**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--force` to prevent accidental name changes.
@@ -913,6 +988,16 @@ bun run process \
   --name=NAME              # Required: SalesChannel name
   --only=PROCESSORS        # Run specific processors (images,manufacturers,reviews,variants)
   --dry-run                # Preview without making changes
+```
+
+### Image Fix Options
+
+```bash
+bun run image fix \
+  --name=NAME              # Required: SalesChannel name
+  --product=TARGET         # Product/category name or ID, or CMS page name
+  --type=TYPE              # "product" (default), "category", or "cms"
+  --dry-run                # Preview without regenerating
 ```
 
 ### Cleanup (SalesChannel-centric)
@@ -968,6 +1053,7 @@ bun run cache:clear                   # Move all cache to trash
 bun run cache:clear -- music         # Move specific SalesChannel to trash
 bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore item from trash
+bun run cache:restore -- --all        # Restore all items from trash
 bun run cache:empty-trash             # Permanently delete trash
 
 # Log management
@@ -1001,23 +1087,24 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 
 ### Available Tools
 
-| Tool                   | Description                              |
-| ---------------------- | ---------------------------------------- |
-| `blueprint_create`     | Generate blueprint.json (no AI)          |
-| `blueprint_hydrate`    | Fill blueprint with AI content           |
-| `blueprint_fix`        | Fix placeholder names                    |
-| `generate`             | Full pipeline: create + hydrate + upload |
-| `process`              | Run post-processors                      |
-| `cache_list`           | List cached SalesChannels                |
-| `cache_clear`          | Clear cache to trash                     |
-| `cache_trash`          | List trash contents                      |
-| `cache_restore`        | Restore from trash                       |
-| `cache_empty_trash`    | Permanently delete trash                 |
-| `list_saleschannels`   | List available SalesChannels             |
-| `cleanup`              | Delete SalesChannel data                 |
-| `cleanup_media`        | Delete orphaned media                    |
-| `cleanup_unused_props` | Delete unused property groups            |
-| `list_processors`      | List available post-processors           |
+| Tool                   | Description                                            |
+| ---------------------- | ------------------------------------------------------ |
+| `blueprint_create`     | Generate blueprint.json (no AI)                        |
+| `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
+| `blueprint_fix`        | Fix placeholder names                                  |
+| `image_fix`            | Regenerate images (product/category/cms by type)       |
+| `generate`             | Full pipeline: create + hydrate + upload               |
+| `process`              | Run post-processors                                    |
+| `cache_list`           | List cached SalesChannels                              |
+| `cache_clear`          | Clear cache to trash                                   |
+| `cache_trash`          | List trash contents                                    |
+| `cache_restore`        | Restore from trash                                     |
+| `cache_empty_trash`    | Permanently delete trash                               |
+| `list_saleschannels`   | List available SalesChannels                           |
+| `cleanup`              | Delete SalesChannel data                               |
+| `cleanup_media`        | Delete orphaned media                                  |
+| `cleanup_unused_props` | Delete unused property groups                          |
+| `list_processors`      | List available post-processors                         |
 
 ### Testing the MCP Server
 

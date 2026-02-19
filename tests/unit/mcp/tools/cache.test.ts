@@ -52,7 +52,7 @@ describe("Cache MCP Tools", () => {
 
         it("should list cached SalesChannels", async () => {
             const cache = createCacheFromEnv();
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             // Create a blueprint to populate cache
             const generator = new BlueprintGenerator({
@@ -70,7 +70,7 @@ describe("Cache MCP Tools", () => {
     describe("cache_clear logic", () => {
         it("should move specific SalesChannel to trash", async () => {
             const cache = createCacheFromEnv();
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             // Create a blueprint
             const generator = new BlueprintGenerator({
@@ -98,7 +98,7 @@ describe("Cache MCP Tools", () => {
     describe("cache_trash logic", () => {
         it("should list trash items after clearing", async () => {
             const cache = createCacheFromEnv();
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             // Create and clear a blueprint to add something to trash
             const generator = new BlueprintGenerator({
@@ -118,7 +118,7 @@ describe("Cache MCP Tools", () => {
     describe("cache_restore logic", () => {
         it("should restore item from trash", async () => {
             const cache = createCacheFromEnv();
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             // Create and clear a blueprint
             const generator = new BlueprintGenerator({
@@ -147,7 +147,7 @@ describe("Cache MCP Tools", () => {
     describe("cache_empty_trash logic", () => {
         it("should permanently delete trash", async () => {
             const cache = createCacheFromEnv();
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             // Create and clear a blueprint
             const generator = new BlueprintGenerator({

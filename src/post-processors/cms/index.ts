@@ -14,6 +14,7 @@
 export { BaseCmsProcessor } from "./base-processor.js";
 export { CommerceProcessor } from "./commerce-processor.js";
 export { FormProcessor } from "./form-processor.js";
+export { HomeProcessor } from "./home-processor.js";
 export { ImagesProcessor } from "./images-processor.js";
 export { TestingProcessor } from "./testing-processor.js";
 export { TextImagesProcessor } from "./text-images-processor.js";

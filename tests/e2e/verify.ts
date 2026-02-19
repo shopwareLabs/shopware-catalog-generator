@@ -41,6 +41,12 @@ interface VerificationResult {
     propertyGroups: { count: number; productsWithProperties: number };
     manufacturers: { count: number };
     images: { productsWithImages: number; totalProducts: number };
+    cms: {
+        landingPages: number;
+        homePage: boolean;
+        testingCategory: boolean;
+        cookieSettingsLink: boolean;
+    };
     passed: boolean;
     errors: string[];
 }
@@ -61,6 +67,12 @@ async function verifyGeneration(
         propertyGroups: { count: 0, productsWithProperties: 0 },
         manufacturers: { count: 0 },
         images: { productsWithImages: 0, totalProducts: 0 },
+        cms: {
+            landingPages: 0,
+            homePage: false,
+            testingCategory: false,
+            cookieSettingsLink: false,
+        },
         passed: false,
         errors: [],
     };
@@ -234,9 +246,10 @@ async function verifyGeneration(
             client,
             "searchPropertyGroup post /search/property-group",
             {
-            limit: 500,
-            associations: { options: {} },
-        });
+                limit: 500,
+                associations: { options: {} },
+            }
+        );
 
         result.propertyGroups.count = propertyResponse.total;
         console.log(`  ✓ Property groups: ${result.propertyGroups.count}`);
@@ -295,16 +308,17 @@ async function verifyGeneration(
             client,
             "searchProduct post /search/product",
             {
-            limit: 500,
-            filter: [
-                {
-                    type: "equals",
-                    field: "visibilities.salesChannelId",
-                    value: salesChannel.id,
-                },
-            ],
-            associations: { properties: {} },
-        });
+                limit: 500,
+                filter: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: salesChannel.id,
+                    },
+                ],
+                associations: { properties: {} },
+            }
+        );
 
         const productsWithProps = productsWithPropsResponse.data.filter(
             (p) => p.properties && p.properties.length > 0
@@ -324,16 +338,17 @@ async function verifyGeneration(
             client,
             "searchProduct post /search/product",
             {
-            limit: 500,
-            filter: [
-                {
-                    type: "equals",
-                    field: "visibilities.salesChannelId",
-                    value: salesChannel.id,
-                },
-            ],
-            associations: { media: {} },
-        });
+                limit: 500,
+                filter: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: salesChannel.id,
+                    },
+                ],
+                associations: { media: {} },
+            }
+        );
 
         const totalProducts = productsWithMediaResponse.total;
         const productsWithImages = productsWithMediaResponse.data.filter(
@@ -347,6 +362,127 @@ async function verifyGeneration(
         console.log(
             `  ✗ Image query failed: ${error instanceof Error ? error.message : String(error)}`
         );
+    }
+
+    // Verify homepage CMS page on root category
+    console.log(`Verifying homepage CMS layout...`);
+    try {
+        const rootCatResponse = await search<Schemas["Category"]>(
+            client,
+            "searchCategory post /search/category",
+            {
+                ids: [salesChannel.navigationCategoryId],
+                limit: 1,
+            }
+        );
+
+        const rootCategory = rootCatResponse.data[0];
+        if (rootCategory?.cmsPageId) {
+            result.cms.homePage = true;
+            console.log(`  ✓ Root category has homepage CMS layout`);
+        } else {
+            result.errors.push("Root category has no CMS page assigned (homepage missing)");
+            console.log(`  ✗ Root category has no CMS page assigned`);
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Homepage check failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify CMS landing pages
+    console.log(`Verifying CMS pages...`);
+    try {
+        const landingPageResponse = await search<Schemas["LandingPage"]>(
+            client,
+            "searchLandingPage post /search/landing-page",
+            {
+                limit: 50,
+                associations: { salesChannels: {} },
+                filter: [
+                    {
+                        type: "equals",
+                        field: "salesChannels.id",
+                        value: salesChannel.id,
+                    },
+                ],
+            }
+        );
+
+        result.cms.landingPages = landingPageResponse.total;
+        console.log(`  ✓ Landing pages: ${result.cms.landingPages}`);
+
+        if (result.cms.landingPages < 6) {
+            result.errors.push(
+                `Expected at least 6 CMS landing pages, found ${result.cms.landingPages}`
+            );
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Landing page query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify Testing category hierarchy
+    console.log(`Verifying Testing category...`);
+    try {
+        const testingCats = await search<Schemas["Category"]>(
+            client,
+            "searchCategory post /search/category",
+            {
+                limit: 10,
+                filter: [
+                    { type: "equals", field: "name", value: "Testing" },
+                    {
+                        type: "equals",
+                        field: "parentId",
+                        value: salesChannel.navigationCategoryId,
+                    },
+                ],
+            }
+        );
+
+        if (testingCats.total > 0) {
+            result.cms.testingCategory = true;
+            console.log(`  ✓ Testing category exists`);
+            const testingId = testingCats.data[0]?.id;
+
+            // Check for Cookie settings child
+            if (testingId) {
+                const cookieCats = await search<
+                    Schemas["Category"] & { linkType?: string; externalLink?: string }
+                >(client, "searchCategory post /search/category", {
+                    limit: 5,
+                    filter: [
+                        { type: "equals", field: "parentId", value: testingId },
+                        { type: "equals", field: "name", value: "Cookie settings" },
+                    ],
+                });
+
+                if (cookieCats.total > 0) {
+                    result.cms.cookieSettingsLink = true;
+                    console.log(`  ✓ Cookie settings link exists`);
+                } else {
+                    result.errors.push("Cookie settings category not found under Testing");
+                    console.log(`  ✗ Cookie settings link not found`);
+                }
+            }
+        } else {
+            result.errors.push("Testing category not found");
+            console.log(`  ✗ Testing category not found`);
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Testing category query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify CMS blueprint cache
+    const cache = createCacheFromEnv();
+    if (cache.hasCmsBlueprint(salesChannelName)) {
+        console.log(`  ✓ CMS blueprint cached`);
+    } else {
+        console.log(`  ⊘ CMS blueprint not cached (CMS used fixture defaults)`);
     }
 
     // Overall pass/fail
@@ -415,6 +551,9 @@ async function main(): Promise<void> {
         console.log(`  Manufacturers: ${result.manufacturers.count}`);
         console.log(
             `  Images: ${result.images.productsWithImages}/${result.images.totalProducts} products with images`
+        );
+        console.log(
+            `  CMS: ${result.cms.landingPages} landing pages, Home: ${result.cms.homePage ? "✓" : "✗"}, Testing: ${result.cms.testingCategory ? "✓" : "✗"}, Cookie: ${result.cms.cookieSettingsLink ? "✓" : "✗"}`
         );
         process.exit(0);
     } else {

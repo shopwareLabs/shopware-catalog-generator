@@ -7,11 +7,14 @@ Internal documentation for AI agents working on tests in this codebase.
 **CRITICAL:** Unit test files MUST be placed in a folder structure that mirrors `src/`.
 
 ```
-src/utils/logger.ts           →  tests/unit/utils/logger.test.ts
-src/providers/openai.ts       →  tests/unit/providers/openai.test.ts
-src/generators/blueprint.ts   →  tests/unit/generators/blueprint.test.ts
-src/shopware/export.ts        →  tests/unit/shopware/export.test.ts
-src/cache.ts                  →  tests/unit/cache.test.ts (root-level files stay at root)
+src/utils/logger.ts             →  tests/unit/utils/logger.test.ts
+src/providers/openai.ts         →  tests/unit/providers/openai.test.ts
+src/blueprint/generator.ts      →  tests/unit/blueprint/generator.test.ts
+src/blueprint/hydrator.ts       →  tests/unit/blueprint/hydrator.test.ts
+src/blueprint/hydrators/cms.ts  →  tests/unit/blueprint/hydrators/cms.test.ts
+src/shopware/export.ts          →  tests/unit/shopware/export.test.ts
+src/shopware/hydrator.ts        →  tests/unit/shopware/hydrator-ordering.test.ts
+src/cache.ts                    →  tests/unit/cache.test.ts (root-level files stay at root)
 ```
 
 This convention:
@@ -25,7 +28,7 @@ This convention:
 ```
 tests/
 ├── unit/                     # Unit tests (mirrors src/ structure)
-│   ├── generators/           # src/generators/ tests
+│   ├── blueprint/            # src/blueprint/ tests
 │   ├── post-processors/      # src/post-processors/ tests
 │   ├── providers/            # src/providers/ tests
 │   ├── server/               # src/server/ tests

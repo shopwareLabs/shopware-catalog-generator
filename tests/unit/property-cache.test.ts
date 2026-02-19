@@ -620,4 +620,42 @@ describe("PropertyCache seeding", () => {
         cache.seedDefaults();
         expect(cache.isEmpty()).toBe(false);
     });
+
+    describe("resolveGroupName", () => {
+        test("returns exact match when group exists", () => {
+            const cache = new PropertyCache(tempDir);
+            cache.seedDefaults();
+            expect(cache.resolveGroupName("Color")).toBe("Color");
+        });
+
+        test("matches suffix pattern (e.g., 'Pot Size' → 'Size')", () => {
+            const cache = new PropertyCache(tempDir);
+            cache.createGroup("Size", ["S", "M", "L"]);
+
+            expect(cache.resolveGroupName("Pot Size")).toBe("Size");
+            expect(cache.resolveGroupName("Blade Size")).toBe("Size");
+        });
+
+        test("matches prefix pattern (e.g., 'Size Large' → 'Size')", () => {
+            const cache = new PropertyCache(tempDir);
+            cache.createGroup("Size", ["S", "M", "L"]);
+
+            expect(cache.resolveGroupName("Size Category")).toBe("Size");
+        });
+
+        test("returns trimmed input when no match", () => {
+            const cache = new PropertyCache(tempDir);
+            cache.seedDefaults();
+
+            expect(cache.resolveGroupName("  Brand  ")).toBe("Brand");
+        });
+
+        test("case-insensitive matching", () => {
+            const cache = new PropertyCache(tempDir);
+            cache.createGroup("Material", ["Wood", "Metal"]);
+
+            expect(cache.resolveGroupName("Handle Material")).toBe("Material");
+            expect(cache.resolveGroupName("handle material")).toBe("Material");
+        });
+    });
 });

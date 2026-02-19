@@ -28,12 +28,19 @@ interface TextProvider {
 
 ```typescript
 interface ImageProvider {
-    generateImage(prompt: string): Promise<string | null>;
+    generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null>;
     readonly isSequential: boolean; // Rate limit handling
     readonly maxConcurrency: number; // Parallel processing limit
     readonly name: string;
 }
+
+interface ImageGenerationOptions {
+    width?: number; // Desired width in pixels
+    height?: number; // Desired height in pixels
+}
 ```
+
+Providers may ignore `width`/`height` if they use fixed sizes or prefer their own defaults.
 
 ## Available Providers
 

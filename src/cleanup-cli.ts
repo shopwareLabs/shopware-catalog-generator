@@ -180,7 +180,7 @@ async function main(): Promise<void> {
     // Validate arguments
     if (!salesChannel && !hasGlobalCleanup) {
         printUsage();
-        process.exit(1);
+        process.exit(0);
     }
 
     // Get Shopware credentials from environment

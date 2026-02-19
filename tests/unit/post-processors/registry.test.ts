@@ -87,8 +87,8 @@ describe("PostProcessor Registry", () => {
 
     test("getAll returns all processors", () => {
         const all = registry.getAll();
-        // 7 CMS processors + 5 other processors = 12 total
-        expect(all.length).toBe(12);
+        // 8 CMS processors + 5 other processors = 13 total
+        expect(all.length).toBe(13);
         expect(all.map((p) => p.name)).toContain("cms-video");
         expect(all.map((p) => p.name)).toContain("cms-testing");
         expect(all.map((p) => p.name)).toContain("digital-product");
@@ -171,7 +171,6 @@ describe("PostProcessor Interface", () => {
 });
 
 describe("runProcessors", () => {
-
     test("throws error for unknown processor", async () => {
         logger.setMcpMode(true);
         const context = createMockContext();

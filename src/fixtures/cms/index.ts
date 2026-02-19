@@ -18,6 +18,7 @@
 
 export { COMMERCE_ELEMENTS_PAGE } from "./commerce.js";
 export { FORM_ELEMENTS_PAGE } from "./form.js";
+export { HOME_LISTING_PAGE } from "./home-listing.js";
 export { IMAGES_ELEMENTS_PAGE } from "./images.js";
 export { TESTING_PLACEHOLDER_PAGE } from "./testing-placeholder.js";
 export { TEXT_ELEMENTS_PAGE } from "./text.js";

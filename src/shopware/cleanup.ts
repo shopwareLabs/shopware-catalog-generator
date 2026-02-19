@@ -1,7 +1,7 @@
-import { logger } from "../utils/index.js";
-
 import type { Schemas } from "./admin-client.js";
 import type { SearchResult } from "./api-types.js";
+
+import { logger } from "../utils/index.js";
 import { ShopwareClient } from "./client.js";
 
 /**
@@ -141,9 +141,7 @@ export class ShopwareCleanup extends ShopwareClient {
                 ]);
 
                 deletedCount += groups.length;
-                logger.info(
-                    `Deleted ${groups.length} property group(s) named "${name}".`
-                );
+                logger.info(`Deleted ${groups.length} property group(s) named "${name}".`);
             }
         }
 
@@ -247,10 +245,9 @@ export class ShopwareCleanup extends ShopwareClient {
 
         const allMedia = await this.fetchAllPages<MediaItem>(
             async (body) => {
-                const { data } = await this.getClient().invoke(
-                    "searchMedia post /search/media",
-                    { body }
-                );
+                const { data } = await this.getClient().invoke("searchMedia post /search/media", {
+                    body,
+                });
                 return data as { data?: MediaItem[]; total?: number };
             },
             {

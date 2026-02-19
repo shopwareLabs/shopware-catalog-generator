@@ -141,6 +141,7 @@ bun run cache:clear                   # Move all to trash
 bun run cache:clear -- music         # Move specific to trash
 bun run cache:trash                   # List trash
 bun run cache:restore -- <item>       # Restore from trash
+bun run cache:restore -- --all        # Restore all trash items
 bun run cache:empty-trash             # Permanently delete
 ```
 

@@ -16,7 +16,7 @@ import type {
     TextProvider,
 } from "../../../src/types/index.js";
 
-import { BlueprintHydrator } from "../../../src/generators/blueprint-hydrator.js";
+import { BlueprintHydrator } from "../../../src/blueprint/hydrator.js";
 
 // Test cache directory
 const TEST_CACHE_DIR = "./test-generated-hydrator";

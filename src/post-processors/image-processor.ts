@@ -1,9 +1,10 @@
 /**
- * Image Processor - Generates and uploads product images
+ * Image Processor - Uploads pre-generated product/category images to Shopware
  *
- * Reads imageDescriptions from product metadata (cache) and:
- * 1. Generates images using the AI image provider
- * 2. Uploads images to Shopware
+ * All AI image generation happens during blueprint hydration (Phase 2).
+ * This processor only reads cached images and uploads them to Shopware:
+ * 1. Reads images from local cache (generated during hydration)
+ * 2. Uploads images to Shopware media
  * 3. Sets cover image and gallery images
  */
 
@@ -14,162 +15,60 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
-import {
-    apiPost,
-    apiUpload,
-    buildImagePrompt,
-    ConcurrencyLimiter,
-    executeWithRetry,
-    generateUUID,
-    logger,
-} from "../utils/index.js";
+import { apiPost, ConcurrencyLimiter, generateUUID, logger } from "../utils/index.js";
+import { CategoryImageProcessor } from "./category-image-processor.js";
+import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
 
 /**
  * Image Processor implementation
  */
 class ImageProcessorImpl implements PostProcessor {
     readonly name = "images";
-    readonly description = "Generate and upload product images";
-    readonly dependsOn: string[] = []; // No dependencies
+    readonly description = "Upload pre-generated product/category images to Shopware";
+    readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { blueprint, cache, imageProvider, options } = context;
+        const { blueprint, cache, options } = context;
 
-        if (!imageProvider) {
+        let processed = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+        const startTime = Date.now();
+
+        const productsWithCachedImages = this.collectProductsWithCachedImages(context);
+        const categoriesWithCachedImages = this.collectCategoriesWithCachedImages(context);
+
+        const totalProducts = productsWithCachedImages.length;
+        const totalCategories = categoriesWithCachedImages.length;
+
+        if (totalProducts === 0 && totalCategories === 0) {
+            logger.info(`    No cached images to upload (run blueprint hydrate first)`, {
+                cli: true,
+            });
             return {
                 name: this.name,
                 processed: 0,
                 skipped: blueprint.products.length,
-                errors: ["No image provider configured"],
-                durationMs: 0,
-            };
-        }
-
-        let processed = 0;
-        const skipped = 0;
-        const errors: string[] = [];
-        const startTime = Date.now();
-
-        // Count products that need image processing
-        const products = blueprint.products;
-        const productsNeedingImages: Array<{
-            product: (typeof products)[0];
-            metadata: NonNullable<ReturnType<typeof cache.loadProductMetadata>>;
-            missingCount: number;
-            cachedCount: number;
-            staleCount: number;
-            shouldCleanup: boolean;
-        }> = [];
-
-        for (const product of products) {
-            const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
-            if (metadata && metadata.imageDescriptions.length > 0) {
-                let cachedCount = 0;
-                let missingCount = 0;
-                let staleCount = 0;
-
-                for (const desc of metadata.imageDescriptions) {
-                    const hasImage = cache.hasImageWithView(
-                        context.salesChannelName,
-                        product.id,
-                        desc.view
-                    );
-
-                    if (!hasImage) {
-                        missingCount++;
-                    } else {
-                        // Check if cached image is stale (prompt mismatch)
-                        const basePrompt = metadata.baseImagePrompt || product.name;
-                        const isStale = cache.isImageStale(
-                            context.salesChannelName,
-                            product.id,
-                            desc.view,
-                            basePrompt
-                        );
-
-                        if (isStale) {
-                            // Delete stale image so it gets regenerated
-                            cache.deleteImageWithView(
-                                context.salesChannelName,
-                                product.id,
-                                desc.view
-                            );
-                            staleCount++;
-                            missingCount++;
-                        } else {
-                            cachedCount++;
-                        }
-                    }
-                }
-
-                if (missingCount > 0 || cachedCount > 0) {
-                    productsNeedingImages.push({
-                        product,
-                        metadata,
-                        missingCount,
-                        cachedCount,
-                        staleCount,
-                        shouldCleanup: missingCount > 0 || staleCount > 0,
-                    });
-                }
-            }
-        }
-
-        // Count category banners needing generation
-        const categoriesWithImages = this.flattenCategories(blueprint.categories).filter(
-            (c) => c.hasImage && c.imageDescription
-        );
-        const categoriesNeedingImages = categoriesWithImages.filter(
-            (c) => !cache.hasImageWithView(context.salesChannelName, c.id, "banner")
-        );
-
-        const totalProductImages = productsNeedingImages.reduce(
-            (sum, p) => sum + p.missingCount,
-            0
-        );
-        const totalStaleImages = productsNeedingImages.reduce((sum, p) => sum + p.staleCount, 0);
-        const totalCategoryImages = categoriesNeedingImages.length;
-        const totalImages = totalProductImages + totalCategoryImages;
-
-        if (totalImages === 0 && productsNeedingImages.length === 0) {
-            logger.info(`    No images to generate or upload`, { cli: true });
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: products.length,
                 errors,
                 durationMs: 0,
             };
         }
 
-        logger.info(`    Image generation: ${totalImages} images to generate`, { cli: true });
-        logger.info(
-            `      - ${totalProductImages} product images (${productsNeedingImages.length} products)`,
-            { cli: true }
-        );
-        if (totalStaleImages > 0) {
-            logger.info(`      - ${totalStaleImages} stale images (product name changed)`, {
-                cli: true,
-            });
-        }
-        logger.info(`      - ${totalCategoryImages} category banners`, { cli: true });
+        const totalImages =
+            productsWithCachedImages.reduce((sum, p) => sum + p.imageCount, 0) + totalCategories;
+        logger.info(`    Uploading ${totalImages} cached images to Shopware`, { cli: true });
+        logger.info(`      - ${totalProducts} products with images`, { cli: true });
+        logger.info(`      - ${totalCategories} category banners`, { cli: true });
 
         if (options.dryRun) {
-            for (const {
-                product,
-                missingCount,
-                cachedCount,
-                staleCount,
-            } of productsNeedingImages) {
-                const staleInfo = staleCount > 0 ? ` (${staleCount} stale)` : "";
-                logger.info(
-                    `    [DRY RUN] ${product.name}: ${missingCount} to generate${staleInfo}, ${cachedCount} cached`,
-                    { cli: true }
-                );
+            for (const { product, imageCount } of productsWithCachedImages) {
+                logger.info(`    [DRY RUN] ${product.name}: ${imageCount} images to upload`, {
+                    cli: true,
+                });
                 processed++;
             }
-            for (const category of categoriesNeedingImages) {
-                logger.info(`    [DRY RUN] Category ${category.name}: banner to generate`, {
+            for (const category of categoriesWithCachedImages) {
+                logger.info(`    [DRY RUN] Category ${category.name}: banner to upload`, {
                     cli: true,
                 });
             }
@@ -182,118 +81,14 @@ class ImageProcessorImpl implements PostProcessor {
             };
         }
 
-        // Create concurrency limiter based on provider capabilities
-        const maxConcurrency = imageProvider.maxConcurrency || 2;
-        const limiter = new ConcurrencyLimiter(maxConcurrency);
-
-        // Collect all image generation tasks
-        type ImageTask = {
-            type: "product" | "category";
-            id: string;
-            name: string;
-            view: string;
-            prompt: string;
-        };
-
-        const imageTasks: ImageTask[] = [];
-
-        // Add product image tasks
-        for (const { product, metadata } of productsNeedingImages) {
-            for (const desc of metadata.imageDescriptions) {
-                if (!cache.hasImageWithView(context.salesChannelName, product.id, desc.view)) {
-                    const prompt = metadata.baseImagePrompt
-                        ? buildImagePrompt(metadata.baseImagePrompt, desc.view)
-                        : desc.prompt;
-                    imageTasks.push({
-                        type: "product",
-                        id: product.id,
-                        name: product.name,
-                        view: desc.view,
-                        prompt,
-                    });
-                }
-            }
-        }
-
-        // Add category banner tasks
-        for (const category of categoriesNeedingImages) {
-            imageTasks.push({
-                type: "category",
-                id: category.id,
-                name: category.name,
-                view: "banner",
-                prompt: category.imageDescription || `Banner image for ${category.name} category`,
-            });
-        }
-
-        // Process all images with concurrency limiting
-        if (imageTasks.length > 0) {
-            logger.info(
-                `    Generating ${imageTasks.length} images (${maxConcurrency} parallel, ${imageProvider.name})...`,
-                { cli: true }
-            );
-            const taskStartTime = Date.now();
-
-            const results = await limiter.all(
-                imageTasks.map((task, index) => async () => {
-                    const shortName = this.truncateName(task.name);
-                    const taskNum = index + 1;
-                    logger.info(
-                        `      [${taskNum}/${imageTasks.length}] ${task.type === "category" ? "📁" : "📦"} ${shortName} (${task.view})`,
-                        { cli: true }
-                    );
-
-                    try {
-                        // Use retry logic for transient failures (rate limits, timeouts)
-                        const imageData = await executeWithRetry(
-                            async () => {
-                                const result = await imageProvider.generateImage(task.prompt);
-                                // Treat null as retriable failure
-                                if (!result) {
-                                    throw new Error("Image generation returned null");
-                                }
-                                return result;
-                            },
-                            {
-                                maxRetries: 3,
-                                baseDelay: 5000, // 5s, 10s, 20s backoff
-                            }
-                        );
-
-                        cache.saveImageWithView(
-                            context.salesChannelName,
-                            task.id,
-                            task.view,
-                            imageData,
-                            task.prompt,
-                            imageProvider.name
-                        );
-                        return { success: true, task };
-                    } catch (error) {
-                        const errorMsg = error instanceof Error ? error.message : String(error);
-                        errors.push(`${task.type} ${task.name} (${task.view}): ${errorMsg}`);
-                        return { success: false, task, error: errorMsg };
-                    }
-                })
-            );
-
-            const successCount = results.filter((r) => r.success).length;
-            const elapsed = ((Date.now() - taskStartTime) / 1000).toFixed(1);
-            logger.info(
-                `    ✓ Generated ${successCount}/${imageTasks.length} images in ${elapsed}s`,
-                { cli: true }
-            );
-        }
-
-        // Now upload product images to Shopware (parallel across products)
+        // Upload product images (parallel across products)
         logger.info(`    Uploading product images to Shopware...`, { cli: true });
         let uploadedProducts = 0;
         const uploadLimiter = new ConcurrencyLimiter(3);
 
         const uploadResults = await uploadLimiter.all(
-            productsNeedingImages.map(({ product, metadata, shouldCleanup }) => async () => {
+            productsWithCachedImages.map(({ product, metadata }) => async () => {
                 try {
-                    // Collect all cached images for upload
                     const mediaToUpload: Array<{
                         mediaId: string;
                         productMediaId: string;
@@ -302,10 +97,11 @@ class ImageProcessorImpl implements PostProcessor {
                     }> = [];
 
                     for (const desc of metadata.imageDescriptions) {
-                        const cachedImage = cache.loadImageWithView(
+                        const cachedImage = cache.images.loadImageWithView(
                             context.salesChannelName,
                             product.id,
-                            desc.view
+                            desc.view,
+                            "product_media"
                         );
                         if (cachedImage) {
                             mediaToUpload.push({
@@ -317,14 +113,12 @@ class ImageProcessorImpl implements PostProcessor {
                         }
                     }
 
-                    // Upload images to Shopware
                     if (mediaToUpload.length > 0) {
                         await this.uploadProductImages(
                             context,
                             product.id,
                             product.name,
-                            mediaToUpload,
-                            shouldCleanup
+                            mediaToUpload
                         );
                         return { uploaded: true, processed: true };
                     }
@@ -341,34 +135,35 @@ class ImageProcessorImpl implements PostProcessor {
 
         for (const result of uploadResults) {
             if (result.processed) processed++;
+            else skipped++;
             if (result.uploaded) uploadedProducts++;
         }
 
         logger.info(`    ✓ Uploaded images for ${uploadedProducts} products`, { cli: true });
 
-        // Now upload category banners to Shopware (parallel)
-        if (categoriesWithImages.length > 0) {
+        // Upload category banners (parallel)
+        if (categoriesWithCachedImages.length > 0) {
             logger.info(`    Uploading category banners to Shopware...`, { cli: true });
-            let uploadedCategories = 0;
-            const categoriesToRebuild = new Set(categoriesNeedingImages.map((c) => c.id));
             const categoryLimiter = new ConcurrencyLimiter(3);
+            const categoryProcessor = new CategoryImageProcessor();
 
             const categoryResults = await categoryLimiter.all(
-                categoriesWithImages.map((category) => async () => {
+                categoriesWithCachedImages.map((category) => async () => {
                     try {
-                        const cachedImage = cache.loadImageWithView(
+                        const cachedImage = cache.images.loadImageWithView(
                             context.salesChannelName,
                             category.id,
-                            "banner"
+                            "banner",
+                            "category_media"
                         );
 
                         if (cachedImage) {
-                            return await this.uploadCategoryImage(
+                            return await categoryProcessor.uploadCategoryImage(
                                 context,
                                 category.id,
                                 category.name,
                                 cachedImage,
-                                categoriesToRebuild.has(category.id)
+                                true
                             );
                         }
                         return false;
@@ -381,7 +176,7 @@ class ImageProcessorImpl implements PostProcessor {
                 })
             );
 
-            uploadedCategories = categoryResults.filter(Boolean).length;
+            const uploadedCategories = categoryResults.filter(Boolean).length;
             logger.info(`    ✓ Uploaded banners for ${uploadedCategories} categories`, {
                 cli: true,
             });
@@ -394,6 +189,57 @@ class ImageProcessorImpl implements PostProcessor {
             errors,
             durationMs: Date.now() - startTime,
         };
+    }
+
+    private collectProductsWithCachedImages(context: PostProcessorContext): Array<{
+        product: PostProcessorContext["blueprint"]["products"][0];
+        metadata: NonNullable<ReturnType<typeof context.cache.loadProductMetadata>>;
+        imageCount: number;
+    }> {
+        const result: Array<{
+            product: PostProcessorContext["blueprint"]["products"][0];
+            metadata: NonNullable<ReturnType<typeof context.cache.loadProductMetadata>>;
+            imageCount: number;
+        }> = [];
+
+        for (const product of context.blueprint.products) {
+            const metadata = context.cache.loadProductMetadata(
+                context.salesChannelName,
+                product.id
+            );
+            if (!metadata || metadata.imageDescriptions.length === 0) continue;
+
+            const imageCount = metadata.imageDescriptions.filter((desc) =>
+                context.cache.images.hasImageWithView(
+                    context.salesChannelName,
+                    product.id,
+                    desc.view,
+                    "product_media"
+                )
+            ).length;
+
+            if (imageCount > 0) {
+                result.push({ product, metadata, imageCount });
+            }
+        }
+
+        return result;
+    }
+
+    private collectCategoriesWithCachedImages(
+        context: PostProcessorContext
+    ): PostProcessorContext["blueprint"]["categories"] {
+        return this.flattenCategories(context.blueprint.categories).filter(
+            (c) =>
+                c.hasImage &&
+                c.imageDescription &&
+                context.cache.images.hasImageWithView(
+                    context.salesChannelName,
+                    c.id,
+                    "banner",
+                    "category_media"
+                )
+        );
     }
 
     private flattenCategories(
@@ -426,16 +272,13 @@ class ImageProcessorImpl implements PostProcessor {
             productMediaId: string;
             view: string;
             base64Data: string;
-        }>,
-        shouldCleanup: boolean
+        }>
     ): Promise<void> {
-        // First check if product already has images in Shopware
         const hasExistingImages = await this.productHasImages(context, productId);
-        if (hasExistingImages && shouldCleanup) {
-            await this.cleanupProductImages(context, productId, productName);
-        }
-        if (hasExistingImages && !shouldCleanup) {
-            logger.info(`      ⊘ Product already has images in Shopware, skipped`, { cli: true });
+        if (hasExistingImages) {
+            logger.info(`      ⊘ ${this.truncateName(productName)}: already has images, skipped`, {
+                cli: true,
+            });
             return;
         }
 
@@ -558,11 +401,10 @@ class ImageProcessorImpl implements PostProcessor {
                 const imageBuffer = Buffer.from(img.base64Data, "base64");
                 const fileName = `${sanitizedName}-${img.view}`;
 
-                // Detect image format from magic bytes
-                const format = this.detectImageFormat(imageBuffer);
+                const format = detectImageFormat(imageBuffer);
 
                 try {
-                    const uploadResponse = await this.uploadImageWithRetry(
+                    const uploadResponse = await uploadImageWithRetry(
                         context,
                         img.mediaId,
                         fileName,
@@ -599,10 +441,9 @@ class ImageProcessorImpl implements PostProcessor {
                             error: message,
                         },
                     });
-                    logger.error(
-                        `      ✗ ${shortName} (${img.view}) upload failed: ${message}`,
-                        { cli: true }
-                    );
+                    logger.error(`      ✗ ${shortName} (${img.view}) upload failed: ${message}`, {
+                        cli: true,
+                    });
                     return "error" as const;
                 }
             })
@@ -617,10 +458,9 @@ class ImageProcessorImpl implements PostProcessor {
         const reusedMedia = mediaToLink.filter((m) => !m.isNew);
         const reusedCount = reusedMedia.length + duplicateCount;
         if (uploadedCount > 0 && reusedCount > 0) {
-            logger.info(
-                `      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`,
-                { cli: true }
-            );
+            logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`, {
+                cli: true,
+            });
         } else if (uploadedCount > 0) {
             logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded`, { cli: true });
         } else if (reusedCount > 0) {
@@ -741,370 +581,6 @@ class ImageProcessorImpl implements PostProcessor {
         return null;
     }
 
-    // Cache for category media folder ID
-    private categoryMediaFolderId: string | null = null;
-
-    /**
-     * Get Category Media folder ID (cached)
-     */
-    private async getCategoryMediaFolderId(context: PostProcessorContext): Promise<string | null> {
-        if (this.categoryMediaFolderId) {
-            return this.categoryMediaFolderId;
-        }
-
-        try {
-            // First try to find the default folder for categories
-            const defaultFolderResponse = await apiPost(context, "search/media-default-folder", {
-                limit: 1,
-                filter: [{ type: "equals", field: "entity", value: "category" }],
-                associations: { folder: {} },
-            });
-
-            if (defaultFolderResponse.ok) {
-                const data = (await defaultFolderResponse.json()) as {
-                    data?: Array<{ folder?: { id: string } }>;
-                };
-                const folder = data.data?.[0]?.folder;
-                if (folder) {
-                    this.categoryMediaFolderId = folder.id;
-                    return this.categoryMediaFolderId;
-                }
-            }
-
-            // Fallback: search for folder by name
-            const response = await apiPost(context, "search/media-folder", {
-                filter: [{ type: "equals", field: "name", value: "Category Media" }],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as { data?: Array<{ id: string }> };
-                const firstFolder = data.data?.[0];
-                if (firstFolder) {
-                    this.categoryMediaFolderId = firstFolder.id;
-                    return this.categoryMediaFolderId;
-                }
-            }
-        } catch (error) {
-            logger.warn("Could not find Category Media folder", { data: error });
-        }
-
-        return null;
-    }
-
-    // Cache for category media IDs
-    private categoryMediaIds: Map<string, string> = new Map();
-
-    /**
-     * Get category media ID (cached)
-     */
-    private async getCategoryMediaId(
-        context: PostProcessorContext,
-        categoryId: string
-    ): Promise<string | null> {
-        const cached = this.categoryMediaIds.get(categoryId);
-        if (cached) {
-            return cached;
-        }
-
-        try {
-            interface CategoryResponse {
-                data?: Array<{ id: string; mediaId?: string | null }>;
-            }
-            const response = await apiPost(context, "search/category", {
-                ids: [categoryId],
-                includes: { category: ["id", "mediaId"] },
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as CategoryResponse;
-                const category = data.data?.[0];
-                if (category?.mediaId) {
-                    this.categoryMediaIds.set(categoryId, category.mediaId);
-                    return category.mediaId;
-                }
-            }
-        } catch {
-            // On error, assume no image
-        }
-
-        return null;
-    }
-
-    /**
-     * Upload category banner image to Shopware
-     */
-    private async uploadCategoryImage(
-        context: PostProcessorContext,
-        categoryId: string,
-        categoryName: string,
-        base64Data: string,
-        shouldCleanup: boolean
-    ): Promise<boolean> {
-        // Check if category already has an image and clear it if so
-        const existingCategoryMediaId = await this.getCategoryMediaId(context, categoryId);
-        if (existingCategoryMediaId && shouldCleanup) {
-            await this.clearCategoryImage(
-                context,
-                categoryId,
-                categoryName,
-                existingCategoryMediaId
-            );
-        }
-        if (existingCategoryMediaId && !shouldCleanup) {
-            logger.info(`      ⊘ Category "${categoryName}" already has image, skipped`, {
-                cli: true,
-            });
-            return false;
-        }
-
-        const sanitizedName = categoryName.replace(/[^a-zA-Z0-9]/g, "-");
-        const fileName = `${sanitizedName}-banner`;
-
-        // Check if media with this filename already exists
-        const existingFileMediaId = await this.findMediaByFileName(context, fileName);
-        let mediaId: string;
-
-        let isExistingMedia = false;
-        if (existingFileMediaId) {
-            // Reuse existing media
-            mediaId = existingFileMediaId;
-            isExistingMedia = true;
-        } else {
-            // Create new media entity
-            mediaId = generateUUID();
-            const mediaFolderId = await this.getCategoryMediaFolderId(context);
-
-            const createMediaResponse = await apiPost(context, "_action/sync", {
-                createMedia: {
-                    entity: "media",
-                    action: "upsert",
-                    payload: [
-                        {
-                            id: mediaId,
-                            private: false,
-                            ...(mediaFolderId && { mediaFolderId }),
-                        },
-                    ],
-                },
-            });
-
-            if (!createMediaResponse.ok) {
-                const errorText = await createMediaResponse.text();
-                logger.apiError(
-                    "_action/sync (create category media)",
-                    createMediaResponse.status,
-                    {
-                        categoryId,
-                        error: errorText,
-                    }
-                );
-                throw new Error(`Failed to create media entity: ${createMediaResponse.status}`);
-            }
-
-            // Upload the image file (with retry for transient failures)
-            const imageBuffer = Buffer.from(base64Data, "base64");
-            const format = this.detectImageFormat(imageBuffer);
-
-            const uploadResponse = await this.uploadImageWithRetry(
-                context,
-                mediaId,
-                fileName,
-                imageBuffer,
-                format
-            );
-
-            if (!uploadResponse.ok) {
-                const errorText = await uploadResponse.text();
-
-                // Skip if file already exists
-                if (!errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
-                    logger.apiError("_action/media/upload (category)", uploadResponse.status, {
-                        categoryId,
-                        error: errorText,
-                    });
-                    throw new Error(`Failed to upload category image: ${uploadResponse.status}`);
-                }
-            }
-        }
-
-        // Update category with the media ID
-        const updateResponse = await apiPost(context, "_action/sync", {
-            updateCategory: {
-                entity: "category",
-                action: "upsert",
-                payload: [
-                    {
-                        id: categoryId,
-                        mediaId,
-                    },
-                ],
-            },
-        });
-
-        if (!updateResponse.ok) {
-            const errorText = await updateResponse.text();
-            logger.apiError("_action/sync (update category mediaId)", updateResponse.status, {
-                categoryId,
-                error: errorText,
-            });
-            throw new Error(`Failed to update category with image: ${updateResponse.status}`);
-        }
-
-        if (isExistingMedia) {
-            logger.info(`      ⊘ Linked existing banner for "${categoryName}"`, { cli: true });
-        } else {
-            logger.info(`      ✓ Uploaded banner for "${categoryName}"`, { cli: true });
-        }
-        return true;
-    }
-
-    /**
-     * Remove existing product images before re-upload
-     */
-    private async cleanupProductImages(
-        context: PostProcessorContext,
-        productId: string,
-        productName: string
-    ): Promise<void> {
-        if (!context.api) {
-            logger.info(`      ⊘ ${this.truncateName(productName)}: cleanup skipped (no API)`, {
-                cli: true,
-            });
-            return;
-        }
-
-        const productMedia = await context.api.searchEntities<{ id: string; mediaId: string }>(
-            "product-media",
-            [{ type: "equals", field: "productId", value: productId }],
-            { limit: 500 }
-        );
-
-        if (productMedia.length === 0) {
-            return;
-        }
-
-        const productMediaIds = productMedia.map((pm) => pm.id);
-        const mediaIds = productMedia.map((pm) => pm.mediaId);
-
-        await context.api.deleteEntities("product_media", productMediaIds);
-
-        for (const mediaId of mediaIds) {
-            try {
-                await context.api.deleteEntity("media", mediaId);
-            } catch {
-                // Media may still be in use elsewhere
-            }
-        }
-
-        this.productsWithImages.delete(productId);
-        logger.info(
-            `      ✓ ${this.truncateName(productName)}: cleaned up ${productMediaIds.length} images`,
-            { cli: true }
-        );
-    }
-
-    /**
-     * Remove existing category image before re-upload
-     */
-    private async clearCategoryImage(
-        context: PostProcessorContext,
-        categoryId: string,
-        categoryName: string,
-        mediaId: string
-    ): Promise<void> {
-        if (!context.api) {
-            logger.info(`      ⊘ Category "${categoryName}": cleanup skipped (no API)`, {
-                cli: true,
-            });
-            return;
-        }
-
-        await context.api.syncEntities({
-            clearCategoryMedia: {
-                entity: "category",
-                action: "upsert",
-                payload: [
-                    {
-                        id: categoryId,
-                        mediaId: null,
-                    },
-                ],
-            },
-        });
-
-        try {
-            await context.api.deleteEntity("media", mediaId);
-        } catch {
-            // Media may still be in use elsewhere
-        }
-
-        this.categoryMediaIds.delete(categoryId);
-        logger.info(`      ✓ Cleared existing banner for "${categoryName}"`, { cli: true });
-    }
-
-    /**
-     * Detect image format from magic bytes
-     */
-    private detectImageFormat(buffer: Buffer): { extension: string; mimeType: string } {
-        // Check first bytes for magic numbers
-        if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-            return { extension: "jpg", mimeType: "image/jpeg" };
-        }
-        if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-            return { extension: "png", mimeType: "image/png" };
-        }
-        if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-            return { extension: "gif", mimeType: "image/gif" };
-        }
-        if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
-            // RIFF header - could be WEBP
-            if (
-                buffer[8] === 0x57 &&
-                buffer[9] === 0x45 &&
-                buffer[10] === 0x42 &&
-                buffer[11] === 0x50
-            ) {
-                return { extension: "webp", mimeType: "image/webp" };
-            }
-        }
-        // Default to JPEG (most common from Pollinations)
-        return { extension: "jpg", mimeType: "image/jpeg" };
-    }
-
-    /**
-     * Upload image with retry logic for transient failures
-     * Retries on rate limits, timeouts, and 5xx errors
-     */
-    private async uploadImageWithRetry(
-        context: PostProcessorContext,
-        mediaId: string,
-        fileName: string,
-        imageBuffer: Buffer,
-        format: { extension: string; mimeType: string }
-    ): Promise<Response> {
-        const endpoint = `_action/media/${mediaId}/upload?extension=${format.extension}&fileName=${encodeURIComponent(fileName)}`;
-
-        return executeWithRetry(
-            async () => {
-                const response = await apiUpload(context, endpoint, imageBuffer, format.mimeType);
-
-                // Retry on 5xx server errors
-                if (response.status >= 500 && response.status < 600) {
-                    const error = new Error(`Server error: ${response.status}`);
-                    (error as unknown as { status: number }).status = 429; // Trick rate limit detection
-                    throw error;
-                }
-
-                return response;
-            },
-            {
-                maxRetries: 3,
-                baseDelay: 2000, // 2s, 4s, 8s
-            }
-        );
-    }
-
     /**
      * Truncate name for cleaner log output
      */
@@ -1195,55 +671,9 @@ class ImageProcessorImpl implements PostProcessor {
                 logger.info(`    No product media found`, { cli: true });
             }
 
-            // Step 5: Get SalesChannel to find root category
-            const salesChannel = await context.api.getSalesChannelByName(context.salesChannelName);
-            if (salesChannel) {
-                // Find categories under the root and clear their mediaId
-                const categories = await context.api.searchEntities<{
-                    id: string;
-                    mediaId?: string;
-                }>(
-                    "category",
-                    [
-                        {
-                            type: "multi",
-                            operator: "or",
-                            queries: [
-                                {
-                                    type: "equals",
-                                    field: "parentId",
-                                    value: salesChannel.navigationCategoryId,
-                                },
-                                {
-                                    type: "contains",
-                                    field: "path",
-                                    value: salesChannel.navigationCategoryId,
-                                },
-                            ],
-                        },
-                    ],
-                    { limit: 500 }
-                );
-
-                const categoriesWithMedia = categories.filter((c) => c.mediaId);
-                if (categoriesWithMedia.length > 0) {
-                    const categoryUpdates = categoriesWithMedia.map((c) => ({
-                        id: c.id,
-                        mediaId: null,
-                    }));
-                    await context.api.syncEntities({
-                        clearCategoryMedia: {
-                            entity: "category",
-                            action: "upsert",
-                            payload: categoryUpdates,
-                        },
-                    });
-                    logger.info(
-                        `    ✓ Cleared media from ${categoriesWithMedia.length} categories`,
-                        { cli: true }
-                    );
-                }
-            }
+            // Step 5: Clear category banners under SalesChannel root
+            const categoryProcessor = new CategoryImageProcessor();
+            await categoryProcessor.cleanupCategoryImages(context);
         } catch (error) {
             errors.push(
                 `Image cleanup failed: ${error instanceof Error ? error.message : String(error)}`

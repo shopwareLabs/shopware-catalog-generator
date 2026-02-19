@@ -16,6 +16,7 @@ function createMockCache() {
     return {
         getSalesChannelDir: mock(() => "/tmp/test-cache"),
         loadProductMetadata: mock(() => null),
+        loadCmsBlueprint: mock(() => null),
     };
 }
 
@@ -115,6 +116,18 @@ describe("TextProcessor", () => {
             expect(result.errors).toEqual([]);
             expect(fetchCalls.length).toBe(0);
         });
+
+        test("non-dry run creates cms and landing pages", async () => {
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+            responses.set("search/cms-page", { ok: true, data: { data: [] } });
+            responses.set("search/landing-page", { ok: true, data: { data: [] } });
+            responses.set("_action/sync", { ok: true, data: { success: true } });
+            const { context } = createMockContext({ fetchResponses: responses });
+
+            const result = await TextProcessor.process(context);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toEqual([]);
+        });
     });
 });
 
@@ -157,6 +170,18 @@ describe("VideoProcessor", () => {
             expect(result.errors).toEqual([]);
             expect(fetchCalls.length).toBe(0);
         });
+
+        test("non-dry run creates cms and landing pages", async () => {
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+            responses.set("search/cms-page", { ok: true, data: { data: [] } });
+            responses.set("search/landing-page", { ok: true, data: { data: [] } });
+            responses.set("_action/sync", { ok: true, data: { success: true } });
+            const { context } = createMockContext({ fetchResponses: responses });
+
+            const result = await VideoProcessor.process(context);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toEqual([]);
+        });
     });
 });
 
@@ -194,6 +219,27 @@ describe("TextImagesProcessor", () => {
             expect(result.processed).toBe(1);
             expect(result.errors).toEqual([]);
             expect(fetchCalls.length).toBe(0);
+        });
+
+        test("non-dry run creates cms and landing pages", async () => {
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+            responses.set("search/cms-page", { ok: true, data: { data: [] } });
+            responses.set("search/landing-page", { ok: true, data: { data: [] } });
+            responses.set("search/media", { ok: true, data: { data: [{ id: "existing-cms-media" }] } });
+            responses.set("_action/sync", { ok: true, data: { success: true } });
+            const { context } = createMockContext({ fetchResponses: responses });
+            context.cache = {
+                ...context.cache,
+                images: {
+                    loadImageForSalesChannel: mock(() => null),
+                    hasImageForSalesChannel: mock(() => false),
+                    saveImageForSalesChannel: mock(() => {}),
+                },
+            } as unknown as PostProcessorContext["cache"];
+
+            const result = await TextImagesProcessor.process(context);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toEqual([]);
         });
     });
 });
@@ -234,6 +280,18 @@ describe("FormProcessor", () => {
             expect(result.processed).toBe(1);
             expect(result.errors).toEqual([]);
             expect(fetchCalls.length).toBe(0);
+        });
+
+        test("non-dry run creates cms and landing pages", async () => {
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+            responses.set("search/cms-page", { ok: true, data: { data: [] } });
+            responses.set("search/landing-page", { ok: true, data: { data: [] } });
+            responses.set("_action/sync", { ok: true, data: { success: true } });
+            const { context } = createMockContext({ fetchResponses: responses });
+
+            const result = await FormProcessor.process(context);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toEqual([]);
         });
     });
 });

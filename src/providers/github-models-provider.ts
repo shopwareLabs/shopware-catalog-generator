@@ -1,7 +1,9 @@
-import type { ChatMessage, TextProvider } from "../types/index.js";
+import type { z } from "zod";
+
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
-import type { z } from "zod";
+
+import type { ChatMessage, TextProvider } from "../types/index.js";
 
 /**
  * GitHub Models text generation provider

@@ -7,8 +7,8 @@
 
 import type { ProcessContext } from "./server/index.js";
 
+import { BlueprintGenerator, BlueprintHydrator } from "./blueprint/index.js";
 import { DataCache } from "./cache.js";
-import { BlueprintGenerator, BlueprintHydrator } from "./generators/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
 import { processManager } from "./server/index.js";

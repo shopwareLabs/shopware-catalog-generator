@@ -258,10 +258,9 @@ export async function syncPropertyGroups(
         updated++;
 
         if (needsDisplayTypeUpdate) {
-            logger.info(
-                `  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`,
-                { cli: true }
-            );
+            logger.info(`  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`, {
+                cli: true,
+            });
         } else if (missingOptions.length > 0) {
             logger.info(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`, {
                 cli: true,
@@ -280,10 +279,9 @@ export async function syncPropertyGroups(
         await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToSync);
     }
 
-    logger.info(
-        `  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`,
-        { cli: true }
-    );
+    logger.info(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`, {
+        cli: true,
+    });
 
     // Upload images for color options that can't use hex codes (Multicolor, Rainbow, etc.)
     await uploadColorImages(dataHydrator, blueprint);

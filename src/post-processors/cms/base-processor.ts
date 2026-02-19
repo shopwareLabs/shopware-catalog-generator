@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { CmsBlueprintPage } from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -16,6 +17,7 @@ import type {
 } from "../index.js";
 
 import { apiPost, generateUUID, logger } from "../../utils/index.js";
+import { detectImageFormat, uploadImageWithRetry } from "../image-utils.js";
 
 /** Filename for storing CMS landing page IDs */
 const CMS_LANDING_PAGES_FILE = "cms-landing-pages.json";
@@ -62,6 +64,61 @@ export abstract class BaseCmsProcessor implements PostProcessor {
     }
 
     /**
+     * Get the hydrated CMS page from cached CMS blueprint (if available).
+     * Returns null if no CMS blueprint is cached or page not found.
+     */
+    protected getHydratedCmsPage(context: PostProcessorContext): CmsBlueprintPage | null {
+        const cmsBlueprint = context.cache.loadCmsBlueprint(context.salesChannelName);
+        if (!cmsBlueprint) return null;
+        return cmsBlueprint.pages.find((p) => p.name === this.pageFixture.name) ?? null;
+    }
+
+    /**
+     * Apply hydrated CMS text to a fixture, returning a new fixture with AI text.
+     * Falls back to original fixture text if no hydrated content is found.
+     */
+    protected applyHydratedText(
+        fixture: CmsPageFixture,
+        hydratedPage: CmsBlueprintPage | null
+    ): CmsPageFixture {
+        if (!hydratedPage) return fixture;
+
+        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+
+        for (let si = 0; si < cloned.sections.length && si < hydratedPage.sections.length; si++) {
+            const fixtureSection = cloned.sections[si];
+            const hydratedSection = hydratedPage.sections[si];
+            if (!fixtureSection || !hydratedSection) continue;
+
+            for (
+                let bi = 0;
+                bi < fixtureSection.blocks.length && bi < hydratedSection.blocks.length;
+                bi++
+            ) {
+                const fixtureBlock = fixtureSection.blocks[bi];
+                const hydratedBlock = hydratedSection.blocks[bi];
+                if (!fixtureBlock || !hydratedBlock) continue;
+
+                let hydratedSlotIdx = 0;
+                for (const slot of fixtureBlock.slots) {
+                    if (slot.type !== "text" || !slot.config.content) continue;
+
+                    const hydratedSlot = hydratedBlock.slots[hydratedSlotIdx];
+                    if (hydratedSlot?.textContent) {
+                        slot.config.content = {
+                            source: "static",
+                            value: hydratedSlot.textContent,
+                        };
+                    }
+                    hydratedSlotIdx++;
+                }
+            }
+        }
+
+        return cloned;
+    }
+
+    /**
      * Process: Create CMS page and landing page
      */
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
@@ -85,12 +142,16 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         }
 
         try {
+            // Apply hydrated CMS text from blueprint if available
+            const hydratedPage = this.getHydratedCmsPage(context);
+            const fixtureToUse = this.applyHydratedText(this.pageFixture, hydratedPage);
+
             // Step 1: Check if CMS page already exists for this SalesChannel
             let cmsPageId = await this.findCmsPageByName(context, cmsPageName);
 
             if (!cmsPageId) {
                 // Create the CMS page layout with store-scoped name
-                cmsPageId = await this.createCmsPage(context, this.pageFixture, cmsPageName);
+                cmsPageId = await this.createCmsPage(context, fixtureToUse, cmsPageName);
                 if (!cmsPageId) {
                     errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
                     return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
@@ -614,6 +675,136 @@ export abstract class BaseCmsProcessor implements PostProcessor {
     private getCmsLandingPagesFilePath(context: PostProcessorContext): string {
         const scDir = context.cache.getSalesChannelDir(context.salesChannelName);
         return path.join(scDir, CMS_LANDING_PAGES_FILE);
+    }
+
+    // =========================================================================
+    // CMS Media Operations
+    // =========================================================================
+
+    private cmsMediaFolderId: string | null = null;
+
+    /**
+     * Get the "CMS Media" folder ID in Shopware (cached per instance)
+     */
+    protected async getCmsMediaFolderId(context: PostProcessorContext): Promise<string | null> {
+        if (this.cmsMediaFolderId) return this.cmsMediaFolderId;
+
+        interface FolderResponse {
+            data?: Array<{ id: string }>;
+        }
+
+        const response = await apiPost(context, "search/media-default-folder", {
+            filter: [{ type: "equals", field: "entity", value: "cms_page" }],
+            associations: { folder: {} },
+            limit: 1,
+        });
+
+        if (!response.ok) return null;
+
+        const data = (await response.json()) as {
+            data?: Array<{ id: string; folder?: { id: string } }>;
+        };
+        const defaultFolder = data.data?.[0];
+        if (defaultFolder?.folder?.id) {
+            this.cmsMediaFolderId = defaultFolder.folder.id;
+            return this.cmsMediaFolderId;
+        }
+
+        // Fallback: search by folder name
+        const folderResponse = await apiPost(context, "search/media-folder", {
+            filter: [{ type: "equals", field: "name", value: "CMS Media" }],
+            limit: 1,
+        });
+
+        if (!folderResponse.ok) return null;
+
+        const folderData = (await folderResponse.json()) as FolderResponse;
+        this.cmsMediaFolderId = folderData.data?.[0]?.id ?? null;
+        return this.cmsMediaFolderId;
+    }
+
+    /**
+     * Upload a pre-cached CMS image to Shopware's CMS Media folder.
+     * Images must be pre-generated during blueprint hydration.
+     * Returns the Shopware media ID or null if not cached / upload fails.
+     */
+    protected async generateAndUploadCmsImage(
+        context: PostProcessorContext,
+        imageKey: string
+    ): Promise<string | null> {
+        const base64 = context.cache.images.loadImageForSalesChannel(
+            context.salesChannelName,
+            imageKey,
+            "cms_media"
+        );
+
+        if (!base64) {
+            logger.warn(`CMS image "${imageKey}" not in cache (run blueprint hydrate first)`);
+            return null;
+        }
+
+        // Upload to Shopware
+        const folderId = await this.getCmsMediaFolderId(context);
+        const mediaId = generateUUID();
+        const imageBuffer = Buffer.from(base64, "base64");
+        const format = detectImageFormat(imageBuffer);
+        const fileName = `cms-${context.salesChannelName}-${imageKey}`;
+
+        // Create media entity
+        const createResponse = await apiPost(context, "_action/sync", {
+            createMedia: {
+                entity: "media",
+                action: "upsert",
+                payload: [{ id: mediaId, mediaFolderId: folderId }],
+            },
+        });
+
+        if (!createResponse.ok) {
+            logger.warn(`Failed to create CMS media entity for ${imageKey}`);
+            return null;
+        }
+
+        // Upload binary
+        const uploadResponse = await uploadImageWithRetry(
+            context,
+            mediaId,
+            fileName,
+            imageBuffer,
+            format
+        );
+
+        if (!uploadResponse.ok) {
+            logger.warn(`Failed to upload CMS image for ${imageKey}`);
+            return null;
+        }
+
+        return mediaId;
+    }
+
+    /**
+     * Get or create a CMS media entity (idempotent - checks Shopware first, then uploads from cache)
+     */
+    protected async getOrCreateCmsMedia(
+        context: PostProcessorContext,
+        imageKey: string
+    ): Promise<string | null> {
+        const fileName = `cms-${context.salesChannelName}-${imageKey}`;
+
+        interface MediaResponse {
+            data?: Array<{ id: string }>;
+        }
+
+        const searchResponse = await apiPost(context, "search/media", {
+            filter: [{ type: "contains", field: "fileName", value: fileName }],
+            limit: 1,
+        });
+
+        if (searchResponse.ok) {
+            const data = (await searchResponse.json()) as MediaResponse;
+            if (data.data?.[0]?.id) return data.data[0].id;
+        }
+
+        return this.generateAndUploadCmsImage(context, imageKey);
     }
 
     // =========================================================================

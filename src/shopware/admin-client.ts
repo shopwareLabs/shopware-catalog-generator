@@ -5,8 +5,9 @@
  * handling authentication and providing a consistent interface for the rest of the application.
  */
 
-import { createAdminAPIClient } from "@shopware/api-client";
 import type { operations } from "@shopware/api-client/admin-api-types";
+
+import { createAdminAPIClient } from "@shopware/api-client";
 
 /** Re-export official types so the rest of the codebase imports them from here */
 export type { operations, Schemas } from "@shopware/api-client/admin-api-types";

@@ -6,7 +6,6 @@ import {
     generateAccessKey as generateAccessKeyUtil,
     logger,
 } from "../utils/index.js";
-
 import { createShopwareAdminClient } from "./admin-client.js";
 
 /**
@@ -131,15 +130,12 @@ export class ShopwareClient {
 
     /** Get currency ID by ISO code */
     async getCurrencyId(currency = "EUR"): Promise<string> {
-        const { data } = await this.getClient().invoke(
-            "searchCurrency post /search/currency",
-            {
-                body: {
-                    limit: 1,
-                    filter: [{ type: "equals", field: "isoCode", value: currency }],
-                },
-            }
-        );
+        const { data } = await this.getClient().invoke("searchCurrency post /search/currency", {
+            body: {
+                limit: 1,
+                filter: [{ type: "equals", field: "isoCode", value: currency }],
+            },
+        });
         const response = data as SearchResult<Schemas["Currency"]>;
         const currencyData = response.data?.[0];
         if (!currencyData) {
@@ -466,15 +462,12 @@ export class ShopwareClient {
      */
     async findCmsPageByName(name: string): Promise<string | null> {
         try {
-            const { data } = await this.getClient().invoke(
-                "searchCmsPage post /search/cms-page",
-                {
-                    body: {
-                        filter: [{ type: "equals", field: "name", value: name }],
-                        limit: 1,
-                    },
-                }
-            );
+            const { data } = await this.getClient().invoke("searchCmsPage post /search/cms-page", {
+                body: {
+                    filter: [{ type: "equals", field: "name", value: name }],
+                    limit: 1,
+                },
+            });
             const response = data as SearchResult<Schemas["CmsPage"]>;
 
             return response.data?.[0]?.id ?? null;
@@ -510,25 +503,22 @@ export class ShopwareClient {
         }>;
     } | null> {
         try {
-            const { data } = await this.getClient().invoke(
-                "searchCmsPage post /search/cms-page",
-                {
-                    body: {
-                        ids: [id],
-                        associations: {
-                            sections: {
-                                associations: {
-                                    blocks: {
-                                        associations: {
-                                            slots: {},
-                                        },
+            const { data } = await this.getClient().invoke("searchCmsPage post /search/cms-page", {
+                body: {
+                    ids: [id],
+                    associations: {
+                        sections: {
+                            associations: {
+                                blocks: {
+                                    associations: {
+                                        slots: {},
                                     },
                                 },
                             },
                         },
                     },
-                }
-            );
+                },
+            });
             const response = data as SearchResult<Schemas["CmsPage"]>;
 
             const page = response.data?.[0];
@@ -578,18 +568,15 @@ export class ShopwareClient {
      */
     async findCategoryByName(name: string, parentId: string): Promise<string | null> {
         try {
-            const { data } = await this.getClient().invoke(
-                "searchCategory post /search/category",
-                {
-                    body: {
-                        filter: [
-                            { type: "equals", field: "name", value: name },
-                            { type: "equals", field: "parentId", value: parentId },
-                        ],
-                        limit: 1,
-                    },
-                }
-            );
+            const { data } = await this.getClient().invoke("searchCategory post /search/category", {
+                body: {
+                    filter: [
+                        { type: "equals", field: "name", value: name },
+                        { type: "equals", field: "parentId", value: parentId },
+                    ],
+                    limit: 1,
+                },
+            });
             const response = data as SearchResult<Schemas["Category"]>;
 
             return response.data?.[0]?.id ?? null;

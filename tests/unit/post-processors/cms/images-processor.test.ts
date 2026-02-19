@@ -3,41 +3,54 @@ import { describe, expect, mock, test } from "bun:test";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 import { ImagesProcessor } from "../../../../src/post-processors/cms/images-processor.js";
+import { MockImageProvider } from "../../../mocks/image-provider.mock.js";
 
-// Helper to create mock cache
-function createMockCache() {
+const MOCK_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+function createMockCache(options: { hasImages?: boolean } = {}) {
+    const hasImages = options.hasImages ?? false;
     return {
         getSalesChannelDir: mock(() => "/tmp/test-cache"),
         loadProductMetadata: mock(() => null),
+        loadCmsBlueprint: mock(() => null),
+        images: {
+            hasImageForSalesChannel: mock(() => hasImages),
+            loadImageForSalesChannel: mock(() => (hasImages ? MOCK_BASE64 : null)),
+            saveImageForSalesChannel: mock(() => {}),
+        },
     };
 }
 
-// Track fetch calls for verification
 interface FetchCall {
     url: string;
     method: string;
     body?: unknown;
 }
 
-// Helper to create mock context with fetch tracking
 function createMockContext(
     options: {
         dryRun?: boolean;
         fetchResponses?: Map<string, { ok: boolean; data: unknown }>;
+        imageProvider?: MockImageProvider;
+        hasImages?: boolean;
     } = {}
 ): { context: PostProcessorContext; fetchCalls: FetchCall[] } {
     const fetchCalls: FetchCall[] = [];
     const responses = options.fetchResponses || new Map();
 
-    // Mock global fetch
     globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input.toString();
         const method = init?.method || "GET";
-        const body = init?.body ? JSON.parse(init.body as string) : undefined;
+        let body: unknown;
+        try {
+            body = init?.body ? JSON.parse(init.body as string) : undefined;
+        } catch {
+            body = undefined;
+        }
 
         fetchCalls.push({ url, method, body });
 
-        // Find matching response
         for (const [pattern, response] of responses.entries()) {
             if (url.includes(pattern)) {
                 return {
@@ -49,7 +62,6 @@ function createMockContext(
             }
         }
 
-        // Default success response
         return {
             ok: true,
             status: 200,
@@ -63,14 +75,17 @@ function createMockContext(
         salesChannelName: "test-store",
         blueprint: {
             version: "1.0",
-            salesChannel: { name: "test-store", description: "Test store" },
+            salesChannel: { name: "test-store", description: "Test store for demo" },
             categories: [],
             products: [],
             propertyGroups: [],
             createdAt: new Date().toISOString(),
             hydratedAt: new Date().toISOString(),
         },
-        cache: createMockCache() as unknown as PostProcessorContext["cache"],
+        cache: createMockCache({
+            hasImages: options.hasImages,
+        }) as unknown as PostProcessorContext["cache"],
+        imageProvider: options.imageProvider ?? new MockImageProvider(),
         shopwareUrl: "https://test.shopware.com",
         getAccessToken: async () => "test-token",
         options: {
@@ -115,91 +130,88 @@ describe("ImagesProcessor", () => {
             expect(fetchCalls.length).toBe(0);
         });
 
-        test("fetches media from products", async () => {
+        test("uploads pre-cached images for slider and gallery", async () => {
+            const imageProvider = new MockImageProvider();
             const responses = new Map<string, { ok: boolean; data: unknown }>();
 
-            // Product search response with media
-            responses.set("search/product", {
+            responses.set("search/media-default-folder", {
                 ok: true,
-                data: {
-                    data: [
-                        {
-                            id: "prod-1",
-                            cover: { media: { id: "media-1" } },
-                            media: [{ media: { id: "media-2" } }],
-                        },
-                    ],
-                },
+                data: { data: [{ id: "df-1", folder: { id: "folder-cms" } }] },
             });
+            responses.set("search/media", { ok: true, data: { data: [] } });
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: {} });
+            responses.set("_action/media", { ok: true, data: {} });
 
-            const { context, fetchCalls } = createMockContext({ fetchResponses: responses });
+            const { context } = createMockContext({
+                fetchResponses: responses,
+                imageProvider,
+                hasImages: true,
+            });
 
             const result = await ImagesProcessor.process(context);
 
             expect(result.errors).toEqual([]);
             expect(result.processed).toBe(1);
-
-            // Should have searched for products
-            const productSearchCalls = fetchCalls.filter((c) => c.url.includes("search/product"));
-            expect(productSearchCalls.length).toBeGreaterThan(0);
+            // Images come from cache, not from the image provider
+            expect(imageProvider.callCount).toBe(0);
+            // Cache should have been read 11 times (5 slider + 6 gallery)
+            const loadCalls = (
+                context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>
+            ).mock.calls;
+            expect(loadCalls.length).toBe(11);
         });
 
-        test("falls back to media endpoint when few product media", async () => {
+        test("reads correct image keys from cache", async () => {
+            const imageProvider = new MockImageProvider();
             const responses = new Map<string, { ok: boolean; data: unknown }>();
 
-            // Product search returns few media (< 5)
-            responses.set("search/product", {
+            responses.set("search/media-default-folder", {
                 ok: true,
-                data: {
-                    data: [{ id: "prod-1", cover: { media: { id: "media-1" } } }],
-                },
+                data: { data: [{ id: "df-1", folder: { id: "folder-cms" } }] },
             });
-            // Media endpoint returns more
-            responses.set("search/media", {
-                ok: true,
-                data: {
-                    data: [
-                        { id: "media-2" },
-                        { id: "media-3" },
-                        { id: "media-4" },
-                        { id: "media-5" },
-                    ],
-                },
-            });
+            responses.set("search/media", { ok: true, data: { data: [] } });
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: {} });
+            responses.set("_action/media", { ok: true, data: {} });
 
-            const { context, fetchCalls } = createMockContext({ fetchResponses: responses });
+            const { context } = createMockContext({
+                fetchResponses: responses,
+                imageProvider,
+                hasImages: true,
+            });
 
             await ImagesProcessor.process(context);
 
-            // Should have searched both products and media
-            const productSearchCalls = fetchCalls.filter((c) => c.url.includes("search/product"));
-            const mediaSearchCalls = fetchCalls.filter((c) => c.url.includes("search/media"));
+            const loadCalls = (
+                context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>
+            ).mock.calls;
+            const loadedKeys = loadCalls.map((call: unknown[]) => call[1]);
 
-            expect(productSearchCalls.length).toBeGreaterThan(0);
-            expect(mediaSearchCalls.length).toBeGreaterThan(0);
+            // 5 slider keys + 6 gallery keys
+            for (let i = 0; i < 5; i++) {
+                expect(loadedKeys).toContain(`img-slider-${i}`);
+            }
+            for (let i = 0; i < 6; i++) {
+                expect(loadedKeys).toContain(`img-gallery-${i}`);
+            }
         });
 
-        test("handles empty media gracefully", async () => {
+        test("handles no image provider gracefully", async () => {
             const responses = new Map<string, { ok: boolean; data: unknown }>();
 
-            // No media found
-            responses.set("search/product", { ok: true, data: { data: [] } });
             responses.set("search/media", { ok: true, data: { data: [] } });
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: {} });
 
             const { context } = createMockContext({ fetchResponses: responses });
+            context.imageProvider = undefined;
 
             const result = await ImagesProcessor.process(context);
 
-            // Should still succeed
             expect(result.processed).toBe(1);
             expect(result.errors).toEqual([]);
         });

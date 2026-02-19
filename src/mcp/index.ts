@@ -10,14 +10,15 @@
  */
 
 import { FastMCP } from "fastmcp";
+import { z } from "zod";
 
 import { logger } from "../utils/index.js";
-
 import {
     registerBlueprintTools,
     registerCacheTools,
     registerCleanupTools,
     registerGenerateTools,
+    registerImageFixTools,
 } from "./tools/index.js";
 
 // Enable MCP mode to suppress console output (prevents stdout pollution)
@@ -36,8 +37,21 @@ export function createMcpServer(): FastMCP {
     // Register all tool categories
     registerBlueprintTools(server);
     registerGenerateTools(server);
+    registerImageFixTools(server);
     registerCacheTools(server);
     registerCleanupTools(server);
+
+    // Utility: restart MCP server to pick up code changes
+    server.addTool({
+        name: "restart",
+        description:
+            "Restart the MCP server to pick up code changes. Cursor auto-restarts the process.",
+        parameters: z.object({}),
+        execute: async () => {
+            setTimeout(() => process.exit(0), 100);
+            return "Restarting MCP server...";
+        },
+    });
 
     return server;
 }

@@ -276,6 +276,44 @@ export const DEFAULT_BLUEPRINT_CONFIG: BlueprintConfig = {
 // Manufacturer Types (for Shopware integration)
 // =============================================================================
 
+// =============================================================================
+// CMS Blueprint Types (for AI text hydration)
+// =============================================================================
+
+/** Complete CMS blueprint for a SalesChannel */
+export interface CmsBlueprint {
+    salesChannelName: string;
+    pages: CmsBlueprintPage[];
+    hydratedAt?: string;
+}
+
+/** A single CMS page with its text content */
+export interface CmsBlueprintPage {
+    /** Page name matching the fixture (e.g., "Text Elements") */
+    name: string;
+    /** Processor name (e.g., "cms-text") */
+    processor: string;
+    /** Sections containing blocks and slots */
+    sections: CmsBlueprintSection[];
+}
+
+export interface CmsBlueprintSection {
+    blocks: CmsBlueprintBlock[];
+}
+
+export interface CmsBlueprintBlock {
+    type: string;
+    position: number;
+    slots: CmsBlueprintSlot[];
+}
+
+export interface CmsBlueprintSlot {
+    type: string;
+    slot: string;
+    /** AI-hydrated HTML text content (only for text-type slots) */
+    textContent?: string;
+}
+
 /** Manufacturer entity from Shopware */
 export interface Manufacturer {
     /** Shopware UUID */

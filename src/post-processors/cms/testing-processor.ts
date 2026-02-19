@@ -22,7 +22,6 @@ import type {
 
 import { TESTING_PLACEHOLDER_PAGE, WELCOME_PAGE } from "../../fixtures/index.js";
 import { apiPost, generateUUID, logger } from "../../utils/index.js";
-
 import { BaseCmsProcessor } from "./base-processor.js";
 
 /** CMS element category configuration matching Shopware admin block categories */
@@ -73,6 +72,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`,
                 { cli: true }
             );
+            logger.info(`    [DRY RUN] Would create Cookie settings external link category`, {
+                cli: true,
+            });
             return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
         }
 
@@ -90,13 +92,15 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
             }
 
-            // Step 3: Create "Testing" main category
+            // Step 3: Create "Testing" main category (last among root children)
+            const lastRootChildId = await this.getLastRootChildId(context, rootCategoryId);
             const testingCategoryId = await this.ensureCategory(
                 context,
                 "Testing",
                 rootCategoryId,
                 testingLandingPageId,
-                errors
+                errors,
+                lastRootChildId ?? undefined
             );
             if (!testingCategoryId) {
                 return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
@@ -108,13 +112,14 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
             }
 
-            // Step 5: Create "CMS" sub-category under Testing
+            // Step 5: Create "CMS" sub-category under Testing (first child)
             const cmsCategoryId = await this.ensureCategory(
                 context,
                 "CMS",
                 testingCategoryId,
                 cmsLandingPageId,
-                errors
+                errors,
+                undefined
             );
             if (!cmsCategoryId) {
                 return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
@@ -123,12 +128,13 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             // Step 6: Create CMS element sub-categories under CMS
             await this.createCmsElementCategories(context, cmsCategoryId, errors);
 
-            // Step 7: Create "Products" navigation category (no landing page)
+            // Step 7: Create "Products" navigation category (after CMS)
             const productsCategoryId = await this.ensureNavigationCategory(
                 context,
                 "Products",
                 testingCategoryId,
-                errors
+                errors,
+                cmsCategoryId
             );
             if (!productsCategoryId) {
                 return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
@@ -136,6 +142,17 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
             // Step 8: Create product type sub-categories under Products
             await this.createProductCategories(context, productsCategoryId, errors);
+
+            // Step 9: Create "Cookie settings" external link (after Products)
+            await this.ensureCookieSettingsCategory(
+                context,
+                testingCategoryId,
+                productsCategoryId,
+                errors
+            );
+
+            // Step 10: Validate all expected sub-categories exist
+            await this.validateHierarchy(context, cmsCategoryId, productsCategoryId, errors);
         } catch (error) {
             errors.push(
                 `Testing processor failed: ${error instanceof Error ? error.message : String(error)}`
@@ -184,13 +201,27 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            // Find CMS and Products sub-categories
+            // Find CMS, Products, and Cookie settings sub-categories
             const cmsCategoryId = await this.findCategoryByName(context, "CMS", testingCategoryId);
             const productsCategoryId = await this.findCategoryByName(
                 context,
                 "Products",
                 testingCategoryId
             );
+            const cookieSettingsCategoryId = await this.findCategoryByName(
+                context,
+                "Cookie settings",
+                testingCategoryId
+            );
+
+            // Delete Cookie settings category (no children)
+            if (cookieSettingsCategoryId) {
+                deleted += await this.deleteCategoryById(
+                    context,
+                    cookieSettingsCategoryId,
+                    "Cookie settings"
+                );
+            }
 
             // Delete CMS element categories (deepest first)
             if (cmsCategoryId) {
@@ -331,25 +362,37 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     // =========================================================================
 
     /**
-     * Ensure a category exists with landing page link
+     * Ensure a category exists with landing page link.
+     * If afterCategoryId is provided and the category already exists,
+     * updates its position to maintain correct ordering.
      */
     private async ensureCategory(
         context: PostProcessorContext,
         name: string,
         parentId: string,
         landingPageId: string,
-        errors: string[]
+        errors: string[],
+        afterCategoryId?: string
     ): Promise<string | null> {
         let categoryId = await this.findCategoryByName(context, name, parentId);
 
         if (!categoryId) {
-            categoryId = await this.createLinkedCategory(context, name, parentId, landingPageId);
+            categoryId = await this.createLinkedCategory(
+                context,
+                name,
+                parentId,
+                landingPageId,
+                afterCategoryId
+            );
             if (!categoryId) {
                 errors.push(`Failed to create "${name}" category`);
                 return null;
             }
             logger.info(`    ✓ Created "${name}" category`, { cli: true });
         } else {
+            if (afterCategoryId) {
+                await this.updateCategoryPosition(context, categoryId, afterCategoryId);
+            }
             logger.info(`    ⊘ "${name}" category already exists`, { cli: true });
         }
 
@@ -363,12 +406,18 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         context: PostProcessorContext,
         name: string,
         parentId: string,
-        errors: string[]
+        errors: string[],
+        afterCategoryId?: string
     ): Promise<string | null> {
         let categoryId = await this.findCategoryByName(context, name, parentId);
 
         if (!categoryId) {
-            categoryId = await this.createNavigationCategory(context, name, parentId);
+            categoryId = await this.createNavigationCategory(
+                context,
+                name,
+                parentId,
+                afterCategoryId
+            );
             if (!categoryId) {
                 errors.push(`Failed to create "${name}" navigation category`);
                 return null;
@@ -394,9 +443,8 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         for (const cat of CMS_CATEGORIES) {
             const landingPageId = landingPages[cat.processor];
             if (!landingPageId) {
-                logger.warn(
-                    `    ⚠ No landing page found for "${cat.name}" (processor: ${cat.processor})`,
-                    { cli: true }
+                errors.push(
+                    `Missing landing page for "${cat.name}" (processor: ${cat.processor} not run or failed)`
                 );
                 continue;
             }
@@ -417,6 +465,43 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             } else {
                 logger.info(`    ⊘ "${cat.name}" CMS sub-category already exists`, { cli: true });
             }
+        }
+    }
+
+    /**
+     * Validate that all expected sub-categories exist in Shopware.
+     * Reports missing categories as errors so the processor doesn't falsely report success.
+     */
+    private async validateHierarchy(
+        context: PostProcessorContext,
+        cmsCategoryId: string,
+        productsCategoryId: string,
+        errors: string[]
+    ): Promise<void> {
+        const missingCms: string[] = [];
+        for (const cat of CMS_CATEGORIES) {
+            const id = await this.findCategoryByName(context, cat.name, cmsCategoryId);
+            if (!id) missingCms.push(cat.name);
+        }
+
+        const missingProducts: string[] = [];
+        for (const cat of PRODUCT_CATEGORIES) {
+            const id = await this.findCategoryByName(context, cat.name, productsCategoryId);
+            if (!id) missingProducts.push(cat.name);
+        }
+
+        if (missingCms.length > 0) {
+            errors.push(`Missing CMS sub-categories: ${missingCms.join(", ")}`);
+        }
+        if (missingProducts.length > 0) {
+            errors.push(`Missing Product sub-categories: ${missingProducts.join(", ")}`);
+        }
+
+        if (missingCms.length === 0 && missingProducts.length === 0) {
+            logger.info(
+                `    ✓ Validated: ${CMS_CATEGORIES.length} CMS + ${PRODUCT_CATEGORIES.length} Product categories`,
+                { cli: true }
+            );
         }
     }
 
@@ -532,28 +617,32 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         context: PostProcessorContext,
         name: string,
         parentId: string,
-        landingPageId: string
+        landingPageId: string,
+        afterCategoryId?: string
     ): Promise<string | null> {
         const categoryId = generateUUID();
+
+        const payload: Record<string, unknown> = {
+            id: categoryId,
+            parentId,
+            name,
+            active: true,
+            type: "link",
+            linkType: "landing_page",
+            internalLink: landingPageId,
+            linkNewTab: false,
+            displayNestedProducts: false,
+            visible: true,
+        };
+        if (afterCategoryId != null) {
+            payload.afterCategoryId = afterCategoryId;
+        }
 
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
                 entity: "category",
                 action: "upsert",
-                payload: [
-                    {
-                        id: categoryId,
-                        parentId,
-                        name,
-                        active: true,
-                        type: "link",
-                        linkType: "landing_page",
-                        internalLink: landingPageId,
-                        linkNewTab: false,
-                        displayNestedProducts: false,
-                        visible: true,
-                    },
-                ],
+                payload: [payload],
             },
         });
 
@@ -574,25 +663,29 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     private async createNavigationCategory(
         context: PostProcessorContext,
         name: string,
-        parentId: string
+        parentId: string,
+        afterCategoryId?: string
     ): Promise<string | null> {
         const categoryId = generateUUID();
+
+        const payload: Record<string, unknown> = {
+            id: categoryId,
+            parentId,
+            name,
+            active: true,
+            type: "page",
+            displayNestedProducts: false,
+            visible: true,
+        };
+        if (afterCategoryId != null) {
+            payload.afterCategoryId = afterCategoryId;
+        }
 
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
                 entity: "category",
                 action: "upsert",
-                payload: [
-                    {
-                        id: categoryId,
-                        parentId,
-                        name,
-                        active: true,
-                        type: "page",
-                        displayNestedProducts: false,
-                        visible: true,
-                    },
-                ],
+                payload: [payload],
             },
         });
 
@@ -648,6 +741,156 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         }
 
         return categoryId;
+    }
+
+    /**
+     * Create a category that links to an external URL
+     */
+    private async createExternalLinkCategory(
+        context: PostProcessorContext,
+        name: string,
+        parentId: string,
+        externalLink: string,
+        afterCategoryId?: string
+    ): Promise<string | null> {
+        const categoryId = generateUUID();
+
+        const payload: Record<string, unknown> = {
+            id: categoryId,
+            parentId,
+            name,
+            active: true,
+            type: "link",
+            linkType: "external",
+            externalLink,
+            linkNewTab: false,
+            displayNestedProducts: false,
+            visible: true,
+        };
+        if (afterCategoryId != null) {
+            payload.afterCategoryId = afterCategoryId;
+        }
+
+        const response = await apiPost(context, "_action/sync", {
+            createCategory: {
+                entity: "category",
+                action: "upsert",
+                payload: [payload],
+            },
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.apiError("_action/sync (create external link category)", response.status, {
+                error: errorText,
+            });
+            return null;
+        }
+
+        return categoryId;
+    }
+
+    /**
+     * Ensure Cookie settings external link category exists (after Products)
+     */
+    private async ensureCookieSettingsCategory(
+        context: PostProcessorContext,
+        parentId: string,
+        afterCategoryId: string,
+        errors: string[]
+    ): Promise<void> {
+        const name = "Cookie settings";
+
+        const categoryId = await this.findCategoryByName(context, name, parentId);
+        if (categoryId) {
+            logger.info(`    ⊘ "${name}" category already exists`, { cli: true });
+            return;
+        }
+
+        const newId = await this.createExternalLinkCategory(
+            context,
+            name,
+            parentId,
+            "/cookie/offcanvas",
+            afterCategoryId
+        );
+        if (newId) {
+            logger.info(`    ✓ Created "${name}" category`, { cli: true });
+        } else {
+            errors.push(`Failed to create "${name}" category`);
+        }
+    }
+
+    /**
+     * Get the last (rightmost) root child ID for afterCategoryId chaining.
+     * Excludes the "Testing" category itself so it can be placed after the last blueprint category.
+     */
+    private async getLastRootChildId(
+        context: PostProcessorContext,
+        rootCategoryId: string
+    ): Promise<string | null> {
+        try {
+            interface CategoryItem {
+                id: string;
+                name?: string;
+                afterCategoryId?: string | null;
+            }
+
+            interface CategoryResponse {
+                data?: CategoryItem[];
+            }
+
+            const response = await apiPost(context, "search/category", {
+                filter: [{ type: "equals", field: "parentId", value: rootCategoryId }],
+                limit: 500,
+            });
+
+            if (!response.ok) {
+                return null;
+            }
+
+            const data = (await response.json()) as CategoryResponse;
+            const allChildren = data.data ?? [];
+            if (allChildren.length === 0) {
+                return null;
+            }
+
+            // Exclude Testing category to find the last *blueprint* category
+            const children = allChildren.filter((c) => c.name !== "Testing");
+            if (children.length === 0) {
+                return null;
+            }
+
+            const afterIds = new Set(
+                children.map((c) => c.afterCategoryId).filter((id): id is string => id != null)
+            );
+            const last = children.find((c) => !afterIds.has(c.id));
+            return last?.id ?? null;
+        } catch (error) {
+            logger.warn("Failed to get last root child for category ordering", { data: error });
+            return null;
+        }
+    }
+
+    /**
+     * Update a category's afterCategoryId to fix ordering
+     */
+    private async updateCategoryPosition(
+        context: PostProcessorContext,
+        categoryId: string,
+        afterCategoryId: string
+    ): Promise<void> {
+        const response = await apiPost(context, "_action/sync", {
+            updateCategory: {
+                entity: "category",
+                action: "upsert",
+                payload: [{ id: categoryId, afterCategoryId }],
+            },
+        });
+
+        if (!response.ok) {
+            logger.warn(`Failed to update category position for ${categoryId}`);
+        }
     }
 
     /**

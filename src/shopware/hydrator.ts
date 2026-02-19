@@ -10,6 +10,8 @@ import type {
     SalesChannelFull,
     SalesChannelInput,
 } from "../types/index.js";
+import type { Schemas } from "./admin-client.js";
+import type { SearchResult } from "./api-types.js";
 
 import {
     buildCategoryPath,
@@ -20,9 +22,6 @@ import {
     logger,
     validateSubdomainName,
 } from "../utils/index.js";
-
-import type { Schemas } from "./admin-client.js";
-import type { SearchResult } from "./api-types.js";
 import { ShopwareClient } from "./client.js";
 
 /**
@@ -487,9 +486,11 @@ export class ShopwareHydrator extends ShopwareClient {
         });
 
         // Build sync operations
-        const syncOps: Array<{ entity: string; action: "upsert"; payload: Record<string, unknown>[] }> = [
-            { entity: "product", action: "upsert", payload: productPayload },
-        ];
+        const syncOps: Array<{
+            entity: string;
+            action: "upsert";
+            payload: Record<string, unknown>[];
+        }> = [{ entity: "product", action: "upsert", payload: productPayload }];
 
         if (mediaPayload.length > 0) {
             syncOps.push({ entity: "media", action: "upsert", payload: mediaPayload });
@@ -827,18 +828,29 @@ export class ShopwareHydrator extends ShopwareClient {
         // Build flat list of categories with parent relationships and paths
         const flatCategories = this.flattenCategoryTree(tree, parentId);
 
-        // Create categories in batches using sync API
-        const categoryPayload = flatCategories.map((item) => ({
-            id: item.category.id || generateUUID(),
-            name: item.category.name,
-            description: item.category.description,
-            parentId: item.parentId,
-            displayNestedProducts: true,
-            type: "page",
-            productAssignmentType: "product",
-            visible: true,
-            active: true,
-        }));
+        // Track last sibling ID per parent for afterCategoryId chaining
+        const lastSiblingIdByParent = new Map<string, string>();
+
+        // Create categories in batches using sync API with afterCategoryId for ordering
+        const categoryPayload = flatCategories.map((item) => {
+            const id = item.category.id || generateUUID();
+            const afterCategoryId =
+                lastSiblingIdByParent.get(item.parentId) ?? (null as string | null);
+            lastSiblingIdByParent.set(item.parentId, id);
+
+            return {
+                id,
+                name: item.category.name,
+                description: item.category.description,
+                parentId: item.parentId,
+                afterCategoryId,
+                displayNestedProducts: true,
+                type: "page",
+                productAssignmentType: "product",
+                visible: true,
+                active: true,
+            };
+        });
 
         // Store IDs in the original tree nodes using path as key (prevents collisions)
         for (let i = 0; i < flatCategories.length; i++) {

@@ -93,6 +93,8 @@ await hydrator.createCategoryTree(categories, rootId, salesChannelId);
 await hydrator.hydrateEnvWithProducts(products, category, salesChannelName);
 ```
 
+**Category ordering**: Categories use `afterCategoryId` to preserve blueprint order. The Testing category is always created last so it appears at the end of the navigation.
+
 ### ShopwareCleanup
 
 Delete entities (SalesChannel-centric):

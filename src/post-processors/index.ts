@@ -436,6 +436,7 @@ export async function cleanupProcessors(
 import {
     CommerceProcessor,
     FormProcessor,
+    HomeProcessor,
     ImagesProcessor,
     TestingProcessor,
     TextImagesProcessor,
@@ -452,6 +453,7 @@ import { VariantProcessor } from "./variant-processor.js";
 export {
     CommerceProcessor,
     FormProcessor,
+    HomeProcessor,
     ImagesProcessor,
     TestingProcessor,
     TextImagesProcessor,
@@ -472,6 +474,8 @@ registry.register(VideoProcessor);
 registry.register(TextImagesProcessor);
 registry.register(CommerceProcessor);
 registry.register(FormProcessor);
+// CMS homepage (root category layout with product listing)
+registry.register(HomeProcessor);
 // Digital product processor (runs after variants)
 registry.register(DigitalProductProcessor);
 // CMS orchestrator (creates Testing category hierarchy, runs last)

@@ -227,6 +227,37 @@ export class PropertyCache {
     }
 
     /**
+     * Resolve a property group name using fuzzy matching against cached groups.
+     * Handles cases like "Pot Size" → "Size", "Handle Material" → "Material".
+     *
+     * @param name - Raw group name to resolve
+     * @returns The matched cached group name, or the trimmed input if no match
+     */
+    resolveGroupName(name: string): string {
+        const normalized = name.trim();
+
+        if (this.has(normalized)) {
+            return normalized;
+        }
+
+        const cachedGroups = this.listNames();
+        for (const cached of cachedGroups) {
+            const cachedLower = cached.toLowerCase();
+            const normalizedLower = normalized.toLowerCase();
+
+            if (normalizedLower.endsWith(cachedLower) && normalizedLower !== cachedLower) {
+                return cached;
+            }
+
+            if (normalizedLower.startsWith(`${cachedLower} `)) {
+                return cached;
+            }
+        }
+
+        return normalized;
+    }
+
+    /**
      * Seed the cache with custom property groups
      *
      * @param groups - Array of property groups to seed

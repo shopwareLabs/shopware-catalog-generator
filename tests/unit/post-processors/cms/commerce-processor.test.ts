@@ -9,6 +9,7 @@ function createMockCache() {
     return {
         getSalesChannelDir: mock(() => "/tmp/test-cache"),
         loadProductMetadata: mock(() => null),
+        loadCmsBlueprint: mock(() => null),
     };
 }
 
@@ -93,8 +94,8 @@ describe("CommerceProcessor", () => {
             expect(CommerceProcessor.description.length).toBeGreaterThan(0);
         });
 
-        test("has no dependencies", () => {
-            expect(CommerceProcessor.dependsOn).toEqual([]);
+        test("depends on images processor", () => {
+            expect(CommerceProcessor.dependsOn).toEqual(["images"]);
         });
 
         test("has page fixture with correct name", () => {
@@ -201,6 +202,46 @@ describe("CommerceProcessor", () => {
             // Should still succeed, just with empty products
             expect(result.processed).toBe(1);
             expect(result.errors).toEqual([]);
+        });
+
+        test("removes gallery-buybox block when products have no media", async () => {
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+
+            // Products without any media
+            responses.set("search/product", {
+                ok: true,
+                data: {
+                    data: [{ id: "prod-1" }, { id: "prod-2" }],
+                },
+            });
+            responses.set("search/cms-page", { ok: true, data: { data: [] } });
+            responses.set("search/landing-page", { ok: true, data: { data: [] } });
+            responses.set("_action/sync", { ok: true, data: {} });
+
+            const { context, fetchCalls } = createMockContext({ fetchResponses: responses });
+
+            await CommerceProcessor.process(context);
+
+            // Find the CMS page creation sync call
+            const syncCalls = fetchCalls.filter((c) => c.url.includes("_action/sync"));
+            const cmsSync = syncCalls[0];
+            expect(cmsSync).toBeDefined();
+
+            if (cmsSync?.body) {
+                const body = cmsSync.body as {
+                    createCmsPage?: {
+                        payload?: Array<{
+                            sections?: Array<{
+                                blocks?: Array<{ type: string }>;
+                            }>;
+                        }>;
+                    };
+                };
+                const sections = body.createCmsPage?.payload?.[0]?.sections ?? [];
+                const blocks = sections.flatMap((s) => s.blocks ?? []);
+                const galleryBuybox = blocks.find((b) => b.type === "gallery-buybox");
+                expect(galleryBuybox).toBeUndefined();
+            }
         });
     });
 });

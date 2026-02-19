@@ -17,11 +17,14 @@ Testing (testing-placeholder.ts)
 │   ├── Text & Images (text-images.ts)
 │   ├── Commerce (commerce.ts)
 │   └── Form (form.ts)
-└── Products (navigation category)
-    ├── Simple Product (link to product)
-    ├── Variant Product (link to product)
-    └── Digital Product (link to product)
+├── Products (navigation category)
+│   ├── Simple Product (link to product)
+│   ├── Variant Product (link to product)
+│   └── Digital Product (link to product)
+└── Cookie settings (external link to /cookie/offcanvas)
 ```
+
+The Testing category is always created last via `afterCategoryId` ordering.
 
 ## Architecture
 
@@ -54,26 +57,50 @@ abstract class BaseCmsProcessor {
 }
 ```
 
+### HomeProcessor (Homepage)
+
+The `cms-home` processor is unique among CMS processors:
+
+- Creates a `product_list` page (not `landingpage`)
+- Assigns CMS page to the root category via `cmsPageId` (no landing page entity)
+- Uses template-based text with dynamic values from the blueprint (no AI hydration)
+- Generates one hero image per store
+
+The homepage includes a `text-teaser-section` (hero image + welcome text) followed by a standard product listing with sidebar filters.
+
 ### Element Processors
 
 Simple processors that extend `BaseCmsProcessor`:
 
-| Processor           | Name              | Fixture        | Description                        |
-| ------------------- | ----------------- | -------------- | ---------------------------------- |
-| TextProcessor       | `cms-text`        | text.ts        | Text blocks, heroes, teasers, HTML |
-| ImagesProcessor     | `cms-images`      | images.ts      | Image, gallery, slider             |
-| VideoProcessor      | `cms-video`       | video.ts       | YouTube, Vimeo embeds              |
-| TextImagesProcessor | `cms-text-images` | text-images.ts | Combined text/image layouts        |
-| CommerceProcessor   | `cms-commerce`    | commerce.ts    | Product boxes, sliders, buy boxes  |
-| FormProcessor       | `cms-form`        | form.ts        | Contact and newsletter forms       |
+| Processor           | Name              | Fixture         | Description                        |
+| ------------------- | ----------------- | --------------- | ---------------------------------- |
+| HomeProcessor       | `cms-home`        | home-listing.ts | Homepage layout on root category   |
+| TextProcessor       | `cms-text`        | text.ts         | Text blocks, heroes, teasers, HTML |
+| ImagesProcessor     | `cms-images`      | images.ts       | Image, gallery, slider             |
+| VideoProcessor      | `cms-video`       | video.ts        | YouTube, Vimeo embeds              |
+| TextImagesProcessor | `cms-text-images` | text-images.ts  | Combined text/image layouts        |
+| CommerceProcessor   | `cms-commerce`    | commerce.ts     | Product boxes, sliders, buy boxes  |
+| FormProcessor       | `cms-form`        | form.ts         | Contact and newsletter forms       |
 
 ### Dynamic Data Population
 
 Some processors override `process()` to fetch and populate dynamic data:
 
-**ImagesProcessor**: Fetches media IDs from products and the media endpoint to populate `image-slider` and `image-gallery` blocks.
+**HomeProcessor**: Builds dynamic HTML from blueprint metadata (store name, description, product/category counts) and generates a hero image. Assigns the CMS page to the root category.
+
+**ImagesProcessor**: Fetches media IDs from products and the media endpoint to populate `image-slider` and `image-gallery` blocks. Generates AI images with block-type-specific dimensions (e.g., hero, gallery), uploads to CMS Media folder.
 
 **CommerceProcessor**: Fetches product IDs and media to populate `product-box`, `product-slider`, and `gallery-buybox` blocks.
+
+### CMS Text Hydration
+
+CMS processors read AI-generated text from `cms-blueprint.json` (generated during `blueprint hydrate --only=cms`), not static fixtures. This allows store-context-aware headlines, captions, and body copy for each block type.
+
+### CMS Image Hydration
+
+CMS images are **pre-generated during blueprint hydration** (not in post-processors) by `hydrateCmsImages()` in `src/blueprint/hydrators/image.ts`. This function defines all 20 CMS image specs (key, prompt, dimensions) and caches them locally in `images/cms_media/`.
+
+Post-processors (`cms-images`, `cms-text-images`, `cms-home`) only read from cache and upload to Shopware via `getOrCreateCmsMedia(context, imageKey)`. The `BaseCmsProcessor.generateAndUploadCmsImage()` method does **not** call the image provider -- it returns `null` if the image isn't cached.
 
 ### TestingProcessor (Orchestrator)
 
@@ -134,7 +161,8 @@ src/fixtures/cms/
 ├── video.ts              # Video elements
 ├── text-images.ts        # Text & images elements
 ├── commerce.ts           # Commerce elements
-└── form.ts               # Form elements
+├── form.ts               # Form elements
+└── home-listing.ts       # Home listing page (root category)
 ```
 
 ## Adding a New CMS Demo Page
@@ -172,9 +200,11 @@ export const NewProcessor = new NewProcessorImpl();
 
 5. Register in `src/post-processors/index.ts`
 
-6. Add to `CMS_CATEGORIES` in `testing-processor.ts`
+6. If the page needs AI images, add image specs to `buildCmsImageSpecs()` in `src/blueprint/hydrators/image.ts`
 
-7. Add unit tests in `tests/unit/post-processors/cms/`
+7. Add to `CMS_CATEGORIES` in `testing-processor.ts`
+
+8. Add unit tests in `tests/unit/post-processors/cms/`
 
 ## Cleanup
 

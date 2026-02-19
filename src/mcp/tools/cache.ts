@@ -5,6 +5,7 @@
  */
 
 import type { FastMCP } from "fastmcp";
+
 import { z } from "zod";
 
 import { createCacheFromEnv } from "../../cache.js";
@@ -35,7 +36,7 @@ export function registerCacheTools(server: FastMCP): void {
                     blueprint && blueprint.categories && blueprint.categories.length > 0;
                 const categoryCount = blueprint?.categories?.length ?? 0;
                 const productCount = blueprint?.products?.length ?? 0;
-                const imageCount = cache.getImageCountForSalesChannel(sc);
+                const imageCount = cache.images.getImageCountForSalesChannel(sc);
 
                 results.push(`  ${sc}`);
                 if (metadata) {

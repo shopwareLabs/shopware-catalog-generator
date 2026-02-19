@@ -14,6 +14,7 @@
 #   ./test-e2e.sh --cleanup=<name>   # Only cleanup specific SalesChannel
 #
 # Post-processors run:
+# - CMS homepage: cms-home (root category layout with welcome text + product listing)
 # - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form
 # - Digital product: digital-product (creates Gift Card €50)
 # - CMS orchestrator: cms-testing (creates Testing category hierarchy)
@@ -86,6 +87,7 @@ if [ -n "$CLEANUP_ONLY" ]; then
     echo "  Cleaning up CMS processors..."
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-testing || true
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-home || true
 
     # Cleanup digital product
     echo "  Cleaning up digital product..."
@@ -93,7 +95,11 @@ if [ -n "$CLEANUP_ONLY" ]; then
 
     # Cleanup SalesChannel and data
     echo "  Cleaning up SalesChannel..."
-    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --delete --props || echo "Cleanup skipped (nothing to clean)"
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --delete || echo "Cleanup skipped (nothing to clean)"
+
+    # Safely remove property groups no longer used by any product
+    echo "  Cleaning up unused property groups..."
+    bun run cleanup -- --unused-props || true
 
     echo "Cleanup complete."
     exit 0
@@ -118,7 +124,7 @@ else
 fi
 echo ""
 
-# Phase 2: Hydrate with AI
+# Phase 2: Hydrate with AI (products + categories + CMS text)
 if [ "$SKIP_HYDRATE" = true ]; then
     echo "[2/5] Skipping AI hydration (--skip-hydrate)"
     if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
@@ -126,15 +132,24 @@ if [ "$SKIP_HYDRATE" = true ]; then
     fi
 elif [ -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
     echo "[2/5] Skipping AI hydration (hydrated blueprint already exists)"
+    # Still hydrate CMS text if not done yet
+    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
+        echo "  Hydrating CMS text content..."
+        bun run blueprint hydrate --name="$TEST_SALESCHANNEL" --only=cms
+        echo "  ✓ CMS text hydrated"
+    fi
 else
-    echo "[2/5] Hydrating blueprint with AI..."
+    echo "[2/5] Hydrating blueprint with AI (includes CMS text)..."
     bun run blueprint hydrate --name="$TEST_SALESCHANNEL"
 
     if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
         echo "ERROR: hydrated-blueprint.json not created"
         exit 1
     fi
-    echo "✓ Blueprint hydrated"
+    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
+        echo "WARNING: cms-blueprint.json not created (CMS text will use fixture defaults)"
+    fi
+    echo "✓ Blueprint hydrated (products + categories + CMS text)"
 fi
 echo ""
 
@@ -157,6 +172,10 @@ elif [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json
     echo "[4/5] Skipping post-processors (no hydrated blueprint)"
 else
     echo "[4/5] Running post-processors..."
+
+    # Run CMS homepage processor (root category layout)
+    echo "  Running CMS homepage processor..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=cms-home
 
     # Run CMS element processors (create demo pages)
     echo "  Running CMS processors..."

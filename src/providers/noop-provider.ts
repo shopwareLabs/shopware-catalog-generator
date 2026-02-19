@@ -1,4 +1,4 @@
-import type { ImageProvider } from "../types/index.js";
+import type { ImageGenerationOptions, ImageProvider } from "../types/index.js";
 
 /**
  * No-operation image provider
@@ -9,8 +9,10 @@ export class NoOpImageProvider implements ImageProvider {
     readonly maxConcurrency = 1;
     readonly name = "none";
 
-    async generateImage(_prompt: string): Promise<string | null> {
-        // Image generation is disabled
+    async generateImage(
+        _prompt: string,
+        _options?: ImageGenerationOptions
+    ): Promise<string | null> {
         return null;
     }
 }

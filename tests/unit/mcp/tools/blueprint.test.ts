@@ -33,7 +33,7 @@ describe("Blueprint MCP Tools", () => {
 
     describe("blueprint_create logic", () => {
         it("should create a blueprint with default products", async () => {
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             const generator = new BlueprintGenerator({
                 totalProducts: 90,
@@ -48,7 +48,7 @@ describe("Blueprint MCP Tools", () => {
         });
 
         it("should create a blueprint with custom product count", async () => {
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             const generator = new BlueprintGenerator({
                 totalProducts: 12,
@@ -63,7 +63,7 @@ describe("Blueprint MCP Tools", () => {
         });
 
         it("should save blueprint to cache", async () => {
-            const { BlueprintGenerator } = await import("../../../../src/generators/index.js");
+            const { BlueprintGenerator } = await import("../../../../src/blueprint/index.js");
 
             const cache = createCacheFromEnv();
             const generator = new BlueprintGenerator({

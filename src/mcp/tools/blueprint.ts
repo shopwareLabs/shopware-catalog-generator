@@ -4,13 +4,22 @@
  * Exposes blueprint create, hydrate, and fix commands.
  */
 
-import type { HydratedBlueprint } from "../../types/index.js";
-import type { ExistingProperty } from "../../utils/index.js";
 import type { FastMCP } from "fastmcp";
+
 import { z } from "zod";
 
+import type { HydratedBlueprint } from "../../types/index.js";
+import type { ExistingProperty } from "../../utils/index.js";
+
+import {
+    BlueprintGenerator,
+    BlueprintHydrator,
+    generateCmsBlueprint,
+    hydrateCmsBlueprint,
+    hydrateCmsImages,
+    hydrateProductImages,
+} from "../../blueprint/index.js";
 import { createCacheFromEnv } from "../../cache.js";
-import { BlueprintGenerator, BlueprintHydrator } from "../../generators/index.js";
 import { createProvidersFromEnv } from "../../providers/index.js";
 import { DataHydrator } from "../../shopware/index.js";
 import {
@@ -90,10 +99,10 @@ Next step: Run blueprint_hydrate to fill with AI-generated content.`;
         parameters: z.object({
             name: z.string().describe("SalesChannel name (must have existing blueprint)"),
             only: z
-                .enum(["categories", "properties"])
+                .enum(["categories", "properties", "cms"])
                 .optional()
                 .describe(
-                    "Selective hydration: 'categories' updates only categories, 'properties' updates only product properties (preserves names)"
+                    "Selective hydration: 'categories' updates only categories, 'properties' updates only product properties (preserves names), 'cms' updates only CMS text content"
                 ),
             force: z
                 .boolean()
@@ -141,7 +150,7 @@ Run blueprint_create first:
             }
 
             // Create providers
-            const { text: textProvider } = createProvidersFromEnv();
+            const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
 
             // Get existing properties from Shopware (if connected)
             let existingProperties: ExistingProperty[] = [];
@@ -160,6 +169,27 @@ Run blueprint_create first:
                 // Proceed without existing properties
             }
 
+            // CMS-only hydration
+            if (args.only === "cms") {
+                const cmsBlueprint = generateCmsBlueprint(salesChannelName);
+                const description =
+                    blueprint.salesChannel.description || `${salesChannelName} webshop`;
+                const hydratedCms = await hydrateCmsBlueprint(
+                    cmsBlueprint,
+                    textProvider,
+                    description
+                );
+                cache.saveCmsBlueprint(salesChannelName, hydratedCms);
+
+                await hydrateCmsImages(imageProvider, cache, salesChannelName, description);
+
+                return `CMS blueprint hydrated successfully!
+
+SalesChannel: ${salesChannelName}
+Pages: ${hydratedCms.pages.length}
+Saved to: generated/sales-channels/${salesChannelName}/cms-blueprint.json`;
+            }
+
             // Create hydrator
             const hydrator = new BlueprintHydrator(textProvider);
             let hydratedBlueprint: HydratedBlueprint;
@@ -176,6 +206,21 @@ Run blueprint_create first:
                 hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
             }
 
+            // Also hydrate CMS text for full/force mode
+            if (!args.only) {
+                const cmsBlueprint = generateCmsBlueprint(salesChannelName);
+                const description =
+                    blueprint.salesChannel.description || `${salesChannelName} webshop`;
+                const hydratedCms = await hydrateCmsBlueprint(
+                    cmsBlueprint,
+                    textProvider,
+                    description
+                );
+                cache.saveCmsBlueprint(salesChannelName, hydratedCms);
+
+                await hydrateCmsImages(imageProvider, cache, salesChannelName, description);
+            }
+
             // Collect properties
             const collector = new PropertyCollector();
             const propertyGroups = collector.collectFromBlueprint(
@@ -186,6 +231,16 @@ Run blueprint_create first:
 
             // Save hydrated blueprint
             cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
+
+            // Generate product + category images (needs metadata from hydrated blueprint)
+            if (imageProvider.name !== "noop") {
+                await hydrateProductImages(
+                    imageProvider,
+                    cache,
+                    salesChannelName,
+                    hydratedBlueprint
+                );
+            }
 
             const modeText = args.only || "full";
             return `Blueprint hydrated successfully!

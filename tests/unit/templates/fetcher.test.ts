@@ -271,6 +271,101 @@ describe("TemplateFetcher", () => {
             });
             expect(noAutoUpdateFetcher).toBeDefined();
         });
+
+        test("tryUseTemplate returns false when ensureTemplate fails", async () => {
+            const localFetcher = new TemplateFetcher({
+                cacheDir: TEST_TEMPLATE_DIR,
+                autoUpdate: false,
+            });
+            const asInternal = localFetcher as unknown as {
+                ensureTemplate: (name: string) => Promise<boolean>;
+                tryUseTemplate: (name: string, cache: DataCache) => Promise<boolean>;
+            };
+            asInternal.ensureTemplate = async () => false;
+
+            const result = await asInternal.tryUseTemplate("missing", cache);
+            expect(result).toBe(false);
+        });
+    });
+
+    describe("repository initialization and sparse checkout internals", () => {
+        test("initRepo fails gracefully with invalid repository URL", () => {
+            const failingFetcher = new TemplateFetcher({
+                repoUrl: "invalid://repo-url",
+                cacheDir: path.join(TEST_BASE_DIR, "invalid-repo"),
+                autoUpdate: false,
+            });
+
+            const initialized = (
+                failingFetcher as unknown as { initRepo: () => boolean }
+            ).initRepo();
+            expect(initialized).toBe(false);
+        });
+
+        test("updateRepo fails gracefully when directory is not a git repo", () => {
+            const nonGitDir = path.join(TEST_BASE_DIR, "non-git");
+            fs.mkdirSync(nonGitDir, { recursive: true });
+            const localFetcher = new TemplateFetcher({
+                cacheDir: nonGitDir,
+                autoUpdate: false,
+            });
+
+            const updated = (localFetcher as unknown as { updateRepo: () => boolean }).updateRepo();
+            expect(updated).toBe(false);
+        });
+
+        test("fetchTemplate fails gracefully when sparse-checkout cannot run", () => {
+            const localFetcher = new TemplateFetcher({
+                cacheDir: TEST_TEMPLATE_DIR,
+                autoUpdate: false,
+            });
+
+            const fetched = (
+                localFetcher as unknown as { fetchTemplate: (name: string) => boolean }
+            ).fetchTemplate("beauty");
+            expect(fetched).toBe(false);
+        });
+
+        test("ensureTemplate short-circuits when template already checked out", async () => {
+            const templateDir = path.join(
+                TEST_TEMPLATE_DIR,
+                "generated",
+                "sales-channels",
+                "beauty"
+            );
+            fs.mkdirSync(templateDir, { recursive: true });
+            fs.writeFileSync(
+                path.join(templateDir, "hydrated-blueprint.json"),
+                JSON.stringify({ version: "1.0" })
+            );
+
+            const localFetcher = new TemplateFetcher({
+                cacheDir: TEST_TEMPLATE_DIR,
+                autoUpdate: false,
+            });
+            const asInternal = localFetcher as unknown as {
+                ensureRepoInitialized: () => boolean;
+                ensureTemplate: (name: string) => Promise<boolean>;
+            };
+            asInternal.ensureRepoInitialized = () => true;
+
+            const ready = await asInternal.ensureTemplate("beauty");
+            expect(ready).toBe(true);
+        });
+
+        test("ensureRepoInitialized returns true when already initialized in memory", () => {
+            const localFetcher = new TemplateFetcher({
+                cacheDir: TEST_TEMPLATE_DIR,
+                autoUpdate: false,
+            });
+            const asInternal = localFetcher as unknown as {
+                repoInitialized: boolean;
+                ensureRepoInitialized: () => boolean;
+            };
+            asInternal.repoInitialized = true;
+
+            expect(asInternal.ensureRepoInitialized()).toBe(true);
+        });
     });
 
     describe("copyPropertiesToCache", () => {

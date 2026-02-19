@@ -80,7 +80,9 @@ class VariantProcessorImpl implements PostProcessor {
             };
         }
 
-        logger.info(`    Creating variants for ${variantProducts.length} products...`, { cli: true });
+        logger.info(`    Creating variants for ${variantProducts.length} products...`, {
+            cli: true,
+        });
 
         for (const product of variantProducts) {
             const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);

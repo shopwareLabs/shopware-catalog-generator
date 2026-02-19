@@ -3,8 +3,8 @@ import fs from "node:fs";
 
 import type { HydratedBlueprint } from "../../src/types/index.js";
 
+import { BlueprintGenerator } from "../../src/blueprint/generator.js";
 import { DataCache } from "../../src/cache.js";
-import { BlueprintGenerator } from "../../src/generators/blueprint-generator.js";
 import { PropertyCollector } from "../../src/utils/property-collector.js";
 
 // Test cache directory

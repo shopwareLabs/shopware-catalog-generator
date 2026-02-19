@@ -12,6 +12,8 @@ import type {
     SalesChannelFull,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import type { Schemas } from "./admin-client.js";
+import type { SearchResult } from "./api-types.js";
 
 import { createEmptyValidation, getValidationWarnings } from "../types/index.js";
 import {
@@ -24,9 +26,6 @@ import {
     normalizeDescription,
     normalizeString,
 } from "../utils/index.js";
-
-import type { Schemas } from "./admin-client.js";
-import type { SearchResult } from "./api-types.js";
 import { ShopwareClient } from "./client.js";
 
 /** Default price for products without price */

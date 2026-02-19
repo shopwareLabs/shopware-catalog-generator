@@ -3,7 +3,6 @@
  */
 
 import { TEXT_ELEMENTS_PAGE } from "../../fixtures/index.js";
-
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class TextProcessorImpl extends BaseCmsProcessor {

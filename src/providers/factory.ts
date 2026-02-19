@@ -8,7 +8,6 @@ import type {
 
 import { PROVIDER_DEFAULTS } from "../types/index.js";
 import { logger } from "../utils/index.js";
-
 import { GitHubModelsTextProvider } from "./github-models-provider.js";
 import { NoOpImageProvider } from "./noop-provider.js";
 import { OpenAIImageProvider, OpenAITextProvider } from "./openai-provider.js";
@@ -50,9 +49,12 @@ export function createProviders(config: ProviderConfig): {
     logger.info(`Text provider: ${textProvider.name} (sequential: ${textProvider.isSequential})`, {
         cli: true,
     });
-    logger.info(`Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`, {
-        cli: true,
-    });
+    logger.info(
+        `Image provider: ${imageProvider.name} (sequential: ${imageProvider.isSequential})`,
+        {
+            cli: true,
+        }
+    );
 
     return { text: textProvider, image: imageProvider };
 }

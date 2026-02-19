@@ -3,7 +3,6 @@
  */
 
 import { VIDEO_ELEMENTS_PAGE } from "../../fixtures/index.js";
-
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class VideoProcessorImpl extends BaseCmsProcessor {

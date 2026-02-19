@@ -38,11 +38,11 @@ class TestCmsProcessor extends BaseCmsProcessor {
     };
 }
 
-// Helper to create mock cache
 function createMockCache() {
     return {
         getSalesChannelDir: mock(() => "/tmp/test-cache"),
         loadProductMetadata: mock(() => null),
+        loadCmsBlueprint: mock(() => null),
     };
 }
 

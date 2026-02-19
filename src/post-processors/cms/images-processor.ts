@@ -1,16 +1,15 @@
 /**
  * Images Elements Processor - Creates the Images demo page
  *
- * Fetches media from products in the SalesChannel to populate
- * image-slider and image-gallery blocks with real images.
+ * Generates AI images matching the store's topic for
+ * image-slider and image-gallery blocks.
  */
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
 import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { IMAGES_ELEMENTS_PAGE } from "../../fixtures/index.js";
-import { apiPost, logger } from "../../utils/index.js";
-
+import { logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class ImagesProcessorImpl extends BaseCmsProcessor {
@@ -18,9 +17,6 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
     readonly description = "Create Image Elements demo page (image, gallery, slider)";
     readonly pageFixture = IMAGES_ELEMENTS_PAGE;
 
-    /**
-     * Override process to populate media IDs before creating the page
-     */
     override async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { options } = context;
         const errors: string[] = [];
@@ -44,19 +40,19 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
         }
 
         try {
-            // Get media IDs from products in this SalesChannel
-            const mediaIds = await this.getMediaIds(context);
+            const mediaIds = await this.uploadCmsImages(context);
+
             if (mediaIds.length === 0) {
-                logger.warn(
-                    `    ⚠ No media found in SalesChannel, image blocks will be empty`,
-                    { cli: true }
-                );
+                logger.warn(`    ⚠ No CMS images generated, image blocks will be empty`, {
+                    cli: true,
+                });
             }
 
-            // Create a modified fixture with media IDs populated
-            const populatedFixture = this.populateMediaIds(this.pageFixture, mediaIds);
+            // Apply hydrated CMS text if available, then populate media IDs
+            const hydratedPage = this.getHydratedCmsPage(context);
+            const textFixture = this.applyHydratedText(this.pageFixture, hydratedPage);
+            const populatedFixture = this.populateMediaIds(textFixture, mediaIds);
 
-            // Step 1: Check if CMS page already exists for this SalesChannel
             let cmsPageId = await this.findCmsPageByName(context, cmsPageName);
 
             if (!cmsPageId) {
@@ -75,7 +71,6 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                 });
             }
 
-            // Step 2: Check if Landing Page already exists for this SalesChannel
             let landingPageId = await this.findLandingPageByName(context, landingPageName);
 
             if (!landingPageId) {
@@ -96,7 +91,6 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
                 );
             }
 
-            // Step 3: Store landing page ID for orchestrator
             await this.storeLandingPageId(context, landingPageId);
         } catch (error) {
             errors.push(
@@ -114,122 +108,55 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
     }
 
     /**
-     * Get media IDs from products in the SalesChannel
+     * Upload pre-cached CMS images for slider and gallery blocks.
+     * Images are pre-generated during blueprint hydration.
      */
-    private async getMediaIds(context: PostProcessorContext): Promise<string[]> {
+    private async uploadCmsImages(context: PostProcessorContext): Promise<string[]> {
         const mediaIds: string[] = [];
 
-        // First, try to get media from products
-        try {
-            interface ProductResponse {
-                data?: Array<{
-                    id: string;
-                    coverId?: string;
-                    cover?: { id?: string; mediaId?: string; media?: { id?: string } };
-                    media?: Array<{ id?: string; mediaId?: string; media?: { id?: string } }>;
-                }>;
-            }
-
-            const response = await apiPost(context, "search/product", {
-                filter: [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                associations: {
-                    cover: { associations: { media: {} } },
-                    media: { associations: { media: {} } },
-                },
-                limit: 10,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as ProductResponse;
-
-                for (const product of data.data || []) {
-                    // Get cover media ID (product_media.media.id or product_media.mediaId)
-                    const coverMediaId = product.cover?.media?.id || product.cover?.mediaId;
-                    if (coverMediaId && !mediaIds.includes(coverMediaId)) {
-                        mediaIds.push(coverMediaId);
-                    }
-
-                    // Get additional media IDs from product_media entries
-                    if (product.media) {
-                        for (const pm of product.media) {
-                            const mediaId = pm.media?.id || pm.mediaId;
-                            if (mediaId && !mediaIds.includes(mediaId)) {
-                                mediaIds.push(mediaId);
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            logger.warn("Failed to get product media for images page", { data: error });
+        for (let i = 0; i < 5; i++) {
+            const id = await this.getOrCreateCmsMedia(context, `img-slider-${i}`);
+            if (id) mediaIds.push(id);
         }
 
-        // If we don't have enough media, query the media endpoint directly
-        if (mediaIds.length < 5) {
-            try {
-                interface MediaResponse {
-                    data?: Array<{ id: string }>;
-                }
-
-                const response = await apiPost(context, "search/media", {
-                    filter: [{ type: "contains", field: "mimeType", value: "image/" }],
-                    limit: 10,
-                });
-
-                if (response.ok) {
-                    const data = (await response.json()) as MediaResponse;
-                    for (const media of data.data || []) {
-                        if (!mediaIds.includes(media.id)) {
-                            mediaIds.push(media.id);
-                        }
-                    }
-                }
-            } catch (error) {
-                logger.warn("Failed to get media from media endpoint", { data: error });
-            }
+        for (let i = 0; i < 6; i++) {
+            const id = await this.getOrCreateCmsMedia(context, `img-gallery-${i}`);
+            if (id) mediaIds.push(id);
         }
 
         return mediaIds;
     }
 
-    /**
-     * Populate media IDs in the fixture
-     */
     private populateMediaIds(fixture: CmsPageFixture, mediaIds: string[]): CmsPageFixture {
-        if (mediaIds.length === 0) {
-            return fixture;
-        }
+        if (mediaIds.length === 0) return fixture;
 
-        // Deep clone the fixture
         const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const sliderMediaIds = mediaIds.slice(0, 5);
+        const galleryMediaIds = mediaIds.slice(5, 11);
 
         for (const section of cloned.sections) {
             for (const block of section.blocks) {
                 for (const slot of block.slots) {
-                    // Image slider slot
                     if (slot.type === "image-slider" && slot.config.sliderItems) {
-                        const sliderItems = mediaIds.slice(0, 5).map((mediaId) => ({
-                            mediaId,
-                            url: null,
-                            newTab: false,
-                        }));
-                        slot.config.sliderItems = { source: "static", value: sliderItems };
+                        slot.config.sliderItems = {
+                            source: "static",
+                            value: sliderMediaIds.map((mediaId) => ({
+                                mediaId,
+                                url: null,
+                                newTab: false,
+                            })),
+                        };
                     }
 
-                    // Image gallery slot
                     if (slot.type === "image-gallery" && slot.config.sliderItems) {
-                        const sliderItems = mediaIds.slice(0, 6).map((mediaId) => ({
-                            mediaId,
-                            url: null,
-                            newTab: false,
-                        }));
-                        slot.config.sliderItems = { source: "static", value: sliderItems };
+                        slot.config.sliderItems = {
+                            source: "static",
+                            value: galleryMediaIds.map((mediaId) => ({
+                                mediaId,
+                                url: null,
+                                newTab: false,
+                            })),
+                        };
                     }
                 }
             }

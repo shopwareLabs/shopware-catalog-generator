@@ -11,6 +11,8 @@
  *   bun run cache:empty-trash                - Permanently delete trash
  */
 
+import fs from "node:fs";
+
 import { createCacheFromEnv } from "./cache.js";
 
 const cache = createCacheFromEnv();
@@ -30,6 +32,7 @@ Usage:
   bun run cache:clear -- [salesChannel]    Move specific SalesChannel cache to trash
   bun run cache:trash                      List trash contents (recoverable data)
   bun run cache:restore -- <item>          Restore specific item from trash
+  bun run cache:restore -- --all           Restore all items from trash
   bun run cache:empty-trash                Permanently delete all trash (IRREVERSIBLE)
 
 Examples:
@@ -38,6 +41,7 @@ Examples:
   bun run cache:clear -- furniture
   bun run cache:trash
   bun run cache:restore -- sales-channel-furniture-2024-01-28T12-00-00
+  bun run cache:restore -- --all
   bun run cache:empty-trash
 
 Note: Clearing moves data to .trash/ folder. Restore before emptying trash.
@@ -60,7 +64,7 @@ function listCache(): void {
         const hasCategories = blueprint && blueprint.categories && blueprint.categories.length > 0;
         const categoryCount = blueprint?.categories?.length ?? 0;
         const productCount = blueprint?.products?.length ?? 0;
-        const imageCount = cache.getImageCountForSalesChannel(sc);
+        const imageCount = cache.images.getImageCountForSalesChannel(sc);
 
         console.log(`  ${sc}`);
         if (metadata) {
@@ -107,23 +111,35 @@ function listTrash(): void {
 
 function restoreFromTrash(itemName?: string): void {
     if (!itemName) {
-        console.error("Error: Please specify the item name to restore");
-        console.log("Use 'bun run cache:trash' to see available items");
-        process.exit(1);
+        const trashItems = cache.listTrash();
+        if (trashItems.length === 0) {
+            console.log("\nTrash is empty.\n");
+            return;
+        }
+
+        console.log("\nPlease specify an item to restore:\n");
+        for (const item of trashItems) {
+            console.log(`  ${item}`);
+        }
+        console.log("\nUsage:");
+        console.log("  bun run cache:restore -- <item>");
+        console.log("  bun run cache:restore -- --all\n");
+        return;
     }
 
-    // Determine target path based on item name
-    let targetPath: string;
-    if (itemName.startsWith("sales-channel-")) {
-        // Extract sales channel name from trash item name
-        // Format: sales-channel-{name}-{timestamp}
-        const match = itemName.match(/^sales-channel-(.+?)-\d{4}-\d{2}-\d{2}T/);
-        const scName = match ? match[1] : itemName.replace("sales-channel-", "").split("-")[0];
-        targetPath = `generated/sales-channels/${scName}`;
-    } else if (itemName.startsWith("all-cache-")) {
-        targetPath = "generated";
-    } else {
-        targetPath = `generated/${itemName}`;
+    if (itemName === "--all") {
+        restoreAllFromTrash();
+        return;
+    }
+
+    const targetPath = getRestoreTargetPath(itemName);
+    const targetState = prepareRestoreTarget(targetPath);
+    if (targetState === "exists-nonempty") {
+        console.error(`Restore target already exists and is not empty: ${targetPath}`);
+        console.log(
+            "Use a specific restore item, clear the target first, or use --all for bulk restore."
+        );
+        process.exit(1);
     }
 
     const success = cache.restoreFromTrash(itemName, targetPath);
@@ -132,6 +148,82 @@ function restoreFromTrash(itemName?: string): void {
     } else {
         process.exit(1);
     }
+}
+
+function restoreAllFromTrash(): void {
+    const trashItems = cache.listTrash();
+    if (trashItems.length === 0) {
+        console.log("\nTrash is empty.\n");
+        return;
+    }
+
+    let restored = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (const item of trashItems) {
+        const targetPath = getRestoreTargetPath(item);
+        const targetState = prepareRestoreTarget(targetPath);
+        if (targetState === "exists-nonempty") {
+            skipped++;
+            continue;
+        }
+
+        const success = cache.restoreFromTrash(item, targetPath);
+        if (success) {
+            restored++;
+        } else {
+            failed++;
+        }
+    }
+
+    console.log(
+        `\nRestore-all complete: ${restored} restored, ${skipped} skipped, ${failed} failed`
+    );
+    if (skipped > 0) {
+        console.log("Skipped items had non-empty existing targets.");
+    }
+    if (failed > 0) {
+        console.log("Some items could not be restored due to internal restore errors.");
+    }
+}
+
+type TargetPrepareState = "ok" | "exists-nonempty";
+
+function prepareRestoreTarget(targetPath: string): TargetPrepareState {
+    if (!fs.existsSync(targetPath)) {
+        return "ok";
+    }
+
+    try {
+        const stats = fs.statSync(targetPath);
+        if (stats.isDirectory()) {
+            const entries = fs.readdirSync(targetPath);
+            if (entries.length === 0) {
+                fs.rmdirSync(targetPath);
+                return "ok";
+            }
+        }
+    } catch {
+        // Treat errors conservatively as non-empty/unsafe to overwrite.
+    }
+
+    return "exists-nonempty";
+}
+
+function getRestoreTargetPath(itemName: string): string {
+    if (itemName.startsWith("sales-channel-")) {
+        // Format: sales-channel-{name}-{timestamp}
+        const match = itemName.match(/^sales-channel-(.+?)-\d{4}-\d{2}-\d{2}T/);
+        const scName = match ? match[1] : itemName.replace("sales-channel-", "").split("-")[0];
+        return `generated/sales-channels/${scName}`;
+    }
+
+    if (itemName.startsWith("all-cache-")) {
+        return "generated";
+    }
+
+    return `generated/${itemName}`;
 }
 
 function emptyTrash(): void {

@@ -38,14 +38,23 @@ export interface TextProvider {
     readonly tokenLimit: number;
 }
 
+/** Options for image generation sizing */
+export interface ImageGenerationOptions {
+    /** Desired image width in pixels */
+    width?: number;
+    /** Desired image height in pixels */
+    height?: number;
+}
+
 /** Image generation provider interface */
 export interface ImageProvider {
     /**
      * Generate an image from a text prompt
      * @param prompt - Text description of the image to generate
+     * @param options - Optional size parameters (width/height)
      * @returns Base64-encoded image data, or null if generation failed
      */
-    generateImage(prompt: string): Promise<string | null>;
+    generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null>;
 
     /** Whether this provider requires sequential processing due to rate limits */
     readonly isSequential: boolean;

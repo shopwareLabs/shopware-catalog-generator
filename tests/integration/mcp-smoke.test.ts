@@ -9,9 +9,8 @@
  *   MCP_SMOKE_VERBOSE=1 bun test tests/integration/mcp-smoke.test.ts  # show full output
  */
 
-import { describe, expect, test } from "bun:test";
-
 import { spawn } from "bun";
+import { describe, expect, test } from "bun:test";
 
 const VERBOSE = process.env.MCP_SMOKE_VERBOSE === "1";
 

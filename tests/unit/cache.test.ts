@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import path from "node:path";
 
-import type { ProductInput, PropertyGroup } from "../../src/types/index.js";
+import type { CmsBlueprint, ProductInput, PropertyGroup } from "../../src/types/index.js";
 
 import { DataCache } from "../../src/cache.js";
 
@@ -159,7 +160,7 @@ describe("DataCache", () => {
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
         test("saves and loads images", () => {
-            cache.saveImageForSalesChannel(
+            cache.images.saveImageForSalesChannel(
                 TEST_SALES_CHANNEL,
                 "product-123",
                 "Test Product",
@@ -167,40 +168,47 @@ describe("DataCache", () => {
                 "test prompt"
             );
 
-            const loaded = cache.loadImageForSalesChannel(TEST_SALES_CHANNEL, "product-123");
+            const loaded = cache.images.loadImageForSalesChannel(TEST_SALES_CHANNEL, "product-123");
             expect(loaded).not.toBeNull();
             expect(loaded).toBe(testBase64);
         });
 
         test("returns null for non-existent image", () => {
-            const loaded = cache.loadImageForSalesChannel(TEST_SALES_CHANNEL, "non-existent");
+            const loaded = cache.images.loadImageForSalesChannel(
+                TEST_SALES_CHANNEL,
+                "non-existent"
+            );
             expect(loaded).toBeNull();
         });
 
         test("hasImageForSalesChannel returns true when image exists", () => {
-            cache.saveImageForSalesChannel(
+            cache.images.saveImageForSalesChannel(
                 TEST_SALES_CHANNEL,
                 "product-123",
                 "Test Product",
                 testBase64,
                 "test prompt"
             );
-            expect(cache.hasImageForSalesChannel(TEST_SALES_CHANNEL, "product-123")).toBe(true);
+            expect(cache.images.hasImageForSalesChannel(TEST_SALES_CHANNEL, "product-123")).toBe(
+                true
+            );
         });
 
         test("hasImageForSalesChannel returns false when image does not exist", () => {
-            expect(cache.hasImageForSalesChannel(TEST_SALES_CHANNEL, "non-existent")).toBe(false);
+            expect(cache.images.hasImageForSalesChannel(TEST_SALES_CHANNEL, "non-existent")).toBe(
+                false
+            );
         });
 
         test("getImageCountForSalesChannel returns correct count", () => {
-            cache.saveImageForSalesChannel(
+            cache.images.saveImageForSalesChannel(
                 TEST_SALES_CHANNEL,
                 "product-1",
                 "Product 1",
                 testBase64,
                 "prompt 1"
             );
-            cache.saveImageForSalesChannel(
+            cache.images.saveImageForSalesChannel(
                 TEST_SALES_CHANNEL,
                 "product-2",
                 "Product 2",
@@ -208,11 +216,54 @@ describe("DataCache", () => {
                 "prompt 2"
             );
 
-            expect(cache.getImageCountForSalesChannel(TEST_SALES_CHANNEL)).toBe(2);
+            expect(cache.images.getImageCountForSalesChannel(TEST_SALES_CHANNEL)).toBe(2);
         });
 
         test("getImageCountForSalesChannel returns 0 for non-existent SalesChannel", () => {
-            expect(cache.getImageCountForSalesChannel("non-existent")).toBe(0);
+            expect(cache.images.getImageCountForSalesChannel("non-existent")).toBe(0);
+        });
+
+        test("saves images to product_media subdirectory", () => {
+            cache.images.saveImageForSalesChannel(
+                TEST_SALES_CHANNEL,
+                "product-123",
+                "Test Product",
+                testBase64,
+                "test prompt"
+            );
+
+            const productMediaDir = path.join(
+                TEST_CACHE_DIR,
+                "sales-channels",
+                TEST_SALES_CHANNEL,
+                "images",
+                "product_media"
+            );
+            expect(fs.existsSync(productMediaDir)).toBe(true);
+            expect(fs.existsSync(path.join(productMediaDir, "product-123.webp"))).toBe(true);
+        });
+
+        test("getImageCountForSalesChannel counts across all media type subdirectories", () => {
+            cache.images.saveImageForSalesChannel(
+                TEST_SALES_CHANNEL,
+                "product-1",
+                "Product 1",
+                testBase64,
+                "prompt 1",
+                undefined,
+                "product_media"
+            );
+            cache.images.saveImageWithView(
+                TEST_SALES_CHANNEL,
+                "cat-1",
+                "banner",
+                testBase64,
+                "banner prompt",
+                undefined,
+                "category_media"
+            );
+
+            expect(cache.images.getImageCountForSalesChannel(TEST_SALES_CHANNEL)).toBe(2);
         });
     });
 
@@ -243,6 +294,62 @@ describe("DataCache", () => {
 
         test("hasCategoryTree returns false when tree does not exist", () => {
             expect(cache.hasCategoryTree("non-existent")).toBe(false);
+        });
+    });
+
+    describe("CMS blueprint cache", () => {
+        const testCmsBlueprint: CmsBlueprint = {
+            salesChannelName: TEST_SALES_CHANNEL,
+            pages: [
+                {
+                    name: "Test Page",
+                    processor: "cms-test",
+                    sections: [
+                        {
+                            blocks: [
+                                {
+                                    type: "text",
+                                    position: 0,
+                                    slots: [
+                                        {
+                                            type: "text",
+                                            slot: "content",
+                                            textContent: "<p>Test content</p>",
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        test("saves and loads CMS blueprint", () => {
+            cache.saveCmsBlueprint(TEST_SALES_CHANNEL, testCmsBlueprint);
+            const loaded = cache.loadCmsBlueprint(TEST_SALES_CHANNEL);
+
+            expect(loaded).not.toBeNull();
+            expect(loaded?.salesChannelName).toBe(TEST_SALES_CHANNEL);
+            expect(loaded?.pages).toHaveLength(1);
+            expect(loaded?.pages[0]?.name).toBe("Test Page");
+            expect(loaded?.pages[0]?.sections[0]?.blocks[0]?.slots[0]?.textContent).toBe(
+                "<p>Test content</p>"
+            );
+        });
+
+        test("returns null for non-existent SalesChannel", () => {
+            const loaded = cache.loadCmsBlueprint("non-existent");
+            expect(loaded).toBeNull();
+        });
+
+        test("hasCmsBlueprint returns true when blueprint exists", () => {
+            cache.saveCmsBlueprint(TEST_SALES_CHANNEL, testCmsBlueprint);
+            expect(cache.hasCmsBlueprint(TEST_SALES_CHANNEL)).toBe(true);
+        });
+
+        test("hasCmsBlueprint returns false when blueprint does not exist", () => {
+            expect(cache.hasCmsBlueprint("non-existent")).toBe(false);
         });
     });
 
@@ -277,6 +384,47 @@ describe("DataCache", () => {
         });
     });
 
+    describe("trash restore", () => {
+        test("restoreFromTrash removes restored item from trash", () => {
+            cache.saveSalesChannelMetadata(TEST_SALES_CHANNEL, "Description");
+            cache.clearSalesChannel(TEST_SALES_CHANNEL);
+
+            const trashItems = cache.listTrash();
+            expect(trashItems.length).toBeGreaterThan(0);
+            const item = trashItems[0];
+            expect(item).toBeDefined();
+            const targetPath = path.join(
+                TEST_CACHE_DIR,
+                "sales-channels",
+                TEST_SALES_CHANNEL
+            );
+
+            const restored = cache.restoreFromTrash(item as string, targetPath);
+            expect(restored).toBe(true);
+            expect(cache.listTrash()).toHaveLength(0);
+        });
+
+        test("restoreFromTrash fails when target path already exists", () => {
+            cache.saveSalesChannelMetadata(TEST_SALES_CHANNEL, "Description");
+            cache.clearSalesChannel(TEST_SALES_CHANNEL);
+
+            const trashItems = cache.listTrash();
+            const item = trashItems[0] as string;
+            const targetPath = path.join(
+                TEST_CACHE_DIR,
+                "sales-channels",
+                TEST_SALES_CHANNEL
+            );
+
+            // Recreate the target so restore should fail
+            cache.saveSalesChannelMetadata(TEST_SALES_CHANNEL, "Existing");
+
+            const restored = cache.restoreFromTrash(item, targetPath);
+            expect(restored).toBe(false);
+            expect(cache.listTrash()).toContain(item);
+        });
+    });
+
     describe("disabled cache", () => {
         let disabledCache: DataCache;
 
@@ -297,11 +445,11 @@ describe("DataCache", () => {
         });
 
         test("loadImageForSalesChannel returns null when disabled", () => {
-            expect(disabledCache.loadImageForSalesChannel("any", "any")).toBeNull();
+            expect(disabledCache.images.loadImageForSalesChannel("any", "any")).toBeNull();
         });
 
         test("hasImageForSalesChannel returns false when disabled", () => {
-            expect(disabledCache.hasImageForSalesChannel("any", "any")).toBe(false);
+            expect(disabledCache.images.hasImageForSalesChannel("any", "any")).toBe(false);
         });
 
         test("hasPropertyGroupsForSalesChannel returns false when disabled", () => {
