@@ -562,11 +562,16 @@ export class ShopwareHydrator extends ShopwareClient {
             return { ...existing, isNew: false };
         }
 
-        // Get Storefront config to clone
-        const storefront = await this.getFullSalesChannel("Storefront");
-
-        // Create or reuse a root category for this SalesChannel
-        const rootCategory = await this.createRootCategory(sanitizedName);
+        // Get Storefront config and multi-language/currency IDs in parallel
+        const [storefront, usdResult, eurResult, deLanguageResult, deSnippetResult, rootCategory] =
+            await Promise.all([
+                this.getFullSalesChannel("Storefront"),
+                this.getCurrencyId("USD").catch(() => null),
+                this.getCurrencyId("EUR").catch(() => null),
+                this.getLanguageId("de-DE"),
+                this.getSnippetSetId("de-DE"),
+                this.createRootCategory(sanitizedName),
+            ]);
 
         // If reusing existing root, clean up old children
         if (!rootCategory.isNew) {
@@ -576,27 +581,69 @@ export class ShopwareHydrator extends ShopwareClient {
             }
         }
 
+        // Resolve currencies: prefer USD for primary (EN domain), EUR for DE domain
+        const usdCurrencyId = usdResult ?? storefront.currencyId;
+        const eurCurrencyId = eurResult ?? storefront.currencyId;
+        const hasGermanDomain = deLanguageResult !== null && deSnippetResult !== null;
+
+        if (!usdResult) {
+            logger.warn("USD currency not found in Shopware - using storefront default currency");
+        }
+        if (!hasGermanDomain) {
+            logger.warn(
+                "German language (de-DE) or snippet set not found - skipping German domain"
+            );
+        }
+
         // Generate access key
         const accessKey = this.generateAccessKey();
 
-        // Determine the URL
-        const baseUrl =
-            input.baseUrl ||
-            generateSubdomainUrl(
-                sanitizedName,
-                this.envPath?.replace(/^https?:\/\//, "") || "localhost:8000"
-            );
+        // Determine URLs
+        const host = this.envPath?.replace(/^https?:\/\//, "") || "localhost:8000";
+        const baseUrl = input.baseUrl || generateSubdomainUrl(sanitizedName, host);
+        const germanUrl = generateSubdomainUrl(`${sanitizedName}-de`, host);
 
         // Create the SalesChannel
         const salesChannelId = generateUUID();
-        const domainId = generateUUID();
+
+        const languages = [{ id: storefront.languageId }];
+        const currencies = [{ id: usdCurrencyId }];
+        const domains: Array<{
+            id: string;
+            url: string;
+            languageId: string;
+            currencyId: string;
+            snippetSetId: string | undefined;
+        }> = [
+            {
+                id: generateUUID(),
+                url: baseUrl,
+                languageId: storefront.languageId,
+                currencyId: usdCurrencyId,
+                snippetSetId: storefront.snippetSetId,
+            },
+        ];
+
+        if (hasGermanDomain) {
+            languages.push({ id: deLanguageResult as string });
+            if (eurCurrencyId !== usdCurrencyId) {
+                currencies.push({ id: eurCurrencyId });
+            }
+            domains.push({
+                id: generateUUID(),
+                url: germanUrl,
+                languageId: deLanguageResult as string,
+                currencyId: eurCurrencyId,
+                snippetSetId: deSnippetResult as string,
+            });
+        }
 
         const payload = {
             id: salesChannelId,
             name: capitalizeString(sanitizedName),
             typeId: storefront.typeId,
             languageId: storefront.languageId,
-            currencyId: storefront.currencyId,
+            currencyId: usdCurrencyId,
             paymentMethodId: storefront.paymentMethodId,
             shippingMethodId: storefront.shippingMethodId,
             countryId: storefront.countryId,
@@ -604,20 +651,12 @@ export class ShopwareHydrator extends ShopwareClient {
             navigationCategoryId: rootCategory.id,
             accessKey,
             active: true,
-            languages: [{ id: storefront.languageId }],
-            currencies: [{ id: storefront.currencyId }],
+            languages,
+            currencies,
             paymentMethods: [{ id: storefront.paymentMethodId }],
             shippingMethods: [{ id: storefront.shippingMethodId }],
             countries: [{ id: storefront.countryId }],
-            domains: [
-                {
-                    id: domainId,
-                    url: baseUrl,
-                    languageId: storefront.languageId,
-                    currencyId: storefront.currencyId,
-                    snippetSetId: storefront.snippetSetId,
-                },
-            ],
+            domains,
         };
 
         await this.sync([
@@ -628,7 +667,8 @@ export class ShopwareHydrator extends ShopwareClient {
             },
         ]);
 
-        logger.info(`Created SalesChannel "${sanitizedName}" with URL: ${baseUrl}`, {
+        const domainUrls = domains.map((d) => d.url).join(", ");
+        logger.info(`Created SalesChannel "${sanitizedName}" with domains: ${domainUrls}`, {
             cli: true,
         });
 
@@ -647,7 +687,7 @@ export class ShopwareHydrator extends ShopwareClient {
             name: capitalizeString(sanitizedName),
             typeId: storefront.typeId,
             languageId: storefront.languageId,
-            currencyId: storefront.currencyId,
+            currencyId: usdCurrencyId,
             paymentMethodId: storefront.paymentMethodId,
             shippingMethodId: storefront.shippingMethodId,
             countryId: storefront.countryId,

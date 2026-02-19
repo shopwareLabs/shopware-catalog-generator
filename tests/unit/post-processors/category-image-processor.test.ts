@@ -121,4 +121,3 @@ describe("CategoryImageProcessor", () => {
         expect(mockApi.deleteEntityMock).toHaveBeenCalled();
     });
 });
-

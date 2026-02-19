@@ -393,11 +393,7 @@ describe("DataCache", () => {
             expect(trashItems.length).toBeGreaterThan(0);
             const item = trashItems[0];
             expect(item).toBeDefined();
-            const targetPath = path.join(
-                TEST_CACHE_DIR,
-                "sales-channels",
-                TEST_SALES_CHANNEL
-            );
+            const targetPath = path.join(TEST_CACHE_DIR, "sales-channels", TEST_SALES_CHANNEL);
 
             const restored = cache.restoreFromTrash(item as string, targetPath);
             expect(restored).toBe(true);
@@ -410,11 +406,7 @@ describe("DataCache", () => {
 
             const trashItems = cache.listTrash();
             const item = trashItems[0] as string;
-            const targetPath = path.join(
-                TEST_CACHE_DIR,
-                "sales-channels",
-                TEST_SALES_CHANNEL
-            );
+            const targetPath = path.join(TEST_CACHE_DIR, "sales-channels", TEST_SALES_CHANNEL);
 
             // Recreate the target so restore should fail
             cache.saveSalesChannelMetadata(TEST_SALES_CHANNEL, "Existing");

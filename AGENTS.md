@@ -288,6 +288,39 @@ await dataHydrator.createCategoryTree(categories, rootId, salesChannelId);
 await runProcessors(context, ["images", "manufacturers", "reviews"]);
 ```
 
+### Multi-Domain SalesChannels
+
+Every SalesChannel is created with two domains automatically:
+
+| Domain             | Language                  | Currency | Snippet Set      |
+| ------------------ | ------------------------- | -------- | ---------------- |
+| `{name}.{host}`    | English (from Storefront) | USD      | English          |
+| `{name}-de.{host}` | German (`de-DE`)          | EUR      | German (`de-DE`) |
+
+**Graceful fallback**: If German (`de-DE`) language or its snippet set is not installed in Shopware, a warning is logged and only the English/USD domain is created.
+
+**Currency**: USD is used as the primary currency for the SalesChannel. If USD is not found in Shopware, the Storefront's default currency is used as fallback.
+
+Both domains are created in a single `sync` call along with both languages and both currencies:
+
+```typescript
+// Domain resolution in createSalesChannel()
+const [storefront, usdResult, eurResult, deLanguageResult, deSnippetResult, rootCategory] =
+    await Promise.all([
+        this.getFullSalesChannel("Storefront"),
+        this.getCurrencyId("USD").catch(() => null), // null → fallback to storefront
+        this.getCurrencyId("EUR").catch(() => null),
+        this.getLanguageId("de-DE"), // null → skip German domain
+        this.getSnippetSetId("de-DE"), // null → skip German domain
+        this.createRootCategory(sanitizedName),
+    ]);
+```
+
+New lookup methods on `ShopwareClient`:
+
+- `getLanguageId(localeCode: string): Promise<string | null>` — searches `language` by `locale.code`
+- `getSnippetSetId(iso: string): Promise<string | null>` — searches `snippet_set` by `iso`
+
 ### Post-Processor System
 
 Post-processors run after initial Shopware upload for resource-intensive tasks:

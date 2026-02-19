@@ -81,6 +81,19 @@ bun run generate --name=music --description="Musical instruments and accessories
 | `--dry-run`     | Preview actions without making changes       |
 | `--no-template` | Skip checking for pre-generated templates    |
 
+### Domains & Languages
+
+Every generated SalesChannel automatically gets two domains:
+
+| Domain                     | Language | Currency |
+| -------------------------- | -------- | -------- |
+| `{name}.localhost:8000`    | English  | USD      |
+| `{name}-de.localhost:8000` | German   | EUR      |
+
+The German domain is only created if the German language (`de-DE`) and its snippet set are installed in your Shopware instance. If not, a warning is logged and only the English domain is created.
+
+> To install German in Shopware: **Settings → Shop → Languages → Add language → German**.
+
 ### Blueprint Workflow
 
 For more control, run the pipeline phases separately:

@@ -95,6 +95,15 @@ await hydrator.hydrateEnvWithProducts(products, category, salesChannelName);
 
 **Category ordering**: Categories use `afterCategoryId` to preserve blueprint order. The Testing category is always created last so it appears at the end of the navigation.
 
+**Multi-domain SalesChannels**: `createSalesChannel()` automatically creates two domains per SalesChannel:
+
+| Domain             | Language                     | Currency |
+| ------------------ | ---------------------------- | -------- |
+| `{name}.{host}`    | English (Storefront default) | USD      |
+| `{name}-de.{host}` | German (`de-DE`)             | EUR      |
+
+The German domain is skipped with a warning if `de-DE` language or its snippet set is not installed in Shopware. USD falls back to the Storefront's default currency if not found. All lookups run in parallel with `Promise.all` via `ShopwareClient.getLanguageId()` and `ShopwareClient.getSnippetSetId()`.
+
 ### ShopwareCleanup
 
 Delete entities (SalesChannel-centric):

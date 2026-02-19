@@ -5,8 +5,8 @@ import path from "node:path";
 
 import type { ChatMessage, TextProvider } from "../../../src/types/index.js";
 
-import { PropertyCache } from "../../../src/property-cache.js";
 import { VariantResolver } from "../../../src/blueprint/variant-resolver.js";
+import { PropertyCache } from "../../../src/property-cache.js";
 
 class MockTextProvider implements TextProvider {
     readonly name = "mock";
@@ -124,4 +124,3 @@ describe("VariantResolver", () => {
         expect(provider.calls).toBe(1);
     });
 });
-

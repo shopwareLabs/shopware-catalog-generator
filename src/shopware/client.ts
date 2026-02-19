@@ -144,6 +144,34 @@ export class ShopwareClient {
         return currencyData.id;
     }
 
+    /** Get language ID by locale code (e.g. "de-DE"), returns null if not installed */
+    async getLanguageId(localeCode: string): Promise<string | null> {
+        const { data } = await this.getClient().invoke("searchLanguage post /search/language", {
+            body: {
+                limit: 1,
+                filter: [{ type: "equals", field: "locale.code", value: localeCode }],
+                associations: { locale: {} },
+            },
+        });
+        const response = data as SearchResult<Schemas["Language"]>;
+        return response.data?.[0]?.id ?? null;
+    }
+
+    /** Get snippet set ID by ISO code (e.g. "de-DE"), returns null if not installed */
+    async getSnippetSetId(iso: string): Promise<string | null> {
+        const { data } = await this.getClient().invoke(
+            "searchSnippetSet post /search/snippet-set",
+            {
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "iso", value: iso }],
+                },
+            }
+        );
+        const response = data as SearchResult<Schemas["SnippetSet"]>;
+        return response.data?.[0]?.id ?? null;
+    }
+
     /** Get standard tax ID */
     async getStandardTaxId(): Promise<string> {
         const { data } = await this.getClient().invoke("searchTax post /search/tax", {

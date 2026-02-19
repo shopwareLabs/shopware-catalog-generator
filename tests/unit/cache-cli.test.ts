@@ -5,7 +5,10 @@ import path from "node:path";
 
 import { DataCache } from "../../src/cache.js";
 
-function runCacheCli(args: string[], cacheDir: string): { stdout: string; stderr: string; exitCode: number } {
+function runCacheCli(
+    args: string[],
+    cacheDir: string
+): { stdout: string; stderr: string; exitCode: number } {
     const proc = Bun.spawnSync({
         cmd: [process.execPath, "run", "src/cache-cli.ts", ...args],
         cwd: process.cwd(),
@@ -70,4 +73,3 @@ describe("cache-cli restore flags", () => {
         expect(result.stdout).toContain("restored");
     });
 });
-

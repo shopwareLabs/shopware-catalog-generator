@@ -348,7 +348,10 @@ describe("ImageProcessor", () => {
             ]);
 
             const metadataMap = new Map<string, Partial<ProductMetadata>>([
-                ["p-upload-new", { imageDescriptions: [{ view: "front" as const, prompt: "test1" }] }],
+                [
+                    "p-upload-new",
+                    { imageDescriptions: [{ view: "front" as const, prompt: "test1" }] },
+                ],
             ]);
 
             const mockApi = createMockApiHelpers();
@@ -437,7 +440,11 @@ describe("ImageProcessor", () => {
             ]);
             mockApi.mockSearchResponse("category", []);
 
-            const context = createMockContext(createMockBlueprint([]), {}, { dryRun: false, mockApi });
+            const context = createMockContext(
+                createMockBlueprint([]),
+                {},
+                { dryRun: false, mockApi }
+            );
             const result = await ImageProcessor.cleanup(context);
 
             expect(result.errors).toEqual([]);

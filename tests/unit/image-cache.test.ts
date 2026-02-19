@@ -53,7 +53,13 @@ describe("ImageCache", () => {
     });
 
     test("legacy single-image format works and is counted", () => {
-        cache.saveImageForSalesChannel("music", "legacy-1", "Legacy Product", PNG_BASE64, "legacy prompt");
+        cache.saveImageForSalesChannel(
+            "music",
+            "legacy-1",
+            "Legacy Product",
+            PNG_BASE64,
+            "legacy prompt"
+        );
 
         expect(cache.hasImageForSalesChannel("music", "legacy-1")).toBe(true);
         expect(cache.loadImageForSalesChannel("music", "legacy-1")).toBe(PNG_BASE64);
@@ -61,9 +67,18 @@ describe("ImageCache", () => {
     });
 
     test("isImageStale compares normalized base prompt", () => {
-        cache.saveImageWithView("music", "p2", "front", PNG_BASE64, "Oak table, bright studio", "model");
+        cache.saveImageWithView(
+            "music",
+            "p2",
+            "front",
+            PNG_BASE64,
+            "Oak table, bright studio",
+            "model"
+        );
         expect(cache.isImageStale("music", "p2", "front", "oak table, warm lighting")).toBe(false);
-        expect(cache.isImageStale("music", "p2", "front", "Walnut table, bright studio")).toBe(true);
+        expect(cache.isImageStale("music", "p2", "front", "Walnut table, bright studio")).toBe(
+            true
+        );
     });
 
     test("returns null on malformed metadata/image read failures", () => {
@@ -91,4 +106,3 @@ describe("ImageCache", () => {
         expect(disabled.loadImageForSalesChannel("music", "x")).toBeNull();
     });
 });
-

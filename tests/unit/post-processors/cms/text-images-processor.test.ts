@@ -76,37 +76,55 @@ describe("TextImagesProcessor", () => {
         expect(result.errors).toEqual([]);
         expect(result.processed).toBe(1);
 
-        const loadCalls = (
-            context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>
-        ).mock.calls;
+        const loadCalls = (context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>)
+            .mock.calls;
         expect(loadCalls.length).toBe(8);
     });
 
     test("populateMediaIds maps media ids into expected slots", () => {
         const fixture = TextImagesProcessor.pageFixture;
-        const mapped = (TextImagesProcessor as unknown as { populateMediaIds: Function }).populateMediaIds(
-            fixture,
-            {
-                "ti-left": "m1",
-                "ti-right": "m2",
-                "ct-left": "m3",
-                "ct-right": "m4",
-                "bubble-left": "m5",
-                "bubble-center": "m6",
-                "bubble-right": "m7",
-                "toi-bg": "m8",
-            }
-        ) as typeof fixture;
+        const mapped = (
+            TextImagesProcessor as unknown as { populateMediaIds: Function }
+        ).populateMediaIds(fixture, {
+            "ti-left": "m1",
+            "ti-right": "m2",
+            "ct-left": "m3",
+            "ct-right": "m4",
+            "bubble-left": "m5",
+            "bubble-center": "m6",
+            "bubble-right": "m7",
+            "toi-bg": "m8",
+        }) as typeof fixture;
 
         const blocks = mapped.sections[0]?.blocks ?? [];
-        expect(blocks.find((b) => b.position === 1)?.slots.find((s) => s.slot === "left")?.config.media?.value).toBe("m1");
-        expect(blocks.find((b) => b.position === 2)?.slots.find((s) => s.slot === "right")?.config.media?.value).toBe("m2");
-        expect(blocks.find((b) => b.position === 3)?.slots.find((s) => s.slot === "left")?.config.media?.value).toBe("m3");
-        expect(blocks.find((b) => b.position === 3)?.slots.find((s) => s.slot === "right")?.config.media?.value).toBe("m4");
-        expect(blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "left-image")?.config.media?.value).toBe("m5");
-        expect(blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "center-image")?.config.media?.value).toBe("m6");
-        expect(blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "right-image")?.config.media?.value).toBe("m7");
+        expect(
+            blocks.find((b) => b.position === 1)?.slots.find((s) => s.slot === "left")?.config.media
+                ?.value
+        ).toBe("m1");
+        expect(
+            blocks.find((b) => b.position === 2)?.slots.find((s) => s.slot === "right")?.config
+                .media?.value
+        ).toBe("m2");
+        expect(
+            blocks.find((b) => b.position === 3)?.slots.find((s) => s.slot === "left")?.config.media
+                ?.value
+        ).toBe("m3");
+        expect(
+            blocks.find((b) => b.position === 3)?.slots.find((s) => s.slot === "right")?.config
+                .media?.value
+        ).toBe("m4");
+        expect(
+            blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "left-image")?.config
+                .media?.value
+        ).toBe("m5");
+        expect(
+            blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "center-image")
+                ?.config.media?.value
+        ).toBe("m6");
+        expect(
+            blocks.find((b) => b.position === 4)?.slots.find((s) => s.slot === "right-image")
+                ?.config.media?.value
+        ).toBe("m7");
         expect(blocks.find((b) => b.type === "text-on-image")?.backgroundMediaId).toBe("m8");
     });
 });
-

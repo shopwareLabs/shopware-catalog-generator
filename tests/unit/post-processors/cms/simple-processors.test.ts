@@ -225,7 +225,10 @@ describe("TextImagesProcessor", () => {
             const responses = new Map<string, { ok: boolean; data: unknown }>();
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
-            responses.set("search/media", { ok: true, data: { data: [{ id: "existing-cms-media" }] } });
+            responses.set("search/media", {
+                ok: true,
+                data: { data: [{ id: "existing-cms-media" }] },
+            });
             responses.set("_action/sync", { ok: true, data: { success: true } });
             const { context } = createMockContext({ fetchResponses: responses });
             context.cache = {
