@@ -151,7 +151,7 @@ function migrateBlueprint(
         const propertyGroups = blueprint.propertyGroups || [];
 
         for (const product of blueprint.products) {
-            const metadata = product.metadata as unknown as LegacyProductMetadata;
+            const metadata = product.metadata as LegacyProductMetadata;
 
             // Skip if not a variant product
             if (!metadata.isVariant) {
@@ -181,10 +181,9 @@ function migrateBlueprint(
             }
 
             // Update the product metadata
-            (product.metadata as unknown as Record<string, unknown>).variantConfigs =
-                variantConfigs;
-            delete (product.metadata as unknown as Record<string, unknown>).variantProperty;
-            delete (product.metadata as unknown as Record<string, unknown>).variantPriceModifiers;
+            Object.assign(product.metadata, { variantConfigs });
+            delete metadata.variantProperty;
+            delete metadata.variantPriceModifiers;
 
             modified = true;
             result.migrated++;

@@ -321,6 +321,9 @@ class ManufacturerProcessorImpl implements PostProcessor {
                     { cli: true }
                 );
             }
+
+            // Clear local cache so the next generate re-creates manufacturers in Shopware
+            context.cache.saveManufacturers(context.salesChannelName, []);
         } catch (error) {
             errors.push(
                 `Manufacturer cleanup failed: ${error instanceof Error ? error.message : String(error)}`

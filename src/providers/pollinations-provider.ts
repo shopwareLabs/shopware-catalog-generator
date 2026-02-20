@@ -103,11 +103,14 @@ export class PollinationsTextProvider implements TextProvider {
                 return error.status;
             }
             // Nested error format
-            if ("error" in error && error.error && typeof error.error === "object") {
-                const innerError = error.error as Record<string, unknown>;
-                if ("status" in innerError && typeof innerError.status === "number") {
-                    return innerError.status;
-                }
+            if (
+                "error" in error &&
+                error.error &&
+                typeof error.error === "object" &&
+                "status" in error.error &&
+                typeof error.error.status === "number"
+            ) {
+                return error.error.status;
             }
         }
         return null;

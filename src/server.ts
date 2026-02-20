@@ -33,7 +33,10 @@ const port = Number(process.env.SERVER_PORT) || 3000;
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown>> {
     try {
-        return (await request.json()) as Record<string, unknown>;
+        const data = await request.json();
+        return typeof data === "object" && data !== null && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : {};
     } catch {
         return {};
     }
@@ -295,8 +298,12 @@ async function handleGenerate(request: Request): Promise<Response> {
     const productCount = (body.productCount as number) || 90;
     const shopwareUser = body.shopwareUser as string | undefined;
     const shopwarePassword = body.shopwarePassword as string | undefined;
-    const cacheOptions = (body.cache as Record<string, unknown>) || {};
-    const clearFirst = cacheOptions.clearFirst === true;
+    const rawCache = body.cache;
+    const clearFirst =
+        typeof rawCache === "object" &&
+        rawCache !== null &&
+        "clearFirst" in rawCache &&
+        rawCache.clearFirst === true;
     const skipProcessors = body.skipProcessors === true;
     const skipTemplate = body.skipTemplate === true;
 

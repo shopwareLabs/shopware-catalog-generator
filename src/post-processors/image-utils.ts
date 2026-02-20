@@ -54,7 +54,7 @@ export async function uploadImageWithRetry(
 
             if (response.status >= 500 && response.status < 600) {
                 const error = new Error(`Server error: ${response.status}`);
-                (error as unknown as { status: number }).status = 429;
+                Object.assign(error, { status: 429 });
                 throw error;
             }
 

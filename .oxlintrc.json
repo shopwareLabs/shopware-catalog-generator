@@ -1,0 +1,7 @@
+{
+    "plugins": ["typescript"],
+    "rules": {
+        // Requires --type-aware flag (oxlint-tsgolint). Enforced today via scripts/lint-no-cast.ts.
+        "typescript/no-unsafe-type-assertion": "error"
+    }
+}

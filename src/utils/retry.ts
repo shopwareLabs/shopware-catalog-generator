@@ -145,19 +145,20 @@ export async function executeWithRetry<T>(
  * which represents time until window reset (could be hours for daily limits)
  */
 export function getRetryAfterMs(error: unknown): number {
-    if (error && typeof error === "object") {
-        const err = error as Record<string, unknown>;
-
-        // Check for headers object (OpenAI style)
-        if (err.headers && typeof err.headers === "object") {
-            const headers = err.headers as Record<string, string>;
-            const retryAfter = headers["retry-after"];
-            if (retryAfter) {
-                const seconds = parseInt(retryAfter, 10);
-                // Only use reasonable values (max 5 minutes)
-                if (!isNaN(seconds) && seconds > 0 && seconds <= 300) {
-                    return seconds * 1000;
-                }
+    if (
+        error &&
+        typeof error === "object" &&
+        "headers" in error &&
+        error.headers &&
+        typeof error.headers === "object"
+    ) {
+        // Check for retry-after header (OpenAI style)
+        const retryAfter = (error.headers as Record<string, string>)["retry-after"];
+        if (retryAfter) {
+            const seconds = parseInt(retryAfter, 10);
+            // Only use reasonable values (max 5 minutes)
+            if (!isNaN(seconds) && seconds > 0 && seconds <= 300) {
+                return seconds * 1000;
             }
         }
     }
@@ -172,19 +173,9 @@ export function getRetryAfterMs(error: unknown): number {
 export function isRateLimitError(error: unknown): boolean {
     // Check Error object properties (OpenAI library)
     if (error && typeof error === "object") {
-        const err = error as Record<string, unknown>;
-
-        // Check status code
-        if (err.status === 429) return true;
-
-        // Check error code (OpenAI style)
-        if (err.code === "RateLimitReached") return true;
-
-        // Check error name
-        if (err.name === "RateLimitError") return true;
-
-        // Check constructor name
-        if (err.constructor?.name === "RateLimitError") return true;
+        if ("status" in error && error.status === 429) return true;
+        if ("code" in error && error.code === "RateLimitReached") return true;
+        if ("name" in error && error.name === "RateLimitError") return true;
     }
 
     // Fallback to string matching

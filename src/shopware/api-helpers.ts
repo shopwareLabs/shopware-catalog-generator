@@ -386,7 +386,7 @@ export class ShopwareApiHelpers {
         if (contentType.includes("application/json")) {
             return (await response.json()) as T;
         }
-        return (await response.text()) as unknown as T;
+        return (await response.text()) as T;
     }
 
     /**
@@ -470,7 +470,7 @@ export class ShopwareApiHelpers {
         if (contentType.includes("application/json")) {
             return (await response.json()) as T;
         }
-        return (await response.text()) as unknown as T;
+        return (await response.text()) as T;
     }
 
     /**
