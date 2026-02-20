@@ -16,23 +16,29 @@ This project uses **Bun** as the runtime instead of Node.js:
 ```
 src/
 ├── types/                    # All types - import from here
+│   ├── AGENTS.md             # Types documentation
 │   ├── index.ts              # Re-exports all types and schemas
 │   ├── shopware.ts           # Shopware entities + Zod schemas
-│   ├── blueprint.ts          # Blueprint types (v2)
+│   ├── blueprint.ts          # Blueprint types
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
-│   └── export.ts             # Export types (ExportValidation, ExportResult)
+│   ├── export.ts             # Export types (ExportValidation, ExportResult)
+│   └── property-cache.ts     # Property cache types
 │
 ├── shopware/                 # Shopware API operations
+│   ├── AGENTS.md             # Shopware module documentation
 │   ├── index.ts              # DataHydrator (combines all) + exports
 │   ├── admin-client.ts       # Official @shopware/api-client wrapper
 │   ├── api-helpers.ts        # Convenience methods (searchEntities, syncEntities, etc.)
+│   ├── api-types.ts          # API type definitions
 │   ├── client.ts             # Legacy auth, base client with fetch API
+│   ├── sync.ts               # Sync operations
 │   ├── hydrator.ts           # Create products/categories/SalesChannels
 │   ├── export.ts             # Export/sync existing data + getExistingPropertyGroups
 │   └── cleanup.ts            # Delete operations (SalesChannel-centric)
 │
 ├── providers/                # AI provider implementations
+│   ├── AGENTS.md             # Provider documentation
 │   ├── index.ts              # Exports + factory
 │   ├── factory.ts            # Provider creation logic
 │   ├── openai-provider.ts    # OpenAI (text + images)
@@ -41,12 +47,14 @@ src/
 │   └── noop-provider.ts      # Disabled image provider
 │
 ├── cli/                      # CLI command modules (main.ts delegates here)
+│   ├── AGENTS.md             # CLI reference (all commands, flags, options)
 │   ├── blueprint.ts          # blueprint create, hydrate, fix
 │   ├── generate.ts           # generate (full pipeline), process (post-processors)
 │   ├── image-fix.ts          # image fix - regenerate product images
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
 │
-├── blueprint/                # v2 Blueprint-based generation
+├── blueprint/                # Blueprint-based generation
+│   ├── AGENTS.md             # Blueprint module documentation
 │   ├── index.ts              # Re-exports all blueprint modules
 │   ├── generator.ts          # Generate blueprint structure (no AI)
 │   ├── hydrator.ts           # Orchestrates category + product hydration
@@ -57,9 +65,10 @@ src/
 │       ├── category.ts       # Category names/descriptions via AI
 │       ├── product.ts        # Product content via AI (parallel branches)
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
-│       └── image.ts          # CMS image pre-generation (20 images cached locally)
+│       └── image.ts          # Product/category/CMS image pre-generation
 │
-├── post-processors/          # v2 Post-processors (parallel execution)
+├── post-processors/          # Post-processors (parallel execution)
+│   ├── AGENTS.md             # Post-processor documentation
 │   ├── index.ts              # Interface, registry, ordered runner
 │   ├── cms/                  # CMS demo page processors
 │   │   ├── AGENTS.md         # CMS processor documentation
@@ -72,16 +81,18 @@ src/
 │   │   ├── text-images-processor.ts # Text & Images demo page
 │   │   ├── commerce-processor.ts # Commerce elements demo page
 │   │   ├── form-processor.ts # Form elements demo page
+│   │   ├── footer-pages-processor.ts # Shared footer and legal pages
 │   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
 │   ├── digital-product-processor.ts # Digital product with download
 │   ├── image-processor.ts    # Multi-view product image generation
 │   ├── category-image-processor.ts # Category banner images
 │   ├── image-utils.ts        # Shared image utilities
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
-│   ├── variant-processor.ts  # Simple v2.0 (marking only)
+│   ├── variant-processor.ts  # Variant product creation
 │   └── review-processor.ts   # Variable review counts
 │
 ├── fixtures/                 # Reusable data configurations
+│   ├── AGENTS.md             # Fixtures documentation
 │   ├── index.ts              # Re-exports all fixtures
 │   ├── types.ts              # Fixture type definitions
 │   ├── cms/                  # CMS page fixtures
@@ -95,30 +106,39 @@ src/
 │   │   ├── commerce.ts       # Commerce elements page
 │   │   ├── form.ts           # Form elements page
 │   │   └── home-listing.ts   # Home listing page (root category)
+│   ├── color-images/         # SVG color swatch images
+│   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
 │
 ├── templates/                # Pre-generated catalog templates
+│   ├── AGENTS.md             # Templates documentation
 │   ├── index.ts              # Exports
 │   └── fetcher.ts            # TemplateFetcher for cloning template repo
 │
 ├── utils/                    # Utility functions
+│   ├── AGENTS.md             # Utilities documentation
 │   ├── index.ts              # Re-exports all utilities
 │   ├── validation.ts         # Subdomain validation
 │   ├── blueprint-validation.ts # Validate blueprints before sync (duplicates, placeholders)
 │   ├── retry.ts              # executeWithRetry, sleep, rate limit handling
 │   ├── strings.ts            # normalizeString, stripHtml, capitalizeString, createShortHash
 │   ├── category-tree.ts      # countCategories, getLeafCategories, etc.
-│   ├── property-collector.ts # Collect, deduplicate, merge properties (v2)
+│   ├── property-collector.ts # Collect, deduplicate, merge properties
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
+│   ├── uuid.ts               # UUID generation
+│   ├── arrays.ts             # Array utilities (randomPick, etc.)
+│   ├── shopware-request.ts   # Shopware API request helpers
 │   └── logger.ts             # File-based logging (logs/ folder)
 │
 ├── server/                   # HTTP server infrastructure
+│   ├── AGENTS.md             # Server documentation
 │   ├── index.ts              # Exports ProcessManager + types
 │   └── process-manager.ts    # Background task management
 │
 ├── mcp/                      # MCP server for Cursor AI integration
+│   ├── AGENTS.md             # MCP server documentation
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
@@ -131,13 +151,14 @@ src/
 ├── cache.ts                  # DataCache class (+ blueprint storage)
 ├── image-cache.ts            # ImageCache (product/category/CMS/property media)
 ├── property-cache.ts         # PropertyCache (store-scoped property caching)
-├── main.ts                   # CLI entry point (v2 subcommand-based)
+├── main.ts                   # CLI entry point (subcommand-based)
 ├── server.ts                 # HTTP server entry (Bun.serve)
 ├── cache-cli.ts              # Cache management CLI
-└── cleanup-cli.ts            # Cleanup CLI (+ manufacturer cleanup)
+├── cleanup-cli.ts            # Cleanup CLI (+ manufacturer cleanup)
+└── migrate-variants.ts       # Variant migration script
 
 scripts/
-└── migrate-properties.ts     # One-time migration for store-scoped properties
+└── lint-no-cast.ts           # Custom lint rule: no type casting
 
 tests/
 ├── unit/                     # Unit tests (mirrors src/ structure)
@@ -190,7 +211,7 @@ tests/
 │   ├── property-cache.test.ts
 │   └── saleschannel-cache.test.ts
 ├── integration/              # Integration tests
-│   └── blueprint.test.ts     # v2 blueprint integration
+│   └── blueprint.test.ts     # Blueprint integration
 ├── e2e/                      # E2E tests
 │   ├── verify.ts             # API verification script
 │   └── browser-checks.md     # Browser verification guide
@@ -205,18 +226,23 @@ tests/
 
 Detailed documentation for each module is in their respective folders:
 
+- **[src/blueprint/AGENTS.md](src/blueprint/AGENTS.md)** - Blueprint generator, hydrator, variant resolver, hydration flow
+- **[src/cli/AGENTS.md](src/cli/AGENTS.md)** - CLI command reference (all commands, flags, options)
+- **[src/fixtures/AGENTS.md](src/fixtures/AGENTS.md)** - Static data configurations (CMS pages, reviews, properties)
+- **[src/mcp/AGENTS.md](src/mcp/AGENTS.md)** - MCP server for Cursor AI integration, adding tools
 - **[src/post-processors/AGENTS.md](src/post-processors/AGENTS.md)** - Post-processor system, registry, cleanup, adding new processors
 - **[src/providers/AGENTS.md](src/providers/AGENTS.md)** - AI provider interfaces, concurrency settings, adding new providers
 - **[src/server/AGENTS.md](src/server/AGENTS.md)** - HTTP server, ProcessManager, background tasks, API endpoints
 - **[src/shopware/AGENTS.md](src/shopware/AGENTS.md)** - Shopware API client, hydrator, cleanup, official client wrapper
 - **[src/templates/AGENTS.md](src/templates/AGENTS.md)** - Pre-generated catalog templates, template fetching
+- **[src/types/AGENTS.md](src/types/AGENTS.md)** - Centralized types, Zod schemas, conventions
 - **[src/utils/AGENTS.md](src/utils/AGENTS.md)** - Shared utilities (retry, strings, logging, etc.)
 
 ## Architecture
 
-### v2 3-Phase Pipeline
+### 3-Phase Pipeline
 
-The v2 architecture uses a 3-phase pipeline for faster generation:
+The architecture uses a 3-phase pipeline for faster generation:
 
 1. **Phase 1: Blueprint Generation** - Create structure WITHOUT AI (instant)
 2. **Phase 2: AI Hydration** - Fill blueprint with AI-generated text AND images (parallel when supported)
@@ -243,24 +269,19 @@ The v2 architecture uses a 3-phase pipeline for faster generation:
 > All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
 
 ```
-flowchart LR
-    subgraph Phase1[Phase 1: Blueprint]
-        BP[Blueprint Generator] --> JSON[blueprint.json]
-    end
+Phase 1: Blueprint          Phase 2: AI Hydration           Phase 3: Upload (no AI)
+(instant, no AI)             (text + images)                 (cached data only)
 
-    subgraph Phase2["Phase 2: AI Hydration (text + images)"]
-        JSON --> AI[Text AI Calls]
-        AI --> Hydrated[hydrated-blueprint.json]
-        Hydrated --> IMG[Image AI Calls]
-        IMG --> Cache[Image Cache]
-    end
-
-    subgraph Phase3["Phase 3: Upload (no AI)"]
-        Cache --> SW[Upload to Shopware]
-        SW --> PP1[Image Upload]
-        SW --> PP2[Manufacturer Processor]
-        SW --> PP3[Review Processor]
-    end
+Blueprint Generator          Text AI Calls                   Upload to Shopware
+       │                          │                               │
+       ▼                          ▼                          ┌────┼────┐
+  blueprint.json ──────▶  hydrated-blueprint.json            │    │    │
+                               │                             ▼    ▼    ▼
+                               ▼                          Images  Mfr  Reviews
+                         Image AI Calls                   Upload  Proc Proc
+                               │
+                               ▼
+                          Image Cache ──────────────────▶
 ```
 
 ### SalesChannel-Centric Model
@@ -273,7 +294,7 @@ The architecture is centered around SalesChannels:
 4. **Post-processors**: Run image, manufacturer, review, variant processors in parallel
 
 ```typescript
-// v2 Flow
+// Generation flow
 const generator = new BlueprintGenerator();
 const blueprint = generator.generateBlueprint("music", "Musical instruments and accessories for musicians of all levels");
 
@@ -349,7 +370,7 @@ interface PostProcessor {
 | `manufacturers`   | Fictional manufacturer creation              | none                    |
 | `reviews`         | Variable review counts (0-10 per product)    | none                    |
 | `variants`        | Variant product creation                     | manufacturers           |
-| `digital-product` | Digital product with download                | variants                |
+| `digital-product` | Digital product with download                | none                    |
 | `cms-testing`     | Testing category hierarchy                   | cms-\*, digital-product |
 
 Processors run in parallel when possible, respecting dependencies:
@@ -951,7 +972,7 @@ CACHE_ENABLED=true
 SERVER_PORT=3000
 ```
 
-## CLI Usage (v2 Subcommand-based)
+## CLI Usage
 
 ```bash
 # Phase 1: Create blueprint (no AI)

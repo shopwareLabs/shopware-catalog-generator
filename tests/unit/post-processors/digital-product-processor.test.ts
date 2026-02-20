@@ -109,8 +109,8 @@ describe("DigitalProductProcessor", () => {
             expect(DigitalProductProcessor.description.length).toBeGreaterThan(0);
         });
 
-        test("depends on variants", () => {
-            expect(DigitalProductProcessor.dependsOn).toContain("variants");
+        test("has no dependencies", () => {
+            expect(DigitalProductProcessor.dependsOn).toEqual([]);
         });
     });
 

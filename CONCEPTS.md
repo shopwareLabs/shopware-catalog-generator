@@ -27,7 +27,7 @@ The generator follows a modular architecture with clear separation of concerns:
 │                        └─────┬─────┘  └─────┬─────┘                         │
 └──────────────────────────────┼──────────────┼───────────────────────────────┘
                                │              │
-                               ⯆              ⯆
+                               ▼              ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            CORE PIPELINE                                    │
 │  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐         │
@@ -37,7 +37,7 @@ The generator follows a modular architecture with clear separation of concerns:
 └──────────────────────────────────┼──────────────────────┼───────────────────┘
                                    │                      │
                     ┌──────────────┼──────────────────────┼──────────────┐
-                    │              ⯆                      ⯆              │
+                    │              ▼                      ▼              │
                     │  ┌──────────────────┐   ┌──────────────────┐       │
                     │  │   AI Provider    │   │   Shopware API   │       │
                     │  │  (Text/Images)   │   │   (Admin API)    │       │
@@ -45,7 +45,7 @@ The generator follows a modular architecture with clear separation of concerns:
                     │           EXTERNAL SERVICES                        │
                     └────────────────────────────────────────────────────┘
                                               │
-                                              ⯆
+                                              ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          POST-PROCESSORS                                    │
 │     ┌────────┐  ┌────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐         │
@@ -54,7 +54,7 @@ The generator follows a modular architecture with clear separation of concerns:
 │     └────────┘  └────────┘  └─────────┘  └──────────┘  └──────────┘         │
 └─────────────────────────────────────────────────────────────────────────────┘
                                │
-                               ⯆
+                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           LOCAL STORAGE                                     │
 │              ┌──────────────────┐   ┌──────────────────┐                    │
@@ -90,7 +90,7 @@ Creates the complete structure instantly without any AI calls:
                                    │
                                    │ No AI calls
                                    │ Instant (~100ms)
-                                   ⯆
+                                   ▼
 ```
 
 **Output:** `generated/sales-channels/{name}/blueprint.json`
@@ -118,7 +118,7 @@ Fills the blueprint with AI-generated content:
                          └───────────┬─────────────┘
                                      │
                               ┌──────┴──────┐
-                              ⯆             ⯆
+                              ▼             ▼
                     ┌──────────────┐  ┌──────────────┐
                     │ AI Provider  │  │ Property     │
                     │ (parallel)   │  │ Cache        │
@@ -141,11 +141,37 @@ Uploads to Shopware and runs post-processors:
 │                 │      │  4. Create Products     │      │  • Variants     │
 └─────────────────┘      └───────────┬─────────────┘      │  • CMS Pages    │
                                      │                    └────────┬────────┘
-                                     ⯆                             │
+                                     ▼                             │
                          ┌──────────────────────┐                  │
                          │    Shopware API      │<─────────────────┘
                          └──────────────────────┘
 ```
+
+### Running Phases Separately
+
+For more control, run each phase as a separate CLI step:
+
+```bash
+# Phase 1: Create structure (instant, no AI)
+bun run blueprint create --name=music --description="Musical instruments and accessories"
+
+# Phase 2: Fill with AI content
+bun run blueprint hydrate --name=music
+
+# Phase 3: Upload to Shopware + run post-processors
+bun run generate --name=music
+```
+
+Phase 2 supports selective re-hydration to update specific parts without changing everything:
+
+```bash
+bun run blueprint hydrate --name=music --only=categories   # Categories only
+bun run blueprint hydrate --name=music --only=properties   # Properties only
+bun run blueprint hydrate --name=music --only=cms          # CMS text only
+bun run blueprint hydrate --name=music --force             # Full re-hydration
+```
+
+If a hydrated blueprint already exists, `--only` or `--force` is required to prevent accidental name changes (which would invalidate cached images).
 
 ---
 
@@ -162,14 +188,14 @@ The generator can run as an HTTP service with background processing for long-run
 │                                                                             │
 │   POST /generate              GET /status/:id              GET /health      │
 │        │                           │                            │           │
-│        ⯆                           ⯆                            ⯆           │
+│        ▼                           ▼                            ▼           │
 │   ┌──────────────┐          ┌──────────────┐           ┌──────────────┐     │
 │   │    Start     │          │    Query     │           │    Stats     │     │
 │   │  Background  │          │   Process    │           │   + Uptime   │     │
 │   │    Task      │          │    State     │           │              │     │
 │   └──────┬───────┘          └──────────────┘           └──────────────┘     │
 │          │                         ↑                                        │
-│          ⯆                         │                                        │
+│          ▼                         │                                        │
 │   ┌─────────────────────────────────────────────────────────────────┐       │
 │   │                      PROCESS MANAGER                            │       │
 │   │                                                                 │       │
@@ -217,7 +243,7 @@ Client                       Server                      ProcessManager
    │   logs: [...]}            │                              │        │
    │<──────────────────────────│                              │        │
    │                           │                              │        │
-   │  ... (poll periodically)  │                              │        ⯆
+   │  ... (poll periodically)  │                              │        ▼
    │                           │                              │
    │  GET /status/proc_xxx     │                              │  Task completes
    │──────────────────────────>│                              │
@@ -242,21 +268,21 @@ Client                       Server                      ProcessManager
     │ pending │ ← Initial state
     └────┬────┘
          │ Task starts
-         ⯆
+         ▼
     ┌─────────┐
     │ running │ ← Processing
     └────┬────┘
          │
     ┌────┴────┐
     │         │
-    ⯆         ⯆
+    ▼         ▼
 ┌─────────┐ ┌────────┐
 │completed│ │ failed │
 └─────────┘ └────────┘
     │           │
     └─────┬─────┘
           │ After 30 min
-          ⯆
+          ▼
     ┌──────────┐
     │ (deleted)│
     └──────────┘
@@ -314,11 +340,11 @@ generated/
 │                                                                  │
 │  Variant Product + Store Context                                 │
 │       │                                                          │
-│       ⯆                                                          │
+│       ▼                                                          │
 │  AI suggests group names based on store + product                │
 │  (e.g., beauty store → ["Volume", "Scent", "Hair Type"])         │
 │       │                                                          │
-│       ⯆                                                          │
+│       ▼                                                          │
 │  ┌────────────────────────────┐                                  │
 │  │   Group in cache?          │                                  │
 │  │   (store-scoped first,     │                                  │
@@ -329,24 +355,24 @@ generated/
 │       │               │                                          │
 │      YES              NO                                         │
 │       │               │                                          │
-│       ⯆               ⯆                                          │
+│       ▼               ▼                                          │
 │  Use cached      AI generates                                    │
 │  options         new options                                     │
 │       │               │                                          │
-│       │               ⯆                                          │
+│       │               ▼                                          │
 │       │          Save to store cache ─> sales-channels/{store}/  │
 │       │               │                      properties/         │
 │       └───────┬───────┘                                          │
 │               │                                                  │
-│               ⯆                                                  │
+│               ▼                                                  │
 │  Select 40-60% of options                                        │
 │               │                                                  │
-│               ⯆                                                  │
+│               ▼                                                  │
 │  Build variantConfigs                                            │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
                                │
-                               ⯆
+                               ▼
                     VARIANT PROCESSOR
 ┌──────────────────────────────────────────────────────────────────┐
 │                                                                  │
@@ -358,13 +384,13 @@ generated/
 │      │               │                                           │
 │     NO              YES                                          │
 │      │               │                                           │
-│      ⯆               │                                           │
+│      ▼               │                                           │
 │  Create from         │                                           │
 │  cache definition    │                                           │
 │      │               │                                           │
 │      └───────┬───────┘                                           │
 │              │                                                   │
-│              ⯆                                                   │
+│              ▼                                                   │
 │  Create variant products (cartesian product)                     │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
@@ -398,6 +424,17 @@ The AI prompt includes store name, description, and product categories to genera
 - Fashion stores get `Size` (S, M, L), `Fabric`, `Fit`
 - Furniture stores get `Material`, `Dimensions`, `Style`
 
+### Migration (for existing stores)
+
+If you have stores generated before the store-scoped property system, run the migration script:
+
+```bash
+bun run scripts/migrate-properties.ts --dry-run   # Preview
+bun run scripts/migrate-properties.ts              # Apply
+```
+
+After migration, re-run generation to sync new properties: `bun run generate --name=<store>`
+
 ---
 
 ## Post-Processor System
@@ -419,17 +456,17 @@ Processors can declare dependencies to control execution order:
        │                               │                  │
        └───────────────────────────────┼──────────────────┘
                                        │ depends on
-                                       ⯆
+                                       ▼
                                ┌─────────────┐
                                │  Variants   │
                                └──────┬──────┘
                                       │ depends on
-                                      ⯆
+                                      ▼
                               ┌───────────────┐
                               │digital-product│
                               └───────┬───────┘
                                       │ depends on
-                                      ⯆
+                                      ▼
                               ┌───────────────┐
                               │  cms-testing  │
                               └───────────────┘
@@ -439,17 +476,19 @@ Processors can declare dependencies to control execution order:
 
 | Processor         | Description                        | Dependencies            |
 | ----------------- | ---------------------------------- | ----------------------- |
-| `cms-text`        | Text CMS demo page                 | None                    |
-| `cms-images`      | Images CMS demo page               | None                    |
-| `cms-video`       | Video CMS demo page                | None                    |
-| `cms-text-images` | Text & Images CMS demo page        | None                    |
-| `cms-commerce`    | Commerce CMS demo page             | None                    |
-| `cms-form`        | Form CMS demo page                 | None                    |
+| `cms-home`        | Homepage layout with product listing | None                  |
+| `cms-text`        | Text elements demo page            | None                    |
+| `cms-images`      | Image elements demo page           | None                    |
+| `cms-video`       | Video elements demo page           | None                    |
+| `cms-text-images` | Text & Images demo page            | None                    |
+| `cms-commerce`    | Commerce elements demo page        | images                  |
+| `cms-form`        | Form elements demo page            | None                    |
+| `cms-footer-pages`| Shared footer and legal pages      | None                    |
 | `images`          | Product and category images        | None                    |
 | `manufacturers`   | Fictional manufacturer creation    | None                    |
 | `reviews`         | Product reviews (0-10 per product) | None                    |
 | `variants`        | Variant product creation           | manufacturers           |
-| `digital-product` | Digital product with download      | variants                |
+| `digital-product` | Digital product (Gift Card)        | none                    |
 | `cms-testing`     | Testing category hierarchy         | cms-\*, digital-product |
 
 ### Testing Page Hierarchy
@@ -597,14 +636,14 @@ logs/
 │                                                            │
 │  cache:list          List all cached SalesChannels         │
 │       │                                                    │
-│       ⯆                                                    │
+│       ▼                                                    │
 │  cache:clear         Move to .trash/ (recoverable)         │
 │       │                                                    │
-│       ⯆                                                    │
+│       ▼                                                    │
 │  cache:trash         View trash contents                   │
 │       │                                                    │
 │       ├─────────────────────────────┐                      │
-│       ⯆                             ⯆                      │
+│       ▼                             ▼                      │
 │  cache:restore        OR       cache:empty-trash           │
 │  (recover files)               (permanent delete)          │
 │                                                            │
@@ -618,7 +657,7 @@ Running generate multiple times is safe:
 ```
   Run generate
        │
-       ⯆
+       ▼
   ┌──────────────────────┐
   │ SalesChannel exists? │
   └──────────┬───────────┘
@@ -627,7 +666,7 @@ Running generate multiple times is safe:
      │               │
     NO              YES
      │               │
-     ⯆               ⯆
+     ▼               ▼
   Create        ┌────────────────┐
   new           │ Cache exists?  │
      │          └───────┬────────┘
@@ -636,13 +675,13 @@ Running generate multiple times is safe:
      │          │               │
      │         NO              YES
      │          │               │
-     │          ⯆               ⯆
+     │          ▼               ▼
      │     Sync from        Use cache
      │     Shopware              │
      │          │               │
      └──────────┴───────┬───────┘
                         │
-                        ⯆
+                        ▼
                Generate missing
                (idempotent)
 ```
@@ -730,7 +769,7 @@ Hydrator          AI           Property Cache      Variant         Shopware
     │              │              │  During post-  │                │
     │              │              │  processing    │                │
     │              │              │       │        │                │
-    │              │              │       ⯆        │                │
+    │              │              │       ▼        │                │
     │              │              │  Check Shopware│                │
     │              │              │────────────────┼───────────────>│
     │              │              │                │                │

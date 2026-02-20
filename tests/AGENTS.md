@@ -62,6 +62,30 @@ bun test --coverage                   # With coverage report
 bun test tests/unit/cache.test.ts     # Specific test file
 ```
 
+## E2E Testing
+
+The `test-e2e.sh` script in the project root runs a full end-to-end test against a local Shopware instance:
+
+```bash
+./test-e2e.sh                              # Full: create → hydrate → upload → verify
+./test-e2e.sh --reuse=music                # Reuse existing blueprint
+./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload → verify
+./test-e2e.sh --reuse=music --skip-upload  # Just verify existing data
+./test-e2e.sh --cleanup=music              # Cleanup only
+```
+
+Prerequisites: Shopware running at `localhost:8000` with `SW_ENV_URL`, `SW_CLIENT_ID`, `SW_CLIENT_SECRET` set in `.env`.
+
+The script runs 5 phases:
+
+1. **Blueprint creation** (`blueprint create --products=10`)
+2. **AI hydration** (`blueprint hydrate`, includes CMS text)
+3. **Shopware upload** (`generate`)
+4. **Post-processors** (CMS pages, digital product, testing hierarchy)
+5. **API verification** (`test:verify`)
+
+Cleanup mode removes entities in reverse dependency order: CMS testing → CMS element pages → CMS home → digital product → SalesChannel → unused property groups.
+
 ## Test Requirements
 
 **All new code MUST have unit tests.** Follow these guidelines:

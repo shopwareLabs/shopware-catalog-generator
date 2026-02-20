@@ -1,6 +1,6 @@
 # Shopware Catalog Generator
 
-Generate synthetic demo data with AI and hydrate your Shopware environment. Creates SalesChannels with category trees, products, descriptions, images, reviews, and properties.
+Generate AI-powered demo catalogs for Shopware. Creates SalesChannels with category trees, products, descriptions, images, reviews, variants, and CMS pages.
 
 > **Architecture details:** See [CONCEPTS.md](CONCEPTS.md) for diagrams and in-depth explanations.
 
@@ -11,27 +11,52 @@ bun install
 bun run build
 ```
 
-Create `.env` file:
+Create a `.env` file:
 
 ```env
+# AI Provider (generates product names, descriptions, images)
 AI_PROVIDER=pollinations
-AI_API_KEY=sk_your_pollinations_key  # Get key at https://enter.pollinations.ai
+AI_API_KEY=sk_your_pollinations_key   # Get key at https://enter.pollinations.ai
+
+# Shopware connection (required to sync data)
 SW_ENV_URL=http://localhost:8000
+SW_CLIENT_ID=your-access-key-id      # Settings → System → Integrations
+SW_CLIENT_SECRET=your-secret-key     # Settings → System → Integrations
 ```
 
-Generate products:
+The `SW_CLIENT_ID` and `SW_CLIENT_SECRET` authenticate against the Shopware Admin API. Create an integration in your Shopware Admin under **Settings → System → Integrations**, then copy the *Access key ID* and *Secret access key* into your `.env`.
+
+Generate a full catalog:
 
 ```bash
 bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 ```
 
-## Provider Options
+This creates a SalesChannel named "music" with 3 top-level categories, ~90 products, AI-generated descriptions, properties, and optional images.
 
-| Provider        | API Key  | Images | Parallel        | Best For                 |
-| --------------- | -------- | ------ | --------------- | ------------------------ |
-| `pollinations`  | Required | Yes    | With `sk_*` key | Testing, demos (default) |
-| `github-models` | Required | N/A    | Limited (2x)    | GitHub/Copilot users     |
-| `openai`        | Required | Paid   | Yes (5x)        | Production, high volume  |
+## Catalog Templates
+
+Pre-generated, ready-to-use catalogs are available at **[shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**. Currently included: `music`, `garden`, and `beauty`.
+
+When you run `generate`, the CLI automatically checks if a matching template exists. If found, it skips AI generation entirely and uploads the template directly:
+
+```bash
+# Uses a pre-generated template (instant, no AI needed)
+bun run generate --name=music
+
+# Force AI generation even if a template exists
+bun run generate --name=music --no-template
+```
+
+Templates require git access via SSH keys or credential helper.
+
+## AI Providers & Performance
+
+| Provider | API Key | Images | Parallel | Best For |
+| --- | --- | --- | --- | --- |
+| `pollinations` | Required | Yes | With `sk_*` key | Testing, demos (default) |
+| `github-models` | Required | N/A | Limited (2x) | GitHub/Copilot users |
+| `openai` | Required | Paid | Yes (5x) | Production, high volume |
 
 > Get a Pollinations API key at **[enter.pollinations.ai](https://enter.pollinations.ai)**
 
@@ -39,7 +64,6 @@ bun run generate --name=music --description="Musical instruments and accessories
 
 ```env
 # Pollinations with secret key - parallel processing, no rate limits
-# Get key at https://enter.pollinations.ai
 AI_PROVIDER=pollinations
 AI_API_KEY=sk_your_pollinations_secret_key
 
@@ -60,52 +84,73 @@ IMAGE_PROVIDER=none          # Disable images
 IMAGE_MODEL=turbo            # Pollinations: flux (default), turbo (fast), klein (quality)
 ```
 
-## CLI Reference
+### Expected Times (90 products)
 
-### Generate
+**Text generation only (blueprint hydration):**
 
-```bash
-# Basic usage (90 products across categories)
-bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
+| Provider | Processing | Time |
+| --- | --- | --- |
+| OpenAI | Parallel (5x) | ~5 min |
+| Pollinations (sk\_\*) | Parallel (5x) | ~5 min |
+| GitHub Models | Limited (2x) | ~10 min |
+| Pollinations (pk\_\*) | Sequential | ~13 min |
 
-# Custom product count
-bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels" --products=50
+**Full generation with images (~270 images at 3 views per product):**
+
+| Provider | Image Model | Time |
+| --- | --- | --- |
+| OpenAI | gpt-image-1.5 | ~35-40 min |
+| Pollinations | flux (default) | ~15-20 min |
+| Pollinations | turbo (fast) | ~10-15 min |
+| Any (images: none) | - | ~5-13 min |
+
+> Image generation is the primary time factor. Use `IMAGE_PROVIDER=none` to skip images for faster testing.
+
+## Shopware Connection
+
+```env
+SW_ENV_URL=http://localhost:8000
+SW_CLIENT_ID=your-access-key-id
+SW_CLIENT_SECRET=your-secret-key
 ```
 
-| Flag            | Description                                  |
-| --------------- | -------------------------------------------- |
-| `--name`        | SalesChannel name (required)                 |
-| `--description` | Context for AI generation                    |
-| `--products`    | Number of products to generate (default: 90) |
-| `--only`        | Post-processors to run (comma-separated)     |
-| `--dry-run`     | Preview actions without making changes       |
-| `--no-template` | Skip checking for pre-generated templates    |
+To create integration credentials:
+
+1. Open Shopware Admin → **Settings → System → Integrations**
+2. Click **Add integration**
+3. Copy the *Access key ID* → `SW_CLIENT_ID`
+4. Copy the *Secret access key* → `SW_CLIENT_SECRET`
 
 ### Domains & Languages
 
 Every generated SalesChannel automatically gets two domains:
 
-| Domain                     | Language | Currency |
-| -------------------------- | -------- | -------- |
-| `{name}.localhost:8000`    | English  | USD      |
-| `{name}-de.localhost:8000` | German   | EUR      |
+| Domain | Language | Currency |
+| --- | --- | --- |
+| `{name}.localhost:8000` | English | USD |
+| `{name}-de.localhost:8000` | German | EUR |
 
-The German domain is only created if the German language (`de-DE`) and its snippet set are installed in your Shopware instance. If not, a warning is logged and only the English domain is created.
+The German domain is only created if `de-DE` language and its snippet set are installed in Shopware. If not, a warning is logged and only the English domain is created.
 
-> To install German in Shopware: **Settings → Shop → Languages → Add language → German**.
+> To install German: **Settings → Shop → Languages → Add language → German**.
+
+## CLI Usage
+
+For the complete reference with all flags and options, see **[CLI Reference](src/cli/AGENTS.md#command-reference)**.
+
+### Generate
+
+```bash
+bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
+```
 
 ### Blueprint Workflow
 
-For more control, run the pipeline phases separately:
+For more control, run the 3-phase pipeline separately. See [CONCEPTS.md](CONCEPTS.md#running-phases-separately) for details.
 
 ```bash
-# Phase 1: Create structure (instant, no AI)
-bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
-
-# Phase 2: Fill with AI content
+bun run blueprint create --name=music --description="Musical instruments and accessories"
 bun run blueprint hydrate --name=music
-
-# Phase 3: Upload to Shopware
 bun run generate --name=music
 ```
 
@@ -115,189 +160,75 @@ Run specific post-processors after upload:
 
 ```bash
 bun run process --name=music --only=images,reviews
-bun run process --name=music --dry-run
 ```
-
-| Processor       | Description                             |
-| --------------- | --------------------------------------- |
-| `cms`           | CMS landing pages (Video Elements demo) |
-| `images`        | Product and category images             |
-| `manufacturers` | Fictional manufacturer creation         |
-| `reviews`       | Product reviews (0-10 per product)      |
-| `variants`      | Variant product creation                |
 
 ### Cleanup
 
-Remove data from Shopware (local cache preserved):
-
 ```bash
-# Core cleanup
-bun run cleanup -- --salesChannel="music"           # Products + categories
-bun run cleanup -- --salesChannel="music" --props   # Also property groups
-bun run cleanup -- --salesChannel="music" --delete  # Also SalesChannel
-
-# Processor-specific
-bun run cleanup -- --salesChannel="music" --processors=cms
-bun run cleanup -- --salesChannel="music" --processors=all
-
-# Full cleanup
-bun run cleanup -- --salesChannel="music" --full --delete
+bun run cleanup -- --salesChannel="music"                    # Products + categories
+bun run cleanup -- --salesChannel="music" --full --delete    # Everything
 ```
 
 ### Cache Management
 
-Local files in `generated/`:
-
 ```bash
 bun run cache:list                    # Show cached SalesChannels
-bun run cache:clear                   # Move all to trash
-bun run cache:clear -- music         # Move specific to trash
-bun run cache:trash                   # List trash
-bun run cache:restore -- <item>       # Restore from trash
-bun run cache:restore -- --all        # Restore all trash items
-bun run cache:empty-trash             # Permanently delete
+bun run cache:clear -- music          # Move to trash
+bun run cache:restore -- --all        # Restore from trash
 ```
 
-## Property System
+## Post-Processors
 
-Properties are generated contextually based on your store type. The AI infers appropriate property groups from the store name, description, and product categories.
+Post-processors run after upload for resource-intensive tasks (images, reviews, CMS pages, etc.).
 
-### How It Works
+| Processor | Description | Dependencies |
+| --- | --- | --- |
+| `cms-home` | Homepage layout with product listing | none |
+| `cms-text` | Text elements demo page | none |
+| `cms-images` | Image elements demo page | none |
+| `cms-video` | Video elements demo page | none |
+| `cms-text-images` | Text & Images demo page | none |
+| `cms-commerce` | Commerce elements demo page | images |
+| `cms-form` | Form elements demo page | none |
+| `cms-footer-pages` | Shared footer and legal pages | none |
+| `images` | Upload pre-generated product/category images | none |
+| `manufacturers` | Fictional manufacturer creation | none |
+| `reviews` | Product reviews (0-10 per product) | none |
+| `variants` | Variant product creation | manufacturers |
+| `digital-product` | Digital product (Gift Card) | none |
+| `cms-testing` | Testing category hierarchy | cms-\*, digital-product |
 
-- **Universal properties (Color)**: Stored globally in `generated/properties/` with comprehensive hex codes
-- **Store-specific properties**: Generated by AI and stored in `generated/sales-channels/{store}/properties/`
-
-This ensures:
-
-- Music stores get properties like `Brand`, `Material`, `Instrument Type`
-- Beauty stores get properties like `Volume`, `Scent`, `Skin Type`
-- Fashion stores get properties like `Size`, `Fabric`, `Fit`
-
-No manual property configuration needed - the AI derives appropriate properties from context.
-
-### Migration (for existing stores)
-
-If you have stores generated before the store-scoped property system, run the migration script:
-
-```bash
-# Preview what would change
-bun run scripts/migrate-properties.ts --dry-run
-
-# Apply migration
-bun run scripts/migrate-properties.ts
-```
-
-After migration, re-run generation to sync new properties:
-
-```bash
-bun run generate --name=<store>
-```
-
-## Shopware Connection
-
-```env
-SW_ENV_URL=http://localhost:8000
-SW_CLIENT_ID=your-client-id
-SW_CLIENT_SECRET=your-client-secret
-```
+Processors run in parallel when possible, respecting dependency order. See [CONCEPTS.md](CONCEPTS.md#post-processor-system) for the execution diagram.
 
 ## Server Mode
 
-Run as a service with background processing:
+Run as an HTTP service with background processing:
 
 ```bash
 bun run server
 ```
 
-| Method | Endpoint      | Description                             |
-| ------ | ------------- | --------------------------------------- |
-| POST   | `/generate`   | Start generation (returns process ID)   |
-| GET    | `/status/:id` | Poll process status, progress, and logs |
-| GET    | `/health`     | Health check and active process count   |
-
-### Background Processing
-
-The server runs generation tasks in the background:
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| POST | `/generate` | Start generation (returns process ID) |
+| GET | `/status/:id` | Poll process status, progress, and logs |
+| GET | `/health` | Health check and active process count |
 
 ```bash
-# Start generation
 curl -X POST http://localhost:3000/generate \
   -H "Content-Type: application/json" \
-  -d '{
-    "envPath": "http://localhost:8000",
-    "salesChannel": "music",
-    "description": "Musical instruments and accessories for musicians of all levels",
-    "shopwareUser": "admin",
-    "shopwarePassword": "shopware"
-  }'
-# Returns: { "processId": "proc_xxx", "statusUrl": "/status/proc_xxx" }
-
-# Poll status
-curl http://localhost:3000/status/proc_xxx
-# Returns: { "status": "running", "progress": {...}, "logs": [...] }
+  -d '{"envPath":"http://localhost:8000","salesChannel":"music","description":"Musical instruments"}'
 ```
 
-**Generate options:**
-
-| Field              | Description                               | Default          |
-| ------------------ | ----------------------------------------- | ---------------- |
-| `envPath`          | Shopware URL (required)                   | -                |
-| `salesChannel`     | SalesChannel name (required)              | -                |
-| `description`      | Context for AI generation                 | "{name} webshop" |
-| `productCount`     | Number of products                        | 90               |
-| `shopwareUser`     | Shopware admin username                   | -                |
-| `shopwarePassword` | Shopware admin password                   | -                |
-| `skipProcessors`   | Skip post-processors after sync           | false            |
-| `skipTemplate`     | Skip checking for pre-generated templates | false            |
-
-## Performance
-
-Expected times for 90 products:
-
-**Text generation only (blueprint hydration):**
-
-| Provider              | Processing    | Time    |
-| --------------------- | ------------- | ------- |
-| OpenAI                | Parallel (5x) | ~5 min  |
-| Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
-| GitHub Models         | Limited (2x)  | ~10 min |
-| Pollinations (pk\_\*) | Sequential    | ~13 min |
-
-**Full generation with images (~270 images at 3 views per product):**
-
-| Provider           | Image Model    | Time       |
-| ------------------ | -------------- | ---------- |
-| OpenAI             | gpt-image-1.5  | ~35-40 min |
-| Pollinations       | flux (default) | ~15-20 min |
-| Pollinations       | turbo (fast)   | ~10-15 min |
-| Any (images: none) | -              | ~5-13 min  |
-
-> **Note:** Image generation is the primary time factor. OpenAI's `gpt-image-1.5` averages ~35s per image. Use `IMAGE_PROVIDER=none` to skip images for faster testing.
-
-## Testing
-
-```bash
-bun test              # Run all tests
-bun test --watch      # Watch mode
-bun test --coverage   # With coverage
-```
-
-## Development
-
-```bash
-bun run dev           # Watch mode
-bun run lint          # Lint + typecheck
-bun run format        # Format code
-bun run build         # Build
-```
+See [CLI Reference](src/cli/AGENTS.md#server-mode) for all request fields.
 
 ## MCP Server (AI Assistant Integration)
 
-This project includes an MCP server for seamless AI assistant integration in Cursor IDE. All CLI commands are exposed as auto-discoverable tools.
+This project includes an MCP server for AI assistant integration in Cursor IDE. All CLI commands are exposed as auto-discoverable tools.
 
 ### Setup
 
-The MCP config at `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamically, so it works on any machine without editing:
+The MCP config at `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamically:
 
 ```json
 {
@@ -310,65 +241,47 @@ The MCP config at `.cursor/mcp.json` uses `/bin/sh` to resolve `$HOME` dynamical
 }
 ```
 
-If your `bun` is installed elsewhere, adjust the path in the `args` accordingly.
+If your `bun` is installed elsewhere, adjust the path accordingly.
 
 ### Testing
 
 ```bash
-# Test interactively
-bun run mcp:dev
-
-# Inspect tools in web UI
-bun run mcp:inspect
+bun run mcp:dev       # Interactive terminal testing
+bun run mcp:inspect   # Web UI inspector
 ```
 
-The MCP server exposes all CLI commands as tools that Cursor can discover and call directly.
-See [AGENTS.md](AGENTS.md) for details on adding new commands.
+## Contributing
 
-## Extending
-
-See [AGENTS.md](AGENTS.md) for developer documentation:
-
-- Adding post-processors
-- Adding AI providers
-- Adding CMS fixtures
-
-## Catalog Templates
-
-Pre-generated templates available at:
-
-> **[github.com/shopwareLabs/shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**
-
-Ready-to-use SalesChannel configurations without running AI generation.
-
-### How Templates Work
-
-When you run `generate --name=<name>`, the CLI automatically checks if a matching template exists:
-
-1. Clones the template repository (first run) or pulls updates
-2. If a template matches the name, copies data to local cache
-3. Skips blueprint creation and AI hydration phases
-4. Proceeds directly to Shopware upload
+### Development
 
 ```bash
-# Uses template if "beauty" exists in the repository
-bun run generate --name=beauty
-
-# Force AI generation even if template exists
-bun run generate --name=beauty --no-template
+bun run dev           # Watch mode
+bun run lint          # Lint + typecheck (oxlint + tsc)
+bun run format        # Format code (oxfmt)
+bun run build         # Build (lint + format + bundle)
 ```
 
-### Environment Variables
+### Testing
 
-```env
-# Override template repository URL (default: git@github.com:shopwareLabs/shopware-catalog-templates.git)
-TEMPLATE_REPO_URL=git@github.com:your-org/your-templates.git
-
-# Override local clone directory (default: .template-repo)
-TEMPLATE_CACHE_DIR=.my-templates
+```bash
+bun test              # Run all tests
+bun test --watch      # Watch mode
+bun test --coverage   # With coverage report
 ```
 
-Templates require git access via SSH keys or credential helper.
+### E2E Testing
+
+```bash
+./test-e2e.sh                              # Full: create → hydrate → upload → verify
+./test-e2e.sh --reuse=music                # Reuse existing blueprint
+./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
+./test-e2e.sh --cleanup=music              # Cleanup only
+bun run test:verify --name=music           # Verify Shopware data
+```
+
+### Extending
+
+See [AGENTS.md](AGENTS.md) for developer documentation on adding post-processors, AI providers, CMS fixtures, and CLI commands.
 
 ## License
 

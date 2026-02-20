@@ -40,7 +40,7 @@ interface DigitalProductCache {
 class DigitalProductProcessorImpl implements PostProcessor {
     readonly name = "digital-product";
     readonly description = "Create a €50 Gift Card as a digital product";
-    readonly dependsOn: string[] = ["variants"]; // Run after variants are created
+    readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { options } = context;

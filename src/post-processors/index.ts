@@ -480,7 +480,6 @@ registry.register(FormProcessor);
 registry.register(HomeProcessor);
 // Shared footer legal pages for all SalesChannels
 registry.register(FooterPagesProcessor);
-// Digital product processor (runs after variants)
 registry.register(DigitalProductProcessor);
 // CMS orchestrator (creates Testing category hierarchy, runs last)
 registry.register(TestingProcessor);
