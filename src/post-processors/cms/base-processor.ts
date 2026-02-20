@@ -16,7 +16,13 @@ import type {
     PostProcessorResult,
 } from "../index.js";
 
-import { apiPost, generateUUID, logger } from "../../utils/index.js";
+import {
+    apiPost,
+    generateUUID,
+    logger,
+    toFixtureUrlSlug,
+    toStoreScopedName,
+} from "../../utils/index.js";
 import { detectImageFormat, uploadImageWithRetry } from "../image-utils.js";
 
 /** Filename for storing CMS landing page IDs */
@@ -45,7 +51,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
      * Format: "Page Name [storeName]"
      */
     protected getCmsPageName(context: PostProcessorContext): string {
-        return `${this.pageFixture.name} [${context.salesChannelName}]`;
+        return toStoreScopedName(this.pageFixture.name, context.salesChannelName);
     }
 
     /**
@@ -53,14 +59,14 @@ export abstract class BaseCmsProcessor implements PostProcessor {
      * Format: "Page Name [storeName]"
      */
     protected getLandingPageName(context: PostProcessorContext): string {
-        return `${this.pageFixture.name} [${context.salesChannelName}]`;
+        return toStoreScopedName(this.pageFixture.name, context.salesChannelName);
     }
 
     /**
      * Get the landing page URL (uses fixture name without prefix for clean URLs)
      */
     protected getLandingPageUrl(): string {
-        return this.pageFixture.name.toLowerCase().replace(/\s+/g, "-").replace(/&/g, "and");
+        return toFixtureUrlSlug(this.pageFixture.name);
     }
 
     /**
@@ -158,7 +164,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
                 }
                 logger.info(`    ✓ Created CMS layout "${this.pageFixture.name}"`, { cli: true });
             } else {
-                logger.info(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`, {
+                logger.info(`    ✓ Reusing CMS layout "${this.pageFixture.name}"`, {
                     cli: true,
                 });
             }

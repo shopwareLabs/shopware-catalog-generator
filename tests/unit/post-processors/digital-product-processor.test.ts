@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 
@@ -192,6 +194,39 @@ describe("DigitalProductProcessor", () => {
 
             // Will fail due to missing tax, but should not throw
             expect(result.name).toBe("digital-product");
+        });
+
+        test("rebuilds when cached product id is stale", async () => {
+            const cacheDir = "/tmp/test-cache";
+            const cacheFile = path.join(cacheDir, "digital-product.json");
+            fs.mkdirSync(cacheDir, { recursive: true });
+            fs.writeFileSync(
+                cacheFile,
+                JSON.stringify({
+                    productId: "stale-product-id",
+                    mediaId: "stale-media-id",
+                    downloadId: "stale-download-id",
+                    createdNew: false,
+                })
+            );
+
+            const responses = new Map<string, { ok: boolean; data: unknown }>();
+            responses.set("search/product", { ok: true, data: { data: [] } }); // stale + no global gift card
+            responses.set("search/tax", { ok: true, data: { data: [{ id: "tax-1" }] } });
+            responses.set("search/product-visibility", { ok: true, data: { data: [] } });
+            responses.set("search/product-download", { ok: true, data: { data: [] } });
+            responses.set("_action/sync", { ok: true, data: { success: true } });
+            responses.set("_action/media", { ok: true, data: {} });
+
+            const { context } = createMockContext({ fetchResponses: responses });
+            const result = await DigitalProductProcessor.process(context);
+
+            expect(result.errors).toEqual([]);
+            expect(result.processed).toBe(1);
+
+            if (fs.existsSync(cacheFile)) {
+                fs.unlinkSync(cacheFile);
+            }
         });
     });
 

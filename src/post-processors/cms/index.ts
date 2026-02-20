@@ -13,6 +13,7 @@
 
 export { BaseCmsProcessor } from "./base-processor.js";
 export { CommerceProcessor } from "./commerce-processor.js";
+export { FooterPagesProcessor } from "./footer-pages-processor.js";
 export { FormProcessor } from "./form-processor.js";
 export { HomeProcessor } from "./home-processor.js";
 export { ImagesProcessor } from "./images-processor.js";

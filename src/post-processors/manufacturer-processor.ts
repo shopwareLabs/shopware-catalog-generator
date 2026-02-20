@@ -14,6 +14,7 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
+import { searchAllByFilter } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
 /**
@@ -249,20 +250,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
 
         try {
             // Step 1: Get all products in this SalesChannel with their manufacturerId
-            const products = await context.api.searchEntities<{
-                id: string;
-                manufacturerId?: string;
-            }>(
-                "product",
-                [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                { limit: 500 }
-            );
+            const products = await this.getAllSalesChannelProductsWithManufacturer(context);
 
             if (products.length === 0) {
                 logger.info(`    No products found in SalesChannel`, { cli: true });
@@ -340,6 +328,23 @@ class ManufacturerProcessorImpl implements PostProcessor {
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
+    }
+
+    private async getAllSalesChannelProductsWithManufacturer(
+        context: PostProcessorContext
+    ): Promise<Array<{ id: string; manufacturerId?: string }>> {
+        return searchAllByFilter<{ id: string; manufacturerId?: string }>(
+            context,
+            "product",
+            [
+                {
+                    type: "equals",
+                    field: "visibilities.salesChannelId",
+                    value: context.salesChannelId,
+                },
+            ],
+            { includes: { product: ["id", "manufacturerId"] } }
+        );
     }
 
     /**

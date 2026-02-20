@@ -123,32 +123,6 @@ describe("TestingProcessor", () => {
             expect(fetchCalls.length).toBe(0);
         });
 
-        test("fetches root category from SalesChannel", async () => {
-            const responses = new Map<string, { ok: boolean; data: unknown }>();
-
-            // Sales channel with navigation category
-            responses.set("search/sales-channel", {
-                ok: true,
-                data: {
-                    data: [{ id: "sc-123", navigationCategoryId: "root-cat-id" }],
-                },
-            });
-            // Products for slider
-            responses.set("search/product", { ok: true, data: { data: [] } });
-            responses.set("search/cms-page", { ok: true, data: { data: [] } });
-            responses.set("search/landing-page", { ok: true, data: { data: [] } });
-            responses.set("search/category", { ok: true, data: { data: [] } });
-            responses.set("_action/sync", { ok: true, data: {} });
-
-            const { context, fetchCalls } = createMockContext({ fetchResponses: responses });
-
-            await TestingProcessor.process(context);
-
-            // Should have searched for sales channel to get root category
-            const scSearchCalls = fetchCalls.filter((c) => c.url.includes("search/sales-channel"));
-            expect(scSearchCalls.length).toBeGreaterThan(0);
-        });
-
         test("fails gracefully when no root category", async () => {
             const responses = new Map<string, { ok: boolean; data: unknown }>();
 

@@ -435,6 +435,7 @@ export async function cleanupProcessors(
 // Import processors
 import {
     CommerceProcessor,
+    FooterPagesProcessor,
     FormProcessor,
     HomeProcessor,
     ImagesProcessor,
@@ -452,6 +453,7 @@ import { VariantProcessor } from "./variant-processor.js";
 // Re-export processors
 export {
     CommerceProcessor,
+    FooterPagesProcessor,
     FormProcessor,
     HomeProcessor,
     ImagesProcessor,
@@ -476,6 +478,8 @@ registry.register(CommerceProcessor);
 registry.register(FormProcessor);
 // CMS homepage (root category layout with product listing)
 registry.register(HomeProcessor);
+// Shared footer legal pages for all SalesChannels
+registry.register(FooterPagesProcessor);
 // Digital product processor (runs after variants)
 registry.register(DigitalProductProcessor);
 // CMS orchestrator (creates Testing category hierarchy, runs last)

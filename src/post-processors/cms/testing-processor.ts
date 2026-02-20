@@ -21,7 +21,17 @@ import type {
 } from "../index.js";
 
 import { TESTING_PLACEHOLDER_PAGE, WELCOME_PAGE } from "../../fixtures/index.js";
-import { apiPost, generateUUID, logger } from "../../utils/index.js";
+import {
+    findCategoryIdByName,
+    getSalesChannelNavigationCategoryId,
+} from "../../shopware/api-helpers.js";
+import {
+    apiPost,
+    generateUUID,
+    logger,
+    toFixtureUrlSlug,
+    toStoreScopedName,
+} from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 /** CMS element category configuration matching Shopware admin block categories */
@@ -191,7 +201,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 };
             }
 
-            const testingCategoryId = await this.findCategoryByName(
+            const testingCategoryId = await findCategoryIdByName(
                 context,
                 "Testing",
                 rootCategoryId
@@ -202,13 +212,13 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             }
 
             // Find CMS, Products, and Cookie settings sub-categories
-            const cmsCategoryId = await this.findCategoryByName(context, "CMS", testingCategoryId);
-            const productsCategoryId = await this.findCategoryByName(
+            const cmsCategoryId = await findCategoryIdByName(context, "CMS", testingCategoryId);
+            const productsCategoryId = await findCategoryIdByName(
                 context,
                 "Products",
                 testingCategoryId
             );
-            const cookieSettingsCategoryId = await this.findCategoryByName(
+            const cookieSettingsCategoryId = await findCategoryIdByName(
                 context,
                 "Cookie settings",
                 testingCategoryId
@@ -282,7 +292,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             }
             logger.info(`    ✓ Created Testing CMS layout "${fixture.name}"`, { cli: true });
         } else {
-            logger.info(`    ⊘ Testing CMS layout "${fixture.name}" already exists`, {
+            logger.info(`    ✓ Reusing existing Testing CMS layout "${fixture.name}"`, {
                 cli: true,
             });
         }
@@ -329,7 +339,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 cli: true,
             });
         } else {
-            logger.info(`    ⊘ CMS showcase layout "${populatedFixture.name}" already exists`, {
+            logger.info(`    ✓ Reusing CMS showcase layout "${populatedFixture.name}"`, {
                 cli: true,
             });
         }
@@ -374,7 +384,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         errors: string[],
         afterCategoryId?: string
     ): Promise<string | null> {
-        let categoryId = await this.findCategoryByName(context, name, parentId);
+        let categoryId = await findCategoryIdByName(context, name, parentId);
 
         if (!categoryId) {
             categoryId = await this.createLinkedCategory(
@@ -409,7 +419,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         errors: string[],
         afterCategoryId?: string
     ): Promise<string | null> {
-        let categoryId = await this.findCategoryByName(context, name, parentId);
+        let categoryId = await findCategoryIdByName(context, name, parentId);
 
         if (!categoryId) {
             categoryId = await this.createNavigationCategory(
@@ -449,7 +459,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 continue;
             }
 
-            let subCategoryId = await this.findCategoryByName(context, cat.name, cmsCategoryId);
+            let subCategoryId = await findCategoryIdByName(context, cat.name, cmsCategoryId);
             if (!subCategoryId) {
                 subCategoryId = await this.createLinkedCategory(
                     context,
@@ -480,13 +490,13 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<void> {
         const missingCms: string[] = [];
         for (const cat of CMS_CATEGORIES) {
-            const id = await this.findCategoryByName(context, cat.name, cmsCategoryId);
+            const id = await findCategoryIdByName(context, cat.name, cmsCategoryId);
             if (!id) missingCms.push(cat.name);
         }
 
         const missingProducts: string[] = [];
         for (const cat of PRODUCT_CATEGORIES) {
-            const id = await this.findCategoryByName(context, cat.name, productsCategoryId);
+            const id = await findCategoryIdByName(context, cat.name, productsCategoryId);
             if (!id) missingProducts.push(cat.name);
         }
 
@@ -522,11 +532,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 continue;
             }
 
-            let subCategoryId = await this.findCategoryByName(
-                context,
-                cat.name,
-                productsCategoryId
-            );
+            let subCategoryId = await findCategoryIdByName(context, cat.name, productsCategoryId);
             if (!subCategoryId) {
                 subCategoryId = await this.createProductLinkCategory(
                     context,
@@ -545,69 +551,8 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         }
     }
 
-    /**
-     * Get the SalesChannel's navigation root category ID
-     */
     private async getRootCategoryId(context: PostProcessorContext): Promise<string | null> {
-        try {
-            interface SalesChannelResponse {
-                data?: Array<{
-                    id: string;
-                    attributes?: { navigationCategoryId?: string };
-                    navigationCategoryId?: string;
-                }>;
-            }
-
-            const response = await apiPost(context, "search/sales-channel", {
-                ids: [context.salesChannelId],
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as SalesChannelResponse;
-                const salesChannel = data.data?.[0];
-                return (
-                    salesChannel?.attributes?.navigationCategoryId ||
-                    salesChannel?.navigationCategoryId ||
-                    null
-                );
-            }
-        } catch (error) {
-            logger.warn("Failed to get navigation category from sales channel", { data: error });
-        }
-
-        return null;
-    }
-
-    /**
-     * Find a category by name under a parent
-     */
-    private async findCategoryByName(
-        context: PostProcessorContext,
-        name: string,
-        parentId: string
-    ): Promise<string | null> {
-        try {
-            interface CategoryResponse {
-                data?: Array<{ id: string }>;
-            }
-
-            const response = await apiPost(context, "search/category", {
-                filter: [
-                    { type: "equals", field: "name", value: name },
-                    { type: "equals", field: "parentId", value: parentId },
-                ],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as CategoryResponse;
-                return data.data?.[0]?.id || null;
-            }
-        } catch (error) {
-            logger.warn(`Failed to find category "${name}"`, { data: error });
-        }
-
-        return null;
+        return getSalesChannelNavigationCategoryId(context);
     }
 
     /**
@@ -801,7 +746,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<void> {
         const name = "Cookie settings";
 
-        const categoryId = await this.findCategoryByName(context, name, parentId);
+        const categoryId = await findCategoryIdByName(context, name, parentId);
         if (categoryId) {
             logger.info(`    ⊘ "${name}" category already exists`, { cli: true });
             return;
@@ -901,7 +846,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         name: string,
         parentId: string
     ): Promise<number> {
-        const categoryId = await this.findCategoryByName(context, name, parentId);
+        const categoryId = await findCategoryIdByName(context, name, parentId);
         if (categoryId) {
             const success = await this.deleteEntity(context, "category", categoryId);
             if (success) {
@@ -1153,14 +1098,14 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
      * Format: "Page Name [storeName]"
      */
     private getStoreScopedName(context: PostProcessorContext, name: string): string {
-        return `${name} [${context.salesChannelName}]`;
+        return toStoreScopedName(name, context.salesChannelName);
     }
 
     /**
      * Convert fixture name to URL-safe slug
      */
     private fixtureNameToUrl(name: string): string {
-        return name.toLowerCase().replace(/\s+/g, "-").replace(/&/g, "and");
+        return toFixtureUrlSlug(name);
     }
 }
 

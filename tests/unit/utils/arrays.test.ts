@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    chunkArray,
     cartesianProduct,
     randomPick,
     randomSample,
@@ -156,5 +157,26 @@ describe("randomPick", () => {
 
     test("returns the only item for single-element array", () => {
         expect(randomPick(["only"])).toBe("only");
+    });
+});
+
+describe("chunkArray", () => {
+    test("splits into equal chunks when divisible", () => {
+        expect(chunkArray([1, 2, 3, 4], 2)).toEqual([
+            [1, 2],
+            [3, 4],
+        ]);
+    });
+
+    test("keeps remainder in last chunk", () => {
+        expect(chunkArray([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+    });
+
+    test("returns empty array for empty input", () => {
+        expect(chunkArray([], 3)).toEqual([]);
+    });
+
+    test("throws for invalid chunk size", () => {
+        expect(() => chunkArray([1, 2], 0)).toThrow();
     });
 });

@@ -120,6 +120,20 @@ export function toKebabCase(str: string): string {
 }
 
 /**
+ * Build a store-scoped name used for store-specific CMS resources.
+ */
+export function toStoreScopedName(name: string, salesChannelName: string): string {
+    return `${name} [${salesChannelName}]`;
+}
+
+/**
+ * Convert a fixture/page name to a URL-safe slug used by landing pages.
+ */
+export function toFixtureUrlSlug(name: string): string {
+    return name.toLowerCase().replace(/\s+/g, "-").replace(/&/g, "and");
+}
+
+/**
  * Create a short deterministic hash from a string using djb2 algorithm.
  * Useful for generating unique suffixes when strings must be truncated.
  *

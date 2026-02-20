@@ -9,11 +9,15 @@
  * - ShopwareApiHelpers provides a generic entity-based interface for post-processors
  */
 
+import type { ShopwareRequestContext } from "../utils/index.js";
 import type { AdminApiClient } from "./admin-client.js";
 
 import {
+    apiPost,
     capitalizeString as capitalizeStringUtil,
+    chunkArray,
     generateAccessKey as generateAccessKeyUtil,
+    logger,
 } from "../utils/index.js";
 
 /** Shopware filter structure */
@@ -490,6 +494,158 @@ export class ShopwareApiHelpers {
 
         return {};
     }
+}
+
+interface SearchAllOptions {
+    includes?: Record<string, string[]>;
+    associations?: Record<string, unknown>;
+    pageSize?: number;
+}
+
+interface PagedSearchResponse<T> {
+    data?: T[];
+    total?: number;
+}
+
+type SalesChannelSearchContext = ShopwareRequestContext & { salesChannelId: string };
+
+export async function getSalesChannelNavigationCategoryId(
+    context: SalesChannelSearchContext
+): Promise<string | null> {
+    interface SalesChannelResponse {
+        data?: Array<{
+            attributes?: { navigationCategoryId?: string };
+            navigationCategoryId?: string;
+        }>;
+    }
+
+    try {
+        const response = await apiPost(context, "search/sales-channel", {
+            ids: [context.salesChannelId],
+        });
+        if (!response.ok) return null;
+
+        const data = (await response.json()) as SalesChannelResponse;
+        const salesChannel = data.data?.[0];
+        return (
+            salesChannel?.attributes?.navigationCategoryId ??
+            salesChannel?.navigationCategoryId ??
+            null
+        );
+    } catch (error) {
+        logger.warn("Failed to resolve sales channel navigation category", { data: error });
+        return null;
+    }
+}
+
+export async function findCategoryIdByName(
+    context: ShopwareRequestContext,
+    name: string,
+    parentId: string
+): Promise<string | null> {
+    interface CategoryResponse {
+        data?: Array<{ id: string }>;
+    }
+
+    try {
+        const response = await apiPost(context, "search/category", {
+            filter: [
+                { type: "equals", field: "name", value: name },
+                { type: "equals", field: "parentId", value: parentId },
+            ],
+            limit: 1,
+        });
+        if (!response.ok) return null;
+
+        const data = (await response.json()) as CategoryResponse;
+        return data.data?.[0]?.id ?? null;
+    } catch (error) {
+        logger.warn(`Failed to find category "${name}"`, { data: error });
+        return null;
+    }
+}
+
+export async function searchAllByFilter<T extends object>(
+    context: ShopwareRequestContext,
+    entity: string,
+    filter: ShopwareFilter[],
+    options: SearchAllOptions = {}
+): Promise<T[]> {
+    const { includes, associations, pageSize = 250 } = options;
+
+    if (context.api) {
+        const firstPage = await context.api.searchEntities<T>(entity, filter, {
+            limit: 500,
+            includes,
+            associations,
+        });
+        if (firstPage.length < 500) {
+            return firstPage;
+        }
+    }
+
+    const results: T[] = [];
+    let page = 1;
+    let fetched = 0;
+    let total = Number.POSITIVE_INFINITY;
+
+    while (fetched < total) {
+        const response = await apiPost(context, `search/${entity}`, {
+            filter,
+            includes,
+            associations,
+            limit: pageSize,
+            page,
+            "total-count-mode": 1,
+        });
+        if (!response.ok) break;
+
+        const data = (await response.json()) as PagedSearchResponse<T>;
+        const pageItems = data.data ?? [];
+        results.push(...pageItems);
+        fetched += pageItems.length;
+        total = data.total ?? fetched;
+
+        if (pageItems.length < pageSize) break;
+        page++;
+    }
+
+    return results;
+}
+
+export async function searchAllByEqualsAny<T extends object>(
+    context: ShopwareRequestContext,
+    entity: string,
+    field: string,
+    values: string[],
+    options: SearchAllOptions = {}
+): Promise<T[]> {
+    const results: T[] = [];
+
+    for (const ids of chunkArray(values, 100)) {
+        const pageItems = await searchAllByFilter<T>(
+            context,
+            entity,
+            [{ type: "equalsAny", field, value: ids }],
+            options
+        );
+        results.push(...pageItems);
+    }
+
+    return results;
+}
+
+export async function getAllSalesChannelProductIds(
+    context: SalesChannelSearchContext
+): Promise<string[]> {
+    const products = await searchAllByFilter<{ id: string }>(context, "product", [
+        {
+            type: "equals",
+            field: "visibilities.salesChannelId",
+            value: context.salesChannelId,
+        },
+    ]);
+    return products.map((product) => product.id);
 }
 
 /**

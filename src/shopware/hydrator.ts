@@ -747,7 +747,8 @@ export class ShopwareHydrator extends ShopwareClient {
      * (children will be deleted when creating the new category tree).
      */
     async createRootCategory(name: string): Promise<{ id: string; name: string; isNew: boolean }> {
-        const categoryName = `${capitalizeString(name)} Root`;
+        const displayName = capitalizeString(name);
+        const categoryName = `${displayName} Demo-Store`;
 
         // Check if a root category with this name already exists
         const { data: searchData } = await this.getClient().invoke(

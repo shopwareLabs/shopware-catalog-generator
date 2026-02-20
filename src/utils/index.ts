@@ -1,5 +1,6 @@
 // Array utilities
 export {
+    chunkArray,
     cartesianProduct,
     randomPick,
     randomSample,
@@ -82,7 +83,9 @@ export {
     normalizeDescription,
     normalizeString,
     stripHtml,
+    toFixtureUrlSlug,
     toKebabCase,
+    toStoreScopedName,
 } from "./strings.js";
 // UUID utilities
 export { generateAccessKey, generateUUID } from "./uuid.js";

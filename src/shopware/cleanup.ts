@@ -376,24 +376,26 @@ export class ShopwareCleanup extends ShopwareClient {
         }
 
         logger.info(`Finding products in SalesChannel...`);
-
-        const { data: productsData } = await this.getClient().invoke(
-            "searchProduct post /search/product",
+        const products = await this.fetchAllPages<Schemas["Product"]>(
+            async (body) => {
+                const { data } = await this.getClient().invoke(
+                    "searchProduct post /search/product",
+                    {
+                        body,
+                    }
+                );
+                return data as { data?: Schemas["Product"][]; total?: number };
+            },
             {
-                body: {
-                    limit: 500,
-                    filter: [
-                        {
-                            type: "equals",
-                            field: "visibilities.salesChannelId",
-                            value: salesChannelId,
-                        },
-                    ],
-                },
+                filter: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: salesChannelId,
+                    },
+                ],
             }
         );
-        const productsResult = productsData as SearchResult<Schemas["Product"]>;
-        const products = productsResult.data ?? [];
 
         if (products.length === 0) {
             logger.info(`No products found in SalesChannel.`);
@@ -420,35 +422,37 @@ export class ShopwareCleanup extends ShopwareClient {
         }
 
         logger.info(`Finding categories under root category...`);
-
-        const { data: categoriesData } = await this.getClient().invoke(
-            "searchCategory post /search/category",
+        const categories = await this.fetchAllPages<Schemas["Category"]>(
+            async (body) => {
+                const { data } = await this.getClient().invoke(
+                    "searchCategory post /search/category",
+                    {
+                        body,
+                    }
+                );
+                return data as { data?: Schemas["Category"][]; total?: number };
+            },
             {
-                body: {
-                    limit: 500,
-                    filter: [
-                        {
-                            type: "multi",
-                            operator: "or",
-                            queries: [
-                                {
-                                    type: "equals",
-                                    field: "parentId",
-                                    value: rootCategoryId,
-                                },
-                                {
-                                    type: "contains",
-                                    field: "path",
-                                    value: rootCategoryId,
-                                },
-                            ],
-                        },
-                    ],
-                },
+                filter: [
+                    {
+                        type: "multi",
+                        operator: "or",
+                        queries: [
+                            {
+                                type: "equals",
+                                field: "parentId",
+                                value: rootCategoryId,
+                            },
+                            {
+                                type: "contains",
+                                field: "path",
+                                value: rootCategoryId,
+                            },
+                        ],
+                    },
+                ],
             }
         );
-        const categoriesResult = categoriesData as SearchResult<Schemas["Category"]>;
-        const categories = categoriesResult.data ?? [];
 
         if (categories.length === 0) {
             logger.info(`No child categories found.`);

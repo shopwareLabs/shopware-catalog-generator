@@ -355,6 +355,20 @@ async function main(): Promise<void> {
         console.log(`Delete SalesChannel: ${deleteSalesChannel ? "Yes" : "No"}`);
         console.log(`Delete property groups: ${deleteProps ? "Yes" : "No"}\n`);
 
+        const cleanableProcessors = registry
+            .getAll()
+            .filter((processor) => typeof processor.cleanup === "function")
+            .map((processor) => processor.name);
+        if (cleanableProcessors.length > 0) {
+            console.log(`Note: Processor cleanup is not included in this mode.`);
+            console.log(`      Run one of these if you want processor entities removed too:`);
+            console.log(
+                `      - bun run cleanup -- --salesChannel="${salesChannel}" --processors=all`
+            );
+            console.log(`      - bun run cleanup -- --salesChannel="${salesChannel}" --full`);
+            console.log(`      Cleanable processors: ${cleanableProcessors.join(", ")}\n`);
+        }
+
         if (deleteManufacturers) {
             console.log(
                 `Note: Use --processors=manufacturers for SalesChannel-scoped manufacturer cleanup.\n`

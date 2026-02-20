@@ -10,6 +10,8 @@ import {
     normalizeDescription,
     normalizeString,
     stripHtml,
+    toFixtureUrlSlug,
+    toStoreScopedName,
 } from "../../../src/utils/strings.js";
 
 describe("string utilities", () => {
@@ -192,6 +194,18 @@ describe("string utilities", () => {
             const hash = createShortHash("", 5);
             expect(hash).toHaveLength(5);
             expect(hash).toMatch(/^[0-9a-z]+$/);
+        });
+    });
+
+    describe("toStoreScopedName", () => {
+        test("formats store scoped names", () => {
+            expect(toStoreScopedName("Welcome", "music")).toBe("Welcome [music]");
+        });
+    });
+
+    describe("toFixtureUrlSlug", () => {
+        test("converts fixture names to slug", () => {
+            expect(toFixtureUrlSlug("Text & Images")).toBe("text-and-images");
         });
     });
 });

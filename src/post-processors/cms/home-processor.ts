@@ -18,6 +18,7 @@ import type {
 } from "../index.js";
 
 import { HOME_LISTING_PAGE } from "../../fixtures/index.js";
+import { getSalesChannelNavigationCategoryId } from "../../shopware/api-helpers.js";
 import { apiPost, capitalizeString, countCategories, logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
@@ -212,36 +213,8 @@ class HomeProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     // Category Operations
     // =========================================================================
 
-    /**
-     * Get the SalesChannel's navigation root category ID.
-     */
     private async getRootCategoryId(context: PostProcessorContext): Promise<string | null> {
-        interface SalesChannelResponse {
-            data?: Array<{
-                id: string;
-                attributes?: { navigationCategoryId?: string };
-                navigationCategoryId?: string;
-            }>;
-        }
-
-        try {
-            const response = await apiPost(context, "search/sales-channel", {
-                ids: [context.salesChannelId],
-            });
-
-            if (!response.ok) return null;
-
-            const data = (await response.json()) as SalesChannelResponse;
-            const salesChannel = data.data?.[0];
-            return (
-                salesChannel?.attributes?.navigationCategoryId ||
-                salesChannel?.navigationCategoryId ||
-                null
-            );
-        } catch (error) {
-            logger.warn("Failed to get navigation category from sales channel", { data: error });
-            return null;
-        }
+        return getSalesChannelNavigationCategoryId(context);
     }
 
     /**

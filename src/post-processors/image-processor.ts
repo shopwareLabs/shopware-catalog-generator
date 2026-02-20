@@ -15,6 +15,7 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
+import { getAllSalesChannelProductIds, searchAllByEqualsAny } from "../shopware/api-helpers.js";
 import { apiPost, ConcurrencyLimiter, generateUUID, logger } from "../utils/index.js";
 import { CategoryImageProcessor } from "./category-image-processor.js";
 import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
@@ -276,7 +277,7 @@ class ImageProcessorImpl implements PostProcessor {
     ): Promise<void> {
         const hasExistingImages = await this.productHasImages(context, productId);
         if (hasExistingImages) {
-            logger.info(`      ⊘ ${this.truncateName(productName)}: already has images, skipped`, {
+            logger.info(`      ✓ ${this.truncateName(productName)}: reused existing images`, {
                 cli: true,
             });
             return;
@@ -464,7 +465,7 @@ class ImageProcessorImpl implements PostProcessor {
         } else if (uploadedCount > 0) {
             logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded`, { cli: true });
         } else if (reusedCount > 0) {
-            logger.info(`      ⊘ ${shortName}: ${reusedCount} images reused`, { cli: true });
+            logger.info(`      ✓ ${shortName}: ${reusedCount} images reused`, { cli: true });
         }
     }
 
@@ -615,31 +616,22 @@ class ImageProcessorImpl implements PostProcessor {
 
         try {
             // Step 1: Get all products in this SalesChannel
-            const products = await context.api.searchEntities<{ id: string }>(
-                "product",
-                [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                { limit: 500 }
-            );
+            const productIds = await getAllSalesChannelProductIds(context);
 
-            if (products.length === 0) {
+            if (productIds.length === 0) {
                 logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            const productIds = products.map((p) => p.id);
             logger.info(`    Found ${productIds.length} products in SalesChannel`, { cli: true });
 
             // Step 2: Find all product_media entries for these products
-            const productMedia = await context.api.searchEntities<{ id: string; mediaId: string }>(
+            const productMedia = await searchAllByEqualsAny<{ id: string; mediaId: string }>(
+                context,
                 "product-media",
-                [{ type: "equalsAny" as "equals", field: "productId", value: productIds }],
-                { limit: 500 }
+                "productId",
+                productIds,
+                { includes: { product_media: ["id", "mediaId"] } }
             );
 
             if (productMedia.length > 0) {

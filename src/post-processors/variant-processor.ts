@@ -17,12 +17,14 @@ import type {
 } from "./index.js";
 
 import { PropertyCache } from "../property-cache.js";
+import { searchAllByEqualsAny, searchAllByFilter } from "../shopware/api-helpers.js";
 import {
     apiPost,
     cartesianProduct,
     createShortHash,
     generateUUID,
     logger,
+    sleep,
     toKebabCase,
 } from "../utils/index.js";
 
@@ -35,6 +37,16 @@ interface PropertyGroup {
     id: string;
     name: string;
     options: PropertyOption[];
+}
+
+export function isTransientShopwareSyncError(errorText: string): boolean {
+    const normalized = errorText.toLowerCase();
+    return (
+        normalized.includes("deadlock found when trying to get lock") ||
+        normalized.includes("sqlstate[40001]") ||
+        normalized.includes("savepoint doctrine_") ||
+        normalized.includes("lock wait timeout exceeded")
+    );
 }
 
 /**
@@ -53,6 +65,26 @@ class VariantProcessorImpl implements PostProcessor {
     private ensuredGroups: Set<string> = new Set();
     // Property cache for group definitions
     private propertyCache: PropertyCache | null = null;
+    private readonly syncRetryAttempts = 3;
+    private readonly syncRetryBaseDelayMs = 500;
+
+    private interfaceResolutionResult(
+        resolved: Array<{
+            group: PropertyGroup;
+            selectedOptions: PropertyOption[];
+            priceModifiers: Record<string, number>;
+        }>,
+        issues: string[]
+    ): {
+        resolved: Array<{
+            group: PropertyGroup;
+            selectedOptions: PropertyOption[];
+            priceModifiers: Record<string, number>;
+        }>;
+        issues: string[];
+    } {
+        return { resolved, issues };
+    }
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { blueprint, cache, options } = context;
@@ -106,12 +138,16 @@ class VariantProcessorImpl implements PostProcessor {
 
             try {
                 // Resolve property groups for each variant config
-                const resolvedGroups = await this.resolvePropertyGroups(context, variantConfigs);
+                const resolution = await this.resolvePropertyGroups(context, variantConfigs);
+                const resolvedGroups = resolution.resolved;
 
                 if (resolvedGroups.length === 0) {
-                    logger.info(`      ⊘ ${product.name}: No suitable property groups found`, {
-                        cli: true,
-                    });
+                    const issueSuffix =
+                        resolution.issues.length > 0 ? ` (${resolution.issues.join("; ")})` : "";
+                    logger.info(
+                        `      ⊘ ${product.name}: No suitable property groups found${issueSuffix}`,
+                        { cli: true }
+                    );
                     skipped++;
                     continue;
                 }
@@ -298,7 +334,7 @@ class VariantProcessorImpl implements PostProcessor {
         // Create/update property group with all options
         const allOptions = [...(existingGroup?.options || []), ...newOptions];
 
-        const response = await apiPost(context, "_action/sync", {
+        const response = await this.syncWithRetry(context, "property group sync", {
             createPropertyGroup: {
                 entity: "property_group",
                 action: "upsert",
@@ -318,10 +354,9 @@ class VariantProcessorImpl implements PostProcessor {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
             logger.apiError("_action/sync (property group)", response.status, {
                 groupName,
-                error: errorText,
+                error: response.errorText ?? "Unknown error",
             });
             this.ensuredGroups.add(groupName);
             return null;
@@ -471,18 +506,20 @@ class VariantProcessorImpl implements PostProcessor {
     private async resolvePropertyGroups(
         context: PostProcessorContext,
         configs: VariantConfig[]
-    ): Promise<
-        Array<{
+    ): Promise<{
+        resolved: Array<{
             group: PropertyGroup;
             selectedOptions: PropertyOption[];
             priceModifiers: Record<string, number>;
-        }>
-    > {
+        }>;
+        issues: string[];
+    }> {
         const resolved: Array<{
             group: PropertyGroup;
             selectedOptions: PropertyOption[];
             priceModifiers: Record<string, number>;
         }> = [];
+        const issues: string[] = [];
 
         for (const config of configs) {
             // Try to find property group in blueprint first
@@ -498,11 +535,23 @@ class VariantProcessorImpl implements PostProcessor {
                 propertyGroup = await this.getPropertyGroup(context, config.group);
             }
 
-            if (!propertyGroup || propertyGroup.options.length < 2) {
+            if (!propertyGroup) {
+                issues.push(`${config.group}: group not found`);
                 logger.debug(`Skipping variant config "${config.group}": not enough options`, {
                     data: {
-                        found: !!propertyGroup,
-                        optionCount: propertyGroup?.options.length || 0,
+                        found: false,
+                        optionCount: 0,
+                    },
+                });
+                continue;
+            }
+
+            if (propertyGroup.options.length < 2) {
+                issues.push(`${config.group}: only ${propertyGroup.options.length} option(s)`);
+                logger.debug(`Skipping variant config "${config.group}": not enough options`, {
+                    data: {
+                        found: true,
+                        optionCount: propertyGroup.options.length,
                     },
                 });
                 continue;
@@ -521,6 +570,15 @@ class VariantProcessorImpl implements PostProcessor {
                     : propertyGroup.options.slice(0, Math.min(3, propertyGroup.options.length));
 
             if (finalOptions.length >= 2) {
+                if (selectedOptions.length < 2) {
+                    const selectedText =
+                        config.selectedOptions.length > 0
+                            ? config.selectedOptions.join(", ")
+                            : "none";
+                    issues.push(
+                        `${config.group}: selected options mismatch (${selectedText}); used fallback options`
+                    );
+                }
                 resolved.push({
                     group: propertyGroup,
                     selectedOptions: finalOptions,
@@ -529,7 +587,7 @@ class VariantProcessorImpl implements PostProcessor {
             }
         }
 
-        return resolved;
+        return this.interfaceResolutionResult(resolved, issues);
     }
 
     /**
@@ -559,21 +617,25 @@ class VariantProcessorImpl implements PostProcessor {
         }
 
         // Update parent with all configurator settings
-        const updateParentResponse = await apiPost(context, "_action/sync", {
-            updateParent: {
-                entity: "product",
-                action: "upsert",
-                payload: [
-                    {
-                        id: product.id,
-                        configuratorSettings: allConfiguratorSettings,
-                    },
-                ],
-            },
-        });
+        const updateParentResponse = await this.syncWithRetry(
+            context,
+            "update parent configurator settings",
+            {
+                updateParent: {
+                    entity: "product",
+                    action: "upsert",
+                    payload: [
+                        {
+                            id: product.id,
+                            configuratorSettings: allConfiguratorSettings,
+                        },
+                    ],
+                },
+            }
+        );
 
         if (!updateParentResponse.ok) {
-            const errorText = await updateParentResponse.text();
+            const errorText = updateParentResponse.errorText ?? "Unknown error";
 
             if (errorText.includes("Duplicate entry") || errorText.includes("1062")) {
                 logger.info(`      ⊘ ${product.name}: Configurator settings already exist`, {
@@ -636,7 +698,7 @@ class VariantProcessorImpl implements PostProcessor {
             };
         });
 
-        const createVariantsResponse = await apiPost(context, "_action/sync", {
+        const createVariantsResponse = await this.syncWithRetry(context, "create variants", {
             createVariants: {
                 entity: "product",
                 action: "upsert",
@@ -645,7 +707,7 @@ class VariantProcessorImpl implements PostProcessor {
         });
 
         if (!createVariantsResponse.ok) {
-            const errorText = await createVariantsResponse.text();
+            const errorText = createVariantsResponse.errorText ?? "Unknown error";
             logger.apiError("_action/sync (variants)", createVariantsResponse.status, {
                 productId: product.id,
                 error: errorText,
@@ -661,7 +723,7 @@ class VariantProcessorImpl implements PostProcessor {
             visibility: 30,
         }));
 
-        const visibilityResponse = await apiPost(context, "_action/sync", {
+        const visibilityResponse = await this.syncWithRetry(context, "variant visibility", {
             addVisibility: {
                 entity: "product_visibility",
                 action: "upsert",
@@ -670,13 +732,56 @@ class VariantProcessorImpl implements PostProcessor {
         });
 
         if (!visibilityResponse.ok) {
-            const errorText = await visibilityResponse.text();
             logger.apiError("_action/sync (variant visibility)", visibilityResponse.status, {
-                error: errorText,
+                error: visibilityResponse.errorText ?? "Unknown error",
             });
         }
 
         return variantPayload.length;
+    }
+
+    private async syncWithRetry(
+        context: PostProcessorContext,
+        operationName: string,
+        payload: unknown
+    ): Promise<{ ok: boolean; status: number; errorText?: string }> {
+        let delayMs = this.syncRetryBaseDelayMs;
+        let lastStatus = 500;
+        let lastErrorText = "Unknown error";
+
+        for (let attempt = 1; attempt <= this.syncRetryAttempts; attempt++) {
+            try {
+                const response = await apiPost(context, "_action/sync", payload);
+                if (response.ok) {
+                    return { ok: true, status: response.status };
+                }
+
+                lastStatus = response.status;
+                lastErrorText = await response.text();
+            } catch (error) {
+                lastStatus = 500;
+                lastErrorText = error instanceof Error ? error.message : String(error);
+            }
+
+            const transient = isTransientShopwareSyncError(lastErrorText);
+            const isLastAttempt = attempt === this.syncRetryAttempts;
+            if (!transient || isLastAttempt) {
+                return {
+                    ok: false,
+                    status: lastStatus,
+                    errorText: lastErrorText,
+                };
+            }
+
+            logger.warn(
+                `Transient Shopware sync error during ${operationName} (attempt ${attempt}/${this.syncRetryAttempts}). Retrying in ${delayMs}ms...`,
+                { cli: true }
+            );
+            await sleep(delayMs);
+            delayMs *= 2;
+        }
+
+        return { ok: false, status: lastStatus, errorText: lastErrorText };
     }
 
     /**
@@ -705,56 +810,57 @@ class VariantProcessorImpl implements PostProcessor {
 
         try {
             // Step 1: Get all parent products in this SalesChannel
-            const parentProducts = await context.api.searchEntities<{ id: string }>(
-                "product",
-                [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                { limit: 500 }
-            );
+            const parents = await searchAllByFilter<{ id: string }>(context, "product", [
+                {
+                    type: "equals",
+                    field: "visibilities.salesChannelId",
+                    value: context.salesChannelId,
+                },
+                {
+                    type: "equals",
+                    field: "parentId",
+                    value: null,
+                },
+            ]);
+            const parentIds = parents.map((parent) => parent.id);
 
-            if (parentProducts.length === 0) {
+            if (parentIds.length === 0) {
                 logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            const parentIds = parentProducts.map((p) => p.id);
             logger.info(`    Found ${parentIds.length} parent products in SalesChannel`, {
                 cli: true,
             });
 
             // Step 2: Find all child products (variants) with these parentIds
-            const variants = await context.api.searchEntities<{ id: string }>(
+            const variants = await searchAllByEqualsAny<{ id: string }>(
+                context,
                 "product",
-                [{ type: "equalsAny" as "equals", field: "parentId", value: parentIds }],
-                { limit: 500 }
+                "parentId",
+                parentIds,
+                { includes: { product: ["id"] } }
             );
 
             if (variants.length > 0) {
                 logger.info(`    Found ${variants.length} variant products`, { cli: true });
 
                 // Step 3: Delete child products
-                const variantIds = variants.map((v) => v.id);
-                await context.api.deleteEntities("product", variantIds);
-                deleted = variantIds.length;
-                logger.info(`    ✓ Deleted ${deleted} variant products`, { cli: true });
+                await context.api.deleteEntities(
+                    "product",
+                    variants.map((variant) => variant.id)
+                );
+                deleted = variants.length;
             } else {
                 logger.info(`    No variant products found`, { cli: true });
             }
 
             // Step 4: Clear configuratorSettings from parent products
             // Find parents that have configuratorSettings
-            const parentsWithConfigurator = await context.api.searchEntities<{
+            const parentsWithConfigurator = await searchAllByEqualsAny<{
                 id: string;
                 configuratorSettings?: unknown[];
-            }>("product", [{ type: "equalsAny" as "equals", field: "id", value: parentIds }], {
-                associations: { configuratorSettings: {} },
-                limit: 500,
-            });
+            }>(context, "product", "id", parentIds, { associations: { configuratorSettings: {} } });
 
             const parentsToUpdate = parentsWithConfigurator.filter(
                 (p) => p.configuratorSettings && p.configuratorSettings.length > 0

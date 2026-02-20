@@ -54,6 +54,7 @@ describe("PostProcessor Registry", () => {
         expect(names).toContain("cms-text-images");
         expect(names).toContain("cms-commerce");
         expect(names).toContain("cms-form");
+        expect(names).toContain("cms-footer-pages");
         expect(names).toContain("cms-testing");
         // Other processors
         expect(names).toContain("images");
@@ -87,9 +88,10 @@ describe("PostProcessor Registry", () => {
 
     test("getAll returns all processors", () => {
         const all = registry.getAll();
-        // 8 CMS processors + 5 other processors = 13 total
-        expect(all.length).toBe(13);
+        // 9 CMS processors + 5 other processors = 14 total
+        expect(all.length).toBe(14);
         expect(all.map((p) => p.name)).toContain("cms-video");
+        expect(all.map((p) => p.name)).toContain("cms-footer-pages");
         expect(all.map((p) => p.name)).toContain("cms-testing");
         expect(all.map((p) => p.name)).toContain("digital-product");
         expect(all.map((p) => p.name)).toContain("images");

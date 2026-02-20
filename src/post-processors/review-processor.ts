@@ -20,6 +20,7 @@ import type {
 } from "./index.js";
 
 import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
+import { getAllSalesChannelProductIds, searchAllByEqualsAny } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger } from "../utils/index.js";
 
 /**
@@ -171,47 +172,36 @@ class ReviewProcessorImpl implements PostProcessor {
 
         try {
             // Step 1: Get all products in this SalesChannel
-            const products = await context.api.searchEntities<{ id: string }>(
-                "product",
-                [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                ],
-                { limit: 500 }
-            );
+            const productIds = await getAllSalesChannelProductIds(context);
 
-            if (products.length === 0) {
+            if (productIds.length === 0) {
                 logger.info(`    No products found in SalesChannel`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            const productIds = products.map((p) => p.id);
             logger.info(`    Found ${productIds.length} products in SalesChannel`, { cli: true });
 
             // Step 2: Find all reviews for these products
-            // Use equalsAny filter (cast needed as type is not fully exported)
-            const reviews = await context.api.searchEntities<{ id: string }>(
+            const reviews = await searchAllByEqualsAny<{ id: string }>(
+                context,
                 "product-review",
-                [{ type: "equalsAny" as "equals", field: "productId", value: productIds }],
-                { limit: 500 }
+                "productId",
+                productIds,
+                { includes: { product_review: ["id"] } }
             );
+            const reviewIds = reviews.map((review) => review.id);
 
-            if (reviews.length === 0) {
+            if (reviewIds.length === 0) {
                 logger.info(`    No reviews found for products`, { cli: true });
                 return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
             }
 
-            logger.info(`    Found ${reviews.length} reviews to delete`, { cli: true });
+            logger.info(`    Found ${reviewIds.length} reviews to delete`, { cli: true });
 
             // Step 3: Delete reviews
-            const reviewIds = reviews.map((r) => r.id);
             await context.api.deleteEntities("product_review", reviewIds);
 
             deleted = reviewIds.length;
-            logger.info(`    ✓ Deleted ${deleted} reviews`, { cli: true });
         } catch (error) {
             errors.push(
                 `Review cleanup failed: ${error instanceof Error ? error.message : String(error)}`

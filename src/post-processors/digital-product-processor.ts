@@ -62,14 +62,25 @@ class DigitalProductProcessorImpl implements PostProcessor {
             // Check if already processed for this SalesChannel
             const cached = this.loadCache(context);
             if (cached) {
-                logger.info(`    ⊘ Gift card already exists (${cached.productId})`, { cli: true });
-                return {
-                    name: this.name,
-                    processed: 0,
-                    skipped: 1,
-                    errors: [],
-                    durationMs: Date.now() - startTime,
-                };
+                const cacheStillValid = await this.isCachedGiftCardValid(context, cached.productId);
+                if (!cacheStillValid) {
+                    logger.warn(
+                        `    ⚠ Stale digital-product cache detected, rebuilding gift card state`,
+                        { cli: true }
+                    );
+                    this.clearCache(context);
+                } else {
+                    logger.info(`    ⊘ Gift card already exists (${cached.productId})`, {
+                        cli: true,
+                    });
+                    return {
+                        name: this.name,
+                        processed: 0,
+                        skipped: 1,
+                        errors: [],
+                        durationMs: Date.now() - startTime,
+                    };
+                }
             }
 
             // Step 1: Check if gift card product already exists globally
@@ -257,6 +268,50 @@ class DigitalProductProcessorImpl implements PostProcessor {
         }
 
         return null;
+    }
+
+    /**
+     * Validate cached product ID still exists and is visible in this SalesChannel
+     */
+    private async isCachedGiftCardValid(
+        context: PostProcessorContext,
+        productId: string
+    ): Promise<boolean> {
+        try {
+            interface ProductResponse {
+                data?: Array<{ id: string }>;
+            }
+            interface VisibilityResponse {
+                data?: Array<{ id: string }>;
+            }
+
+            const productResponse = await apiPost(context, "search/product", {
+                ids: [productId],
+                limit: 1,
+            });
+            if (!productResponse.ok) {
+                return false;
+            }
+            const productData = (await productResponse.json()) as ProductResponse;
+            if (!productData.data?.length) {
+                return false;
+            }
+
+            const visibilityResponse = await apiPost(context, "search/product-visibility", {
+                filter: [
+                    { type: "equals", field: "productId", value: productId },
+                    { type: "equals", field: "salesChannelId", value: context.salesChannelId },
+                ],
+                limit: 1,
+            });
+            if (!visibilityResponse.ok) {
+                return false;
+            }
+            const visibilityData = (await visibilityResponse.json()) as VisibilityResponse;
+            return !!visibilityData.data?.length;
+        } catch {
+            return false;
+        }
     }
 
     /**

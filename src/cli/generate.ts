@@ -21,6 +21,7 @@ import {
     executePostProcessors,
     requireHydratedBlueprint,
     requireValidName,
+    verifyShopwareConnection,
 } from "./shared.js";
 
 export async function generate(args: CliArgs): Promise<void> {
@@ -34,6 +35,14 @@ export async function generate(args: CliArgs): Promise<void> {
 
     logger.configure({ enabled: true });
     console.log(`Log file: ${logger.getLogFile()}\n`);
+
+    console.log("Step 0: Checking Shopware connection...");
+    const swEnvUrl = await verifyShopwareConnection(
+        process.env.SW_ENV_URL,
+        process.env.SW_CLIENT_ID,
+        process.env.SW_CLIENT_SECRET
+    );
+    console.log("  Shopware connection OK");
 
     const cache = createCacheFromEnv();
 
@@ -86,10 +95,6 @@ export async function generate(args: CliArgs): Promise<void> {
     }
 
     console.log("\nStep 3: Syncing to Shopware...");
-    const swEnvUrl = process.env.SW_ENV_URL;
-    if (!swEnvUrl) {
-        throw new CLIError("SW_ENV_URL environment variable is required", "MISSING_ENV");
-    }
 
     const dataHydrator = new DataHydrator();
     await dataHydrator.authenticateWithClientCredentials(
@@ -166,10 +171,13 @@ export async function processCommand(args: CliArgs): Promise<void> {
     const cache = createCacheFromEnv();
     const blueprint = requireHydratedBlueprint(cache, salesChannelName);
 
-    const swEnvUrl = process.env.SW_ENV_URL;
-    if (!swEnvUrl) {
-        throw new CLIError("SW_ENV_URL environment variable is required", "MISSING_ENV");
-    }
+    console.log("Step 0: Checking Shopware connection...");
+    const swEnvUrl = await verifyShopwareConnection(
+        process.env.SW_ENV_URL,
+        process.env.SW_CLIENT_ID,
+        process.env.SW_CLIENT_SECRET
+    );
+    console.log("  Shopware connection OK");
 
     const dataHydrator = new DataHydrator();
     await dataHydrator.authenticateWithClientCredentials(

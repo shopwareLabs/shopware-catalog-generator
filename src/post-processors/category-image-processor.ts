@@ -6,6 +6,7 @@
 
 import type { PostProcessorContext } from "./index.js";
 
+import { searchAllByFilter } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger } from "../utils/index.js";
 import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
 
@@ -156,7 +157,7 @@ export class CategoryImageProcessor {
             );
         }
         if (existingCategoryMediaId && !shouldCleanup) {
-            logger.info(`      ⊘ Category "${categoryName}" already has image, skipped`, {
+            logger.info(`      ✓ Reused existing banner for "${categoryName}"`, {
                 cli: true,
             });
             return false;
@@ -241,7 +242,7 @@ export class CategoryImageProcessor {
         }
 
         if (isExistingMedia) {
-            logger.info(`      ⊘ Linked existing banner for "${categoryName}"`, {
+            logger.info(`      ✓ Reused existing banner for "${categoryName}"`, {
                 cli: true,
             });
         } else {
@@ -294,10 +295,11 @@ export class CategoryImageProcessor {
         const salesChannel = await context.api.getSalesChannelByName(context.salesChannelName);
         if (!salesChannel) return 0;
 
-        const categories = await context.api.searchEntities<{
+        const categories = await searchAllByFilter<{
             id: string;
             mediaId?: string;
         }>(
+            context,
             "category",
             [
                 {
@@ -317,7 +319,7 @@ export class CategoryImageProcessor {
                     ],
                 },
             ],
-            { limit: 500 }
+            { includes: { category: ["id", "mediaId"] } }
         );
 
         const categoriesWithMedia = categories.filter((c) => c.mediaId);
