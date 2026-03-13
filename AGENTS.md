@@ -92,7 +92,7 @@ src/
 │   │   ├── footer-pages-processor.ts # Shared footer and legal pages
 │   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
 │   ├── cross-selling-processor.ts # Category-based cross-selling
-│   ├── currency-utils.ts     # resolvePrimaryCurrencyId (USD → EUR → SalesChannel)
+│   ├── currency-utils.ts     # resolvePrimaryCurrencyId (base currency factor=1 → SalesChannel)
 │   ├── customer-processor.ts     # Demo customer accounts with B2B group
 │   ├── digital-product-processor.ts # Digital product with download
 │   ├── image-processor.ts    # Multi-view product image generation

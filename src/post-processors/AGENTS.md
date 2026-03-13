@@ -192,13 +192,12 @@ import { resolvePrimaryCurrencyId } from "./currency-utils.js";
 const currencyId = await resolvePrimaryCurrencyId(context.api, context.salesChannelId);
 ```
 
-Fallback order mirrors `createSalesChannel()`:
+Fallback order:
 
-1. **USD** — project's primary currency
-2. **EUR** — secondary fallback
-3. **SalesChannel's own currency** — last resort
+1. **System base currency** (`factor = 1`) — what `ShopwareHydrator.getCurrencyId()` defaults to and what Shopware's `PriceFieldSerializer` validates product prices against (EUR in a standard install)
+2. **SalesChannel's own currency** — last resort
 
-Each lookup is independent (a missing USD does not prevent the EUR lookup). Throws if all three fail.
+> USD is intentionally NOT prioritised. Product prices must be in the system base currency or Shopware rejects the sync with "No price for default currency defined". Throws if both lookups fail.
 
 Used by `variant-processor` and `digital-product-processor`.
 

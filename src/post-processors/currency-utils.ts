@@ -1,9 +1,10 @@
 /**
  * Currency resolution utilities for post-processors.
  *
- * Mirrors the fallback logic used by createSalesChannel() in hydrator.ts:
- * USD → EUR → SalesChannel's own currency. Each lookup is independent
- * so a missing USD does not prevent the EUR lookup from running.
+ * Finds the system base currency (factor = 1) — the same currency that
+ * ShopwareHydrator.getCurrencyId() defaults to and that product prices use.
+ * This ensures variant and digital product prices pass Shopware's
+ * PriceFieldSerializer validation ("No price for default currency defined").
  */
 
 import type { ShopwareApi } from "../shopware/api-helpers.js";
@@ -13,27 +14,33 @@ import { logger } from "../utils/index.js";
 /**
  * Resolve the primary currency ID for a SalesChannel.
  *
- * Fallback order:
- *   1. USD (matches the project's multi-currency model)
- *   2. EUR
- *   3. The SalesChannel's own configured currency
+ * Matches the currency used by the main product sync (ShopwareHydrator.getCurrencyId):
  *
- * Each lookup is independent — a missing currency does not short-circuit
- * subsequent attempts (unlike a single try/catch around sequential awaits).
+ *   1. System base currency (factor = 1) — what Shopware uses as the default for
+ *      price validation; EUR in a standard installation
+ *   2. The SalesChannel's own configured currency — last resort
+ *
+ * Note: USD is intentionally NOT prioritised here. Even though the SalesChannel
+ * is created with USD as a secondary currency, product prices must be expressed
+ * in the system base currency or Shopware will reject the sync with
+ * "No price for default currency defined".
  */
 export async function resolvePrimaryCurrencyId(
     api: ShopwareApi,
     salesChannelId: string
 ): Promise<string> {
-    const [usdId, eurId] = await Promise.all([
-        api.getCurrencyId("USD").catch(() => null),
-        api.getCurrencyId("EUR").catch(() => null),
-    ]);
+    // Find the system base currency (factor = 1) — this is the default for product prices
+    const baseCurrencies = await api
+        .searchEntities<{ id: string }>(
+            "currency",
+            [{ type: "equals", field: "factor", value: 1 }],
+            { limit: 1 }
+        )
+        .catch(() => []);
 
-    if (usdId) return usdId;
-    if (eurId) return eurId;
+    if (baseCurrencies[0]?.id) return baseCurrencies[0].id;
 
-    logger.warn("Neither USD nor EUR found — falling back to SalesChannel currency");
+    logger.warn("Base currency (factor=1) not found — falling back to SalesChannel currency");
 
     const [sc] = await api.searchEntities<{ currencyId: string }>(
         "sales_channel",
@@ -43,5 +50,5 @@ export async function resolvePrimaryCurrencyId(
 
     if (sc?.currencyId) return sc.currencyId;
 
-    throw new Error("No currency found: USD, EUR, and SalesChannel lookup all failed");
+    throw new Error("No currency found: base currency and SalesChannel lookup all failed");
 }
