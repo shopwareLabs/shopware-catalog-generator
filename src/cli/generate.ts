@@ -11,7 +11,7 @@ import {
     runProcessorsForSalesChannel,
 } from "../services/generate-service.js";
 import { logger } from "../utils/index.js";
-import { CLIError, requireValidName, verifyShopwareConnection } from "./shared.js";
+import { requireValidName, throwIfServiceError, verifyShopwareConnection } from "./shared.js";
 
 export async function generate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
@@ -28,8 +28,10 @@ export async function generate(args: CliArgs): Promise<void> {
     const lines = await generateService(salesChannelName, description, {
         products: args.products,
         dryRun: args.dryRun,
-        noTemplate: args.noTemplate,
+        noTemplate: args.noTemplate || args.force, // --force implies --no-template
     });
+
+    throwIfServiceError(lines, "GENERATE_FAILED");
 
     for (const line of lines) {
         console.log(line);
@@ -52,11 +54,7 @@ export async function processCommand(args: CliArgs): Promise<void> {
         args.dryRun ?? false
     );
 
-    // Check for error response
-    if (lines.some((l) => l.startsWith("Error:"))) {
-        const errorLine = lines.find((l) => l.startsWith("Error:"))!;
-        throw new CLIError(errorLine.slice("Error: ".length), "PROCESS_FAILED");
-    }
+    throwIfServiceError(lines, "PROCESS_FAILED");
 
     for (const line of lines) {
         console.log(line);

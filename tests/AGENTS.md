@@ -227,7 +227,11 @@ Shared factories in `tests/helpers/` avoid duplicating fixture setup across test
 ### blueprint-factory.ts
 
 ```typescript
-import { createTestProduct, createTestCategory, createTestBlueprint } from "../../helpers/blueprint-factory.js";
+import {
+    createTestProduct,
+    createTestCategory,
+    createTestBlueprint,
+} from "../../helpers/blueprint-factory.js";
 
 // Create a single product with sensible defaults
 const product = createTestProduct({ name: "Guitar", price: 99.99 });

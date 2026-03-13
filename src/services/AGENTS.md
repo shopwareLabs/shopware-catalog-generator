@@ -38,8 +38,8 @@ const lines = await createBlueprint("music", "Musical instruments", 90);
 
 // Phase 2: Hydrate with AI content
 const lines = await hydrateBlueprint("music", { only: "categories" }); // selective
-const lines = await hydrateBlueprint("music", { force: true });        // full re-hydration
-const lines = await hydrateBlueprint("music", {});                     // new blueprint
+const lines = await hydrateBlueprint("music", { force: true }); // full re-hydration
+const lines = await hydrateBlueprint("music", {}); // new blueprint
 
 // Phase 2b: Fix incomplete hydration (placeholder names)
 const lines = await fixBlueprint("music");
@@ -65,7 +65,11 @@ const desc = resolveCmsStoreDescription("music", blueprint.salesChannel.descript
 Shared logic for the `generate` (full pipeline) and `process` (post-processors only) commands.
 
 ```typescript
-import { generate, runProcessorsForSalesChannel, GenerateOptions } from "./services/generate-service.js";
+import {
+    generate,
+    runProcessorsForSalesChannel,
+    GenerateOptions,
+} from "./services/generate-service.js";
 
 // Full pipeline: blueprint → hydrate → upload → post-processors
 const lines = await generate("music", "Musical instruments", { products: 90 });
@@ -76,11 +80,11 @@ const lines = await runProcessorsForSalesChannel("music", ["images", "reviews"],
 
 `GenerateOptions`:
 
-| Field        | Type      | Default | Description                          |
-| ------------ | --------- | ------- | ------------------------------------ |
-| `products`   | `number`  | `90`    | Products to generate                 |
-| `dryRun`     | `boolean` | `false` | Preview only, no Shopware changes    |
-| `noTemplate` | `boolean` | `false` | Skip pre-generated template lookup   |
+| Field        | Type      | Default | Description                        |
+| ------------ | --------- | ------- | ---------------------------------- |
+| `products`   | `number`  | `90`    | Products to generate               |
+| `dryRun`     | `boolean` | `false` | Preview only, no Shopware changes  |
+| `noTemplate` | `boolean` | `false` | Skip pre-generated template lookup |
 
 The `generate` function:
 
@@ -120,7 +124,7 @@ const lines = await fixThemeImages("music", blueprint, cache, "logo", false);
 `THEME_MEDIA_KEYS` — the three supported theme media keys:
 
 ```typescript
-["store-logo", "store-favicon", "store-share"]
+["store-logo", "store-favicon", "store-share"];
 ```
 
 Internal helpers (exported for testing):
@@ -133,7 +137,11 @@ Internal helpers (exported for testing):
 Factory for creating the `ProcessorDeps` bundle (API helpers + AI providers) needed to run post-processors. Replaces repeated bootstrap code that was duplicated across services and tools.
 
 ```typescript
-import { createProcessorDeps, ProcessorDepsConfig, ProcessorDeps } from "./services/shopware-context.js";
+import {
+    createProcessorDeps,
+    ProcessorDepsConfig,
+    ProcessorDeps,
+} from "./services/shopware-context.js";
 
 const deps = createProcessorDeps({
     baseURL: process.env.SW_ENV_URL,
@@ -151,12 +159,12 @@ const deps = createProcessorDeps({
 
 `ProcessorDepsConfig`:
 
-| Field            | Type           | Description                                    |
-| ---------------- | -------------- | ---------------------------------------------- |
-| `baseURL`        | `string`       | Shopware Admin API base URL                    |
-| `getAccessToken` | `TokenGetter`  | Returns current access token                   |
-| `clientId`       | `string?`      | OAuth client ID (for client credentials flow)  |
-| `clientSecret`   | `string?`      | OAuth client secret                            |
-| `username`       | `string?`      | Admin username (for password flow)             |
-| `password`       | `string?`      | Admin password                                 |
-| `skipProviders`  | `boolean?`     | Skip AI provider creation (cleanup-only flows) |
+| Field            | Type          | Description                                    |
+| ---------------- | ------------- | ---------------------------------------------- |
+| `baseURL`        | `string`      | Shopware Admin API base URL                    |
+| `getAccessToken` | `TokenGetter` | Returns current access token                   |
+| `clientId`       | `string?`     | OAuth client ID (for client credentials flow)  |
+| `clientSecret`   | `string?`     | OAuth client secret                            |
+| `username`       | `string?`     | Admin username (for password flow)             |
+| `password`       | `string?`     | Admin password                                 |
+| `skipProviders`  | `boolean?`    | Skip AI provider creation (cleanup-only flows) |

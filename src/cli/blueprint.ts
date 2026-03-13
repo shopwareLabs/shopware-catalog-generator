@@ -16,7 +16,7 @@ import { logger } from "../utils/index.js";
 
 // Re-export for backwards compatibility with tests
 export { resolveCmsStoreDescription };
-import { CLIError, requireValidName } from "./shared.js";
+import { CLIError, requireValidName, throwIfServiceError } from "./shared.js";
 
 export async function blueprintCreate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
@@ -49,10 +49,7 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
         force: forceHydration,
     });
 
-    // Check for error response
-    if (lines.length === 1 && lines[0]?.startsWith("Error:")) {
-        throw new CLIError(lines[0].slice("Error: ".length), "HYDRATE_FAILED");
-    }
+    throwIfServiceError(lines, "HYDRATE_FAILED");
 
     for (const line of lines) {
         console.log(line);
@@ -64,9 +61,7 @@ export async function blueprintFix(args: CliArgs): Promise<void> {
 
     const lines = await fixBlueprint(salesChannelName);
 
-    if (lines.length === 1 && lines[0]?.startsWith("Error:")) {
-        throw new CLIError(lines[0].slice("Error: ".length), "FIX_FAILED");
-    }
+    throwIfServiceError(lines, "FIX_FAILED");
 
     for (const line of lines) {
         console.log(line);

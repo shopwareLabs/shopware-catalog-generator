@@ -43,6 +43,21 @@ export interface CliArgs {
 }
 
 // =============================================================================
+// Service Output Helpers
+// =============================================================================
+
+/**
+ * Throw a CLIError if any line in a service response starts with "Error:".
+ * All CLI wrappers call this immediately after receiving lines from a service function.
+ */
+export function throwIfServiceError(lines: string[], code: string): void {
+    const errorLine = lines.find((l) => l.startsWith("Error:"));
+    if (errorLine) {
+        throw new CLIError(errorLine.slice("Error: ".length), code);
+    }
+}
+
+// =============================================================================
 // Validation Helpers
 // =============================================================================
 

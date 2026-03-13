@@ -13,7 +13,12 @@ import {
     fixProductImages,
     fixThemeImages,
 } from "../services/image-fix-service.js";
-import { CLIError, requireHydratedBlueprint, requireValidName } from "./shared.js";
+import {
+    CLIError,
+    requireHydratedBlueprint,
+    requireValidName,
+    throwIfServiceError,
+} from "./shared.js";
 
 type ImageFixType = "product" | "category" | "cms" | "theme";
 
@@ -58,6 +63,8 @@ export async function imageFixCommand(args: CliArgs): Promise<void> {
             lines = await fixCmsImages(salesChannelName, blueprint, cache, args.target, dryRun);
         }
     }
+
+    throwIfServiceError(lines, "IMAGE_FIX_FAILED");
 
     for (const line of lines) {
         console.log(line);

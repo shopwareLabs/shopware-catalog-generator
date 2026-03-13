@@ -39,10 +39,10 @@ interface PostProcessorContext {
     salesChannelId: string;
     salesChannelName: string;
     blueprint: HydratedBlueprint;
-    cache: DataCacheApi;        // Cache API interface (not the full DataCache class)
+    cache: DataCacheApi; // Cache API interface (not the full DataCache class)
     textProvider?: TextProvider;
     imageProvider?: ImageProvider;
-    api: ShopwareApiHelpers;    // Required — always use this for API calls
+    api: ShopwareApiHelpers; // Required — always use this for API calls
     options: PostProcessorOptions;
 }
 ```
@@ -53,7 +53,7 @@ interface PostProcessorContext {
 
 ```typescript
 interface PostProcessorOptions {
-    batchSize: number;           // Batch size for parallel operations (default: 5)
+    batchSize: number; // Batch size for parallel operations (default: 5)
     dryRun: boolean;
     activeProcessors?: string[]; // List of selected processors for conditional rendering
 }
