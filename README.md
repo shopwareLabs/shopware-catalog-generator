@@ -50,6 +50,16 @@ bun run generate --name=music --no-template
 
 Templates require git access via SSH keys or credential helper.
 
+### Maintaining the Templates Repository
+
+When regenerating all templates, squash the history to keep the repo size small. A maintenance script is included for this:
+
+```bash
+bash scripts/reset-templates-history.sh /path/to/shopware-catalog-templates
+```
+
+This creates a fresh single commit, cleans up all stale refs, and repackages the objects to the minimum possible size. Afterwards, a force-push is required.
+
 ## AI Providers & Performance
 
 | Provider        | API Key  | Images | Parallel        | Best For                 |
