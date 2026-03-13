@@ -131,11 +131,12 @@ describe("PromotionProcessor", () => {
             expect(discounts[0]?.value).toBe(100);
         });
 
-        test("skips existing promotions", async () => {
+        test("skips existing promotions and links them to SalesChannel", async () => {
             const { context, mockApi } = createTestContext();
+            // Mock by code (new lookup strategy)
             mockApi.mockSearchResponse("promotion", [
-                { id: "existing-1", name: "Welcome Discount" },
-                { id: "existing-2", name: "Summer Sale" },
+                { id: "existing-1", code: "WELCOME10" },
+                { id: "existing-2", code: "SUMMER20" },
             ]);
 
             const result = await PromotionProcessor.process(context);
@@ -144,15 +145,16 @@ describe("PromotionProcessor", () => {
             expect(result.skipped).toBe(2);
             expect(result.errors).toEqual([]);
 
+            // 2 new promotions created + 2 SalesChannel link syncs for existing ones
             const syncCalls = mockApi.getCallsByEndpoint("_action/sync");
-            expect(syncCalls.length).toBe(2);
+            expect(syncCalls.length).toBe(4);
         });
 
         test("is fully idempotent when all promotions exist", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSearchResponse(
                 "promotion",
-                PROMOTIONS.map((p, i) => ({ id: `existing-${i}`, name: p.name }))
+                PROMOTIONS.map((p, i) => ({ id: `existing-${i}`, code: p.code }))
             );
 
             const result = await PromotionProcessor.process(context);
@@ -160,8 +162,9 @@ describe("PromotionProcessor", () => {
             expect(result.processed).toBe(0);
             expect(result.skipped).toBe(PROMOTIONS.length);
 
+            // Only SalesChannel link syncs, no promotion creation syncs
             const syncCalls = mockApi.getCallsByEndpoint("_action/sync");
-            expect(syncCalls.length).toBe(0);
+            expect(syncCalls.length).toBe(PROMOTIONS.length);
         });
 
         test("handles API error gracefully", async () => {

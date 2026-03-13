@@ -1,7 +1,7 @@
 /**
  * Currency resolution utilities for post-processors.
  *
- * Finds the system base currency (factor = 1) — the same currency that
+ * Finds the system base currency — the same currency that
  * ShopwareHydrator.getCurrencyId() defaults to and that product prices use.
  * This ensures variant and digital product prices pass Shopware's
  * PriceFieldSerializer validation ("No price for default currency defined").
@@ -12,24 +12,22 @@ import type { ShopwareApi } from "../shopware/api-helpers.js";
 import { logger } from "../utils/index.js";
 
 /**
- * Resolve the primary currency ID for a SalesChannel.
+ * Resolve the primary currency ID used for product prices.
  *
- * Matches the currency used by the main product sync (ShopwareHydrator.getCurrencyId):
+ * Must match the currency used by ShopwareHydrator.getCurrencyId() (defaults to EUR)
+ * so that variant/digital-product prices are consistent with their parent products.
  *
- *   1. System base currency (factor = 1) — what Shopware uses as the default for
- *      price validation; EUR in a standard installation
- *   2. The SalesChannel's own configured currency — last resort
+ * Resolution order:
+ *   1. System base currency (factor = 1) — EUR in a standard Shopware installation
+ *   2. EUR by ISO code — fallback matching ShopwareHydrator.getCurrencyId() default
  *
- * Note: USD is intentionally NOT prioritised here. Even though the SalesChannel
- * is created with USD as a secondary currency, product prices must be expressed
- * in the system base currency or Shopware will reject the sync with
- * "No price for default currency defined".
+ * The SalesChannel's configured currency is intentionally NOT used as a fallback:
+ * SalesChannels are created with USD as their primary currency, but product prices
+ * are always expressed in the system base currency (EUR). Using USD would cause
+ * Shopware to reject variant syncs with "No price for default currency defined".
  */
-export async function resolvePrimaryCurrencyId(
-    api: ShopwareApi,
-    salesChannelId: string
-): Promise<string> {
-    // Find the system base currency (factor = 1) — this is the default for product prices
+export async function resolvePrimaryCurrencyId(api: ShopwareApi): Promise<string> {
+    // Try system base currency first (factor = 1, typically EUR)
     const baseCurrencies = await api
         .searchEntities<{ id: string }>(
             "currency",
@@ -40,15 +38,7 @@ export async function resolvePrimaryCurrencyId(
 
     if (baseCurrencies[0]?.id) return baseCurrencies[0].id;
 
-    logger.warn("Base currency (factor=1) not found — falling back to SalesChannel currency");
-
-    const [sc] = await api.searchEntities<{ currencyId: string }>(
-        "sales_channel",
-        [{ type: "equals", field: "id", value: salesChannelId }],
-        { limit: 1 }
-    );
-
-    if (sc?.currencyId) return sc.currencyId;
-
-    throw new Error("No currency found: base currency and SalesChannel lookup all failed");
+    // Fall back to EUR by ISO code — matches ShopwareHydrator.getCurrencyId() default
+    logger.warn("Base currency (factor=1) not found — falling back to EUR");
+    return api.getCurrencyId("EUR");
 }

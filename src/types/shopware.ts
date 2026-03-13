@@ -146,6 +146,8 @@ export interface ProductVisibilityPayload {
 
 /** Tiered price entry for quantity-based pricing */
 export interface TieredPricePayload {
+    /** Deterministic UUID derived from productId + tier index — enables idempotent upserts */
+    id: string;
     ruleId: string;
     quantityStart: number;
     quantityEnd?: number;

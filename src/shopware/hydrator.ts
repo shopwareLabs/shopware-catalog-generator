@@ -502,11 +502,17 @@ export class ShopwareHydrator extends ShopwareClient {
                 product.properties = p.options.map((option) => ({ id: option.id }));
             }
 
-            // Graduated/tiered pricing via product_price entities
+            // Graduated/tiered pricing via product_price entities.
+            // IDs are derived deterministically from the product UUID so re-syncs
+            // upsert the existing rows instead of appending duplicates.
             if (p.hasTieredPricing && ruleId) {
                 const round = (v: number): number => Math.round(v * 100) / 100;
+                // Replace last hex digit of product UUID with tier index (0-f).
+                // Guarantees a stable, valid UUID for up to 16 tiers per product.
+                const tierId = (i: number): string => p.id.slice(0, -1) + i.toString(16);
                 const tieredPrices: TieredPricePayload[] = [
                     {
+                        id: tierId(0),
                         ruleId,
                         quantityStart: 1,
                         quantityEnd: 9,
@@ -520,6 +526,7 @@ export class ShopwareHydrator extends ShopwareClient {
                         ],
                     },
                     {
+                        id: tierId(1),
                         ruleId,
                         quantityStart: 10,
                         quantityEnd: 49,
@@ -533,6 +540,7 @@ export class ShopwareHydrator extends ShopwareClient {
                         ],
                     },
                     {
+                        id: tierId(2),
                         ruleId,
                         quantityStart: 50,
                         price: [

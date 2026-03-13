@@ -4,90 +4,62 @@ import { resolvePrimaryCurrencyId } from "../../../src/post-processors/currency-
 import { createMockApiHelpers } from "../../mocks/index.js";
 
 describe("resolvePrimaryCurrencyId", () => {
-    test("returns USD when USD is available", async () => {
+    test("returns base currency (factor=1) when found", async () => {
         const mockApi = createMockApiHelpers();
+        mockApi.mockSearchResponse("currency", [{ id: "eur-id" }]);
 
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            if (isoCode === "USD") return "usd-id";
-            if (isoCode === "EUR") return "eur-id";
-            throw new Error(`Currency "${isoCode}" not found`);
-        };
-
-        const result = await resolvePrimaryCurrencyId(mockApi, "sc-123");
-        expect(result).toBe("usd-id");
-    });
-
-    test("falls back to EUR when USD is missing", async () => {
-        const mockApi = createMockApiHelpers();
-
-        // USD throws (not found), EUR succeeds
-        let callCount = 0;
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            callCount++;
-            if (isoCode === "USD") throw new Error('Currency "USD" not found');
-            if (isoCode === "EUR") return "eur-id";
-            throw new Error(`Currency "${isoCode}" not found`);
-        };
-
-        const result = await resolvePrimaryCurrencyId(mockApi, "sc-123");
+        const result = await resolvePrimaryCurrencyId(mockApi);
         expect(result).toBe("eur-id");
-        expect(callCount).toBe(2);
     });
 
-    test("falls back to SalesChannel currency when both USD and EUR are missing", async () => {
+    test("falls back to EUR by ISO code when factor=1 search returns nothing", async () => {
         const mockApi = createMockApiHelpers();
+        mockApi.mockSearchResponse("currency", []);
+        mockApi.getCurrencyId = async (): Promise<string> => "eur-id";
 
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            throw new Error(`Currency "${isoCode}" not found`);
+        const result = await resolvePrimaryCurrencyId(mockApi);
+        expect(result).toBe("eur-id");
+    });
+
+    test("falls back to EUR by ISO code when factor=1 search throws", async () => {
+        const mockApi = createMockApiHelpers();
+        // Simulate searchEntities throwing for factor filter
+        mockApi.searchEntities = async (entity: string) => {
+            if (entity === "currency") throw new Error("field not searchable");
+            return [];
         };
-        mockApi.mockSearchResponse("sales_channel", [{ id: "sc-123", currencyId: "chf-id" }]);
+        mockApi.getCurrencyId = async (): Promise<string> => "eur-id";
 
-        const result = await resolvePrimaryCurrencyId(mockApi, "sc-123");
-        expect(result).toBe("chf-id");
+        const result = await resolvePrimaryCurrencyId(mockApi);
+        expect(result).toBe("eur-id");
     });
 
-    test("throws when USD, EUR, and SalesChannel lookup all fail", async () => {
+    test("falls back to getCurrencyId with EUR iso code", async () => {
         const mockApi = createMockApiHelpers();
+        mockApi.mockSearchResponse("currency", []);
 
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            throw new Error(`Currency "${isoCode}" not found`);
-        };
-        mockApi.mockSearchResponse("sales_channel", []);
-
-        await expect(resolvePrimaryCurrencyId(mockApi, "sc-123")).rejects.toThrow(
-            "No currency found"
-        );
-    });
-
-    test("prefers USD over EUR when both are available", async () => {
-        const mockApi = createMockApiHelpers();
-
-        let callCount = 0;
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            callCount++;
-            if (isoCode === "USD") return "usd-id";
-            if (isoCode === "EUR") return "eur-id";
-            throw new Error(`Currency "${isoCode}" not found`);
-        };
-
-        const result = await resolvePrimaryCurrencyId(mockApi, "sc-123");
-        expect(result).toBe("usd-id");
-        expect(callCount).toBe(2);
-    });
-
-    test("lookups run in parallel (both called even when USD succeeds)", async () => {
-        const mockApi = createMockApiHelpers();
         const calledWith: string[] = [];
-
-        mockApi.getCurrencyId = async (isoCode?: string): Promise<string> => {
-            calledWith.push(isoCode ?? "EUR");
-            if (isoCode === "USD") return "usd-id";
-            if (isoCode === "EUR") return "eur-id";
-            throw new Error(`Currency "${isoCode}" not found`);
+        mockApi.getCurrencyId = async (isoCode = "EUR"): Promise<string> => {
+            calledWith.push(isoCode);
+            return "eur-id";
         };
 
-        await resolvePrimaryCurrencyId(mockApi, "sc-123");
-        expect(calledWith).toContain("USD");
-        expect(calledWith).toContain("EUR");
+        await resolvePrimaryCurrencyId(mockApi);
+        expect(calledWith).toEqual(["EUR"]);
+    });
+
+    test("does not call getCurrencyId when factor=1 currency is found", async () => {
+        const mockApi = createMockApiHelpers();
+        mockApi.mockSearchResponse("currency", [{ id: "base-id" }]);
+
+        let getCurrencyCalled = false;
+        mockApi.getCurrencyId = async (): Promise<string> => {
+            getCurrencyCalled = true;
+            return "eur-id";
+        };
+
+        const result = await resolvePrimaryCurrencyId(mockApi);
+        expect(result).toBe("base-id");
+        expect(getCurrencyCalled).toBe(false);
     });
 });

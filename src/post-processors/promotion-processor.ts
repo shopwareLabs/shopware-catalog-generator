@@ -53,12 +53,24 @@ class PromotionProcessorImpl implements PostProcessor {
             return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
         }
 
-        const existingPromotions = await this.findExistingPromotions(context);
+        const existingByCode = await this.findExistingPromotionsByCode(context);
 
         for (const promo of PROMOTIONS) {
-            if (existingPromotions.has(promo.name)) {
-                logger.info(`    ⊘ Promotion "${promo.name}" already exists`, { cli: true });
-                skipped++;
+            const existingId = existingByCode.get(promo.code);
+
+            if (existingId) {
+                // Promotion code already exists — associate it with this SalesChannel
+                try {
+                    await this.addSalesChannelToPromotion(context, existingId, salesChannelId);
+                    logger.info(
+                        `    ⊘ Promotion "${promo.name}" already exists — linked to SalesChannel`,
+                        { cli: true }
+                    );
+                    skipped++;
+                } catch (error) {
+                    const msg = error instanceof Error ? error.message : String(error);
+                    errors.push(`Failed to link promotion "${promo.name}" to SalesChannel: ${msg}`);
+                }
                 continue;
             }
 
@@ -177,20 +189,45 @@ class PromotionProcessorImpl implements PostProcessor {
         };
     }
 
-    private async findExistingPromotions(context: PostProcessorContext): Promise<Set<string>> {
-        if (!context.api) return new Set();
+    /** Returns a map of promotion code → promotion ID for all known promo codes. */
+    private async findExistingPromotionsByCode(
+        context: PostProcessorContext
+    ): Promise<Map<string, string>> {
+        if (!context.api) return new Map();
 
         try {
-            const promotionNames = PROMOTIONS.map((p) => p.name);
-            const promotions = await context.api.searchEntities<{ id: string; name: string }>(
+            const codes = PROMOTIONS.map((p) => p.code);
+            const promotions = await context.api.searchEntities<{ id: string; code: string }>(
                 "promotion",
-                [{ type: "equalsAny", field: "name", value: promotionNames.join("|") }],
-                { includes: { promotion: ["id", "name"] }, limit: 50 }
+                [{ type: "equalsAny", field: "code", value: codes }],
+                { includes: { promotion: ["id", "code"] }, limit: 50 }
             );
-            return new Set(promotions.map((p) => p.name));
+            return new Map(promotions.map((p) => [p.code, p.id]));
         } catch {
-            return new Set();
+            return new Map();
         }
+    }
+
+    /** Add a SalesChannel association to an existing promotion (idempotent). */
+    private async addSalesChannelToPromotion(
+        context: PostProcessorContext,
+        promotionId: string,
+        salesChannelId: string
+    ): Promise<void> {
+        await context.api!.syncEntities({
+            [`${PROMOTION_PREFIX}-sc-link`]: {
+                entity: "promotion_sales_channel",
+                action: "upsert",
+                payload: [
+                    {
+                        id: generateUUID(),
+                        promotionId,
+                        salesChannelId,
+                        priority: 1,
+                    },
+                ],
+            },
+        });
     }
 }
 

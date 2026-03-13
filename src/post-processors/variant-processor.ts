@@ -245,10 +245,7 @@ class VariantProcessorImpl implements PostProcessor {
      */
     private async getCurrencyId(context: PostProcessorContext): Promise<string> {
         if (this.resolvedCurrencyId) return this.resolvedCurrencyId;
-        this.resolvedCurrencyId = await resolvePrimaryCurrencyId(
-            context.api,
-            context.salesChannelId
-        );
+        this.resolvedCurrencyId = await resolvePrimaryCurrencyId(context.api);
         return this.resolvedCurrencyId;
     }
 

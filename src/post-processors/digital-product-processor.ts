@@ -367,7 +367,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
     ): Promise<string | null> {
         const productId = generateUUID();
         const deliveryTimeId = await this.getInstantDeliveryTimeId(context);
-        const currencyId = await resolvePrimaryCurrencyId(context.api, context.salesChannelId);
+        const currencyId = await resolvePrimaryCurrencyId(context.api);
 
         try {
             const payload: ProductSyncPayload = {
