@@ -92,8 +92,8 @@ git reflog expire --expire=now --all
 echo "=== Repacking (lean clone strategy) ==="
 TMPDIR_LEAN="$(mktemp -d)"
 git clone --no-local --bare "file://$(pwd)" "$TMPDIR_LEAN/lean.git" 2>/dev/null
-cp "$TMPDIR_LEAN/lean.git/objects/pack/"* .git/objects/pack/
 rm -f .git/objects/pack/pack-*.pack .git/objects/pack/pack-*.idx .git/objects/pack/pack-*.rev
+cp "$TMPDIR_LEAN/lean.git/objects/pack/"* .git/objects/pack/
 rm -rf "$TMPDIR_LEAN"
 
 echo ""
