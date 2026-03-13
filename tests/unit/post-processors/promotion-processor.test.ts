@@ -194,7 +194,10 @@ describe("PromotionProcessor", () => {
                 return ids;
             };
 
-            const [firstRun, secondRun] = await Promise.all([runAndCollectIds(), runAndCollectIds()]);
+            const [firstRun, secondRun] = await Promise.all([
+                runAndCollectIds(),
+                runAndCollectIds(),
+            ]);
             expect(firstRun.length).toBeGreaterThan(0);
             expect(firstRun).toEqual(secondRun);
         });

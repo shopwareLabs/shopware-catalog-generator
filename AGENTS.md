@@ -1064,7 +1064,7 @@ bun run blueprint hydrate --name=music
 # Phase 2b: Selective re-hydration (preserves product names for image stability)
 bun run blueprint hydrate --name=music --only=categories  # Categories only
 bun run blueprint hydrate --name=music --only=properties  # Properties only
-bun run blueprint hydrate --name=music --force            # Full re-hydration
+bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
 bun run blueprint fix --name=music
@@ -1094,7 +1094,7 @@ bun run blueprint create \
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
   --only=MODE              # Selective: "categories", "properties", or "cms"
-  --force                  # Force full re-hydration (changes names, triggers image regen)
+  --rehydrate              # Force full re-hydration (changes names, triggers image regen)
 ```
 
 Hydration modes:
@@ -1103,9 +1103,9 @@ Hydration modes:
 - **--only=categories**: Only update category names/descriptions, preserve all product data
 - **--only=properties**: Only update product properties, preserve names (for image stability)
 - **--only=cms**: Only hydrate CMS blueprint text (`cms-blueprint.json`)
-- **--force**: Force full re-hydration even if hydrated blueprint exists
+- **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
-Safety: If hydrated blueprint exists, requires `--only` or `--force` to prevent accidental name changes.
+Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
 
 ### Generate Options
 

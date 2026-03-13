@@ -38,7 +38,7 @@ export interface CliArgs {
     only?: string[];
     dryRun?: boolean;
     noTemplate?: boolean;
-    force?: boolean;
+    rehydrate?: boolean;
     type?: string;
 }
 

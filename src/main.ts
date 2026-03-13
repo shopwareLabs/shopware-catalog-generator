@@ -67,7 +67,7 @@ function parseCliArgs(): CliArgs {
         only: flags.only ? (flags.only as string).split(",") : undefined,
         dryRun: flags["dry-run"] === true,
         noTemplate: flags["no-template"] === true,
-        force: flags.force === true,
+        rehydrate: flags.rehydrate === true,
         type: flags.type as string | undefined,
     };
 }
@@ -96,9 +96,9 @@ Options:
   --only=<list>         Comma-separated list:
                         - For 'process': processor names (images, manufacturers, etc.)
                         - For 'blueprint hydrate': categories or properties
-  --force               Force full re-hydration (overwrites existing, changes product names)
+  --rehydrate           [blueprint hydrate only] Force full re-hydration (overwrites existing, changes product names)
   --dry-run             Log actions without executing
-  --no-template         Skip checking for pre-generated templates
+  --no-template         [generate only] Skip checking for pre-generated templates
   -i, --interactive     Run interactive wizard
 
 Examples:
@@ -106,7 +106,7 @@ Examples:
   bun run src/main.ts blueprint hydrate --name=furniture
   bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
   bun run src/main.ts blueprint hydrate --name=furniture --only=properties  # Properties only
-  bun run src/main.ts blueprint hydrate --name=furniture --force            # Full re-hydration
+  bun run src/main.ts blueprint hydrate --name=furniture --rehydrate        # Full re-hydration
   bun run src/main.ts blueprint fix --name=furniture
   bun run src/main.ts generate --name=furniture --description="Wood furniture store"
   bun run src/main.ts process --name=furniture --only=images,manufacturers

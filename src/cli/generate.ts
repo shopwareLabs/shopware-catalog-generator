@@ -28,7 +28,7 @@ export async function generate(args: CliArgs): Promise<void> {
     const lines = await generateService(salesChannelName, description, {
         products: args.products,
         dryRun: args.dryRun,
-        noTemplate: args.noTemplate || args.force, // --force implies --no-template
+        noTemplate: args.noTemplate,
     });
 
     // Check for error response before printing (mirrors processCommand)

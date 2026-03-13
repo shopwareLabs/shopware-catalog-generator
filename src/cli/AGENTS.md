@@ -82,11 +82,11 @@ Phase 2: Fill blueprint with AI-generated content (names, descriptions, properti
 bun run blueprint hydrate --name=music
 ```
 
-| Flag      | Type   | Default            | Description                                                          |
-| --------- | ------ | ------------------ | -------------------------------------------------------------------- |
-| `--name`  | string | _(required)_       | SalesChannel name                                                    |
-| `--only`  | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`                 |
-| `--force` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names) |
+| Flag          | Type   | Default            | Description                                                          |
+| ------------- | ------ | ------------------ | -------------------------------------------------------------------- |
+| `--name`      | string | _(required)_       | SalesChannel name                                                    |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`                 |
+| `--rehydrate` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names) |
 
 #### Hydration Modes
 
@@ -96,9 +96,9 @@ bun run blueprint hydrate --name=music
 | `--only=categories`        | Only update category names/descriptions, preserve product data |
 | `--only=properties`        | Only update product properties, preserve names (image-stable)  |
 | `--only=cms`               | Only hydrate CMS blueprint text (`cms-blueprint.json`)         |
-| `--force`                  | Force full re-hydration even if hydrated blueprint exists      |
+| `--rehydrate`              | Force full re-hydration even if hydrated blueprint exists      |
 
-If a hydrated blueprint already exists, `--only` or `--force` is required to prevent accidental name changes.
+If a hydrated blueprint already exists, `--only` or `--rehydrate` is required to prevent accidental name changes.
 
 **Output:** `generated/sales-channels/{name}/hydrated-blueprint.json`
 

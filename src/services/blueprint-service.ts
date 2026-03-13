@@ -71,7 +71,7 @@ export async function hydrateBlueprint(
         return [
             `Error: Hydrated blueprint already exists for "${salesChannelName}". ` +
                 `Re-hydrating will change product names and trigger image regeneration. ` +
-                `Use --only=categories, --only=properties, or --force.`,
+                `Use --only=categories, --only=properties, or --rehydrate.`,
         ];
     }
 
@@ -179,7 +179,7 @@ export async function hydrateBlueprint(
         hydrateOnly
             ? `Mode: ${hydrateOnly} only`
             : forceHydration
-              ? `Mode: full (--force)`
+              ? `Mode: full (--rehydrate)`
               : `Mode: full`,
         `Log file: ${logger.getLogFile()}`,
         ``,

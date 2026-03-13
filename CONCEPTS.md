@@ -168,10 +168,10 @@ Phase 2 supports selective re-hydration to update specific parts without changin
 bun run blueprint hydrate --name=music --only=categories   # Categories only
 bun run blueprint hydrate --name=music --only=properties   # Properties only
 bun run blueprint hydrate --name=music --only=cms          # CMS text only
-bun run blueprint hydrate --name=music --force             # Full re-hydration
+bun run blueprint hydrate --name=music --rehydrate         # Full re-hydration
 ```
 
-If a hydrated blueprint already exists, `--only` or `--force` is required to prevent accidental name changes (which would invalidate cached images).
+If a hydrated blueprint already exists, `--only` or `--rehydrate` is required to prevent accidental name changes (which would invalidate cached images).
 
 ---
 
@@ -446,50 +446,59 @@ Post-processors run after the main upload for resource-intensive tasks.
 Processors can declare dependencies to control execution order:
 
 ```
-       ┌──────────────────────────────────────────────────┐
-       │           NO DEPENDENCIES (parallel)             │
-       │                                                  │
-       │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ │
-       │  │ cms-*   │ │ Images  │ │Manufact-│ │ Reviews │ │
-       │  │(6 procs)│ │         │ │  urers  │ │         │ │
-       │  └─────────┘ └─────────┘ └────┬────┘ └─────────┘ │
-       │                               │                  │
-       └───────────────────────────────┼──────────────────┘
-                                       │ depends on
-                                       ▼
-                               ┌─────────────┐
-                               │  Variants   │
-                               └──────┬──────┘
-                                      │ depends on
-                                      ▼
-                              ┌───────────────┐
-                              │digital-product│
-                              └───────┬───────┘
-                                      │ depends on
-                                      ▼
-                              ┌───────────────┐
-                              │  cms-testing  │
-                              └───────────────┘
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │                    NO DEPENDENCIES (parallel)                        │
+  │                                                                      │
+  │  ┌──────────┐  ┌────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐  │
+  │  │ cms-text │  │ Images │  │Manufactu-│  │ Reviews │  │  Theme   │  │
+  │  │ cms-video│  │        │  │  rers    │  │         │  │          │  │
+  │  │ cms-img  │  │        │  │          │  │         │  │          │  │
+  │  │ cms-form │  │        │  │          │  │         │  │          │  │
+  │  │ cms-foot │  │        │  │          │  │         │  │          │  │
+  │  │ cms-ti   │  │        │  │          │  │         │  │          │  │
+  │  │customers │  │        │  │          │  │         │  │          │  │
+  │  │promotions│  │        │  │          │  │         │  │          │  │
+  │  │cross-sell│  │        │  │          │  │         │  │          │  │
+  │  │ digital  │  │        │  │          │  │         │  │          │  │
+  │  └──────────┘  └───┬────┘  └────┬─────┘  └─────────┘  └──────────┘  │
+  └───────────────────┼─────────────┼────────────────────────────────────┘
+                      │             │ depends on
+                      │             ▼
+                      │     ┌─────────────┐
+                      │     │  Variants   │
+                      │     └─────────────┘
+                      │
+                      ▼ (cms-commerce depends on images)
+              ┌───────────────┐
+              │  cms-commerce │
+              └───────────────┘
+
+  cms-home depends on: customers, promotions, cross-selling
+  cms-testing depends on: all cms-*, digital-product
 ```
 
 ### Available Processors
 
-| Processor          | Description                          | Dependencies            |
-| ------------------ | ------------------------------------ | ----------------------- |
-| `cms-home`         | Homepage layout with product listing | None                    |
-| `cms-text`         | Text elements demo page              | None                    |
-| `cms-images`       | Image elements demo page             | None                    |
-| `cms-video`        | Video elements demo page             | None                    |
-| `cms-text-images`  | Text & Images demo page              | None                    |
-| `cms-commerce`     | Commerce elements demo page          | images                  |
-| `cms-form`         | Form elements demo page              | None                    |
-| `cms-footer-pages` | Shared footer and legal pages        | None                    |
-| `images`           | Product and category images          | None                    |
-| `manufacturers`    | Fictional manufacturer creation      | None                    |
-| `reviews`          | Product reviews (0-10 per product)   | None                    |
-| `variants`         | Variant product creation             | manufacturers           |
-| `digital-product`  | Digital product (Gift Card)          | none                    |
-| `cms-testing`      | Testing category hierarchy           | cms-\*, digital-product |
+| Processor          | Description                              | Dependencies                         |
+| ------------------ | ---------------------------------------- | ------------------------------------ |
+| `cms-home`         | Homepage layout with product listing     | customers, promotions, cross-selling |
+| `cms-text`         | Text elements demo page                  | None                                 |
+| `cms-images`       | Image elements demo page                 | None                                 |
+| `cms-video`        | Video elements demo page                 | None                                 |
+| `cms-text-images`  | Text & Images demo page                  | None                                 |
+| `cms-commerce`     | Commerce elements demo page              | images                               |
+| `cms-form`         | Form elements demo page                  | None                                 |
+| `cms-footer-pages` | Shared footer and legal pages            | None                                 |
+| `cross-selling`    | Category-based cross-selling streams     | None                                 |
+| `customers`        | Demo customer accounts with B2B group    | None                                 |
+| `images`           | Product and category images              | None                                 |
+| `manufacturers`    | Fictional manufacturer creation          | None                                 |
+| `promotions`       | Demo promotion codes                     | None                                 |
+| `reviews`          | Product reviews (0-10 per product)       | None                                 |
+| `theme`            | Child theme with brand colors and media  | None                                 |
+| `variants`         | Variant product creation                 | manufacturers                        |
+| `digital-product`  | Digital product (Gift Card)              | None                                 |
+| `cms-testing`      | Testing category hierarchy               | cms-\*, digital-product              |
 
 ### Testing Page Hierarchy
 
@@ -606,22 +615,32 @@ generated/
 │   ├── color.json                 # Color with hex codes
 │   └── index.json
 └── sales-channels/
-    └── music/                    # Per-SalesChannel data
-        ├── metadata.json          # SalesChannel info
-        ├── blueprint.json         # Phase 1 output
-        ├── hydrated-blueprint.json# Phase 2 output
-        ├── categories.json        # Category tree
-        ├── property-groups.json   # Synced from Shopware
-        ├── manufacturers.json     # Created manufacturers
-        ├── properties/            # Store-specific properties
-        │   ├── material.json      # AI-generated for this store
+    └── music/                     # Per-SalesChannel data
+        ├── metadata.json           # SalesChannel info
+        ├── blueprint.json          # Phase 1 output
+        ├── hydrated-blueprint.json # Phase 2 output
+        ├── cms-blueprint.json      # AI-hydrated CMS text
+        ├── categories.json         # Category tree
+        ├── property-groups.json    # Synced from Shopware
+        ├── properties/             # Store-specific properties
+        │   ├── material.json       # AI-generated for this store
         │   ├── style.json
         │   └── index.json
         ├── metadata/
-        │   └── {productId}.json   # Per-product metadata
+        │   └── {productId}.json    # Per-product metadata
         └── images/
-            ├── {productId}-front.webp
-            └── {productId}-front.json
+            ├── product_media/
+            │   └── {productId}.webp
+            ├── category_media/
+            │   └── {categoryId}.webp
+            ├── cms_media/
+            │   └── *.webp
+            ├── property_images/
+            │   └── *.webp
+            └── theme_media/
+                ├── store-logo.webp
+                ├── store-favicon.webp
+                └── store-share.webp
 
 logs/
 └── generator-{timestamp}.log      # Detailed logs

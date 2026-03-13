@@ -33,7 +33,7 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
 
     const hydrateOnly = args.only?.[0] as "categories" | "properties" | "cms" | undefined;
-    const forceHydration = args.force === true;
+    const forceHydration = args.rehydrate === true;
 
     if (hydrateOnly && !["categories", "properties", "cms"].includes(hydrateOnly)) {
         throw new CLIError(

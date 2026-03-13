@@ -50,7 +50,7 @@ export function registerBlueprintTools(server: FastMCP): void {
         name: "blueprint_hydrate",
         description:
             "Fill blueprint with AI-generated content (product/category names, descriptions, properties). " +
-            "Supports selective hydration with --only and force re-hydration with --force.",
+            "Supports selective hydration with --only and full re-hydration with --rehydrate.",
         parameters: z.object({
             name: z.string().describe("SalesChannel name"),
             only: z
@@ -60,7 +60,7 @@ export function registerBlueprintTools(server: FastMCP): void {
                     "Selectively hydrate only this part (categories, properties, or cms). " +
                         "Preserves existing product names (important for image stability)."
                 ),
-            force: z
+            rehydrate: z
                 .boolean()
                 .default(false)
                 .describe(
@@ -77,7 +77,7 @@ export function registerBlueprintTools(server: FastMCP): void {
 
             const lines = await hydrateBlueprint(salesChannelName, {
                 only: args.only,
-                force: args.force,
+                force: args.rehydrate,
             });
             return lines.join("\n");
         },
