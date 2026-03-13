@@ -70,7 +70,7 @@ class TemplateFetcher {
 TEMPLATE_REPO_URL=git@github.com:shopwareLabs/shopware-catalog-templates.git
 
 # Local directory for cloning (relative to project root)
-TEMPLATE_CACHE_DIR=.template-repo
+TEMPLATE_CACHE_DIR=.shopware-catalog-templates
 
 # Enable/disable auto-update on each check
 TEMPLATE_AUTO_UPDATE=true

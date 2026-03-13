@@ -1,7 +1,7 @@
 node_modules/
 generatedImages/
 generated/
-.template-repo/
+.shopware-catalog-templates/
 .trash/
 logs/
 tests/logs/

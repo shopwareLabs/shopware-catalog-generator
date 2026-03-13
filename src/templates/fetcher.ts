@@ -17,7 +17,7 @@ import { logger } from "../utils/index.js";
 const DEFAULT_TEMPLATE_REPO_URL = "git@github.com:shopwareLabs/shopware-catalog-templates.git";
 
 /** Default directory for cloning the template repository */
-const DEFAULT_TEMPLATE_CACHE_DIR = ".template-repo";
+const DEFAULT_TEMPLATE_CACHE_DIR = ".shopware-catalog-templates";
 
 /** Configuration options for TemplateFetcher */
 export interface TemplateFetcherOptions {
