@@ -10,21 +10,13 @@ import { FormProcessor } from "../../../../src/post-processors/cms/form-processo
 import { TextImagesProcessor } from "../../../../src/post-processors/cms/text-images-processor.js";
 import { TextProcessor } from "../../../../src/post-processors/cms/text-processor.js";
 import { VideoProcessor } from "../../../../src/post-processors/cms/video-processor.js";
+import { createTestContext } from "../../../helpers/post-processor-context.js";
 
-// Helper to create mock cache
-function createMockCache() {
-    return {
-        getSalesChannelDir: mock(() => "/tmp/test-cache"),
-        loadProductMetadata: mock(() => null),
-        loadCmsBlueprint: mock(() => null),
-    };
-}
-
-// Helper to create mock context
-function createMockContext(
+function createContextWithFetch(
     options: {
         dryRun?: boolean;
         fetchResponses?: Map<string, { ok: boolean; data: unknown }>;
+        cachedImages?: Set<string>;
     } = {}
 ): { context: PostProcessorContext; fetchCalls: Array<{ url: string; method: string }> } {
     const fetchCalls: Array<{ url: string; method: string }> = [];
@@ -55,26 +47,10 @@ function createMockContext(
         } as Response;
     }) as unknown as typeof fetch;
 
-    const context: PostProcessorContext = {
-        salesChannelId: "sc-123",
-        salesChannelName: "test-store",
-        blueprint: {
-            version: "1.0",
-            salesChannel: { name: "test-store", description: "Test store" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
-        },
-        cache: createMockCache() as unknown as PostProcessorContext["cache"],
-        shopwareUrl: "https://test.shopware.com",
-        getAccessToken: async () => "test-token",
-        options: {
-            batchSize: 5,
-            dryRun: options.dryRun || false,
-        },
-    };
+    const { context } = createTestContext({
+        dryRun: options.dryRun,
+        cachedImages: options.cachedImages,
+    });
 
     return { context, fetchCalls };
 }
@@ -107,7 +83,7 @@ describe("TextProcessor", () => {
 
     describe("process", () => {
         test("dry run logs without API calls", async () => {
-            const { context, fetchCalls } = createMockContext({ dryRun: true });
+            const { context, fetchCalls } = createContextWithFetch({ dryRun: true });
 
             const result = await TextProcessor.process(context);
 
@@ -122,7 +98,7 @@ describe("TextProcessor", () => {
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: { success: true } });
-            const { context } = createMockContext({ fetchResponses: responses });
+            const { context } = createContextWithFetch({ fetchResponses: responses });
 
             const result = await TextProcessor.process(context);
             expect(result.processed).toBe(1);
@@ -161,7 +137,7 @@ describe("VideoProcessor", () => {
 
     describe("process", () => {
         test("dry run logs without API calls", async () => {
-            const { context, fetchCalls } = createMockContext({ dryRun: true });
+            const { context, fetchCalls } = createContextWithFetch({ dryRun: true });
 
             const result = await VideoProcessor.process(context);
 
@@ -176,7 +152,7 @@ describe("VideoProcessor", () => {
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: { success: true } });
-            const { context } = createMockContext({ fetchResponses: responses });
+            const { context } = createContextWithFetch({ fetchResponses: responses });
 
             const result = await VideoProcessor.process(context);
             expect(result.processed).toBe(1);
@@ -211,7 +187,7 @@ describe("TextImagesProcessor", () => {
 
     describe("process", () => {
         test("dry run logs without API calls", async () => {
-            const { context, fetchCalls } = createMockContext({ dryRun: true });
+            const { context, fetchCalls } = createContextWithFetch({ dryRun: true });
 
             const result = await TextImagesProcessor.process(context);
 
@@ -230,15 +206,10 @@ describe("TextImagesProcessor", () => {
                 data: { data: [{ id: "existing-cms-media" }] },
             });
             responses.set("_action/sync", { ok: true, data: { success: true } });
-            const { context } = createMockContext({ fetchResponses: responses });
-            context.cache = {
-                ...context.cache,
-                images: {
-                    loadImageForSalesChannel: mock(() => null),
-                    hasImageForSalesChannel: mock(() => false),
-                    saveImageForSalesChannel: mock(() => {}),
-                },
-            } as unknown as PostProcessorContext["cache"];
+            const { context } = createContextWithFetch({
+                fetchResponses: responses,
+                cachedImages: new Set(),
+            });
 
             const result = await TextImagesProcessor.process(context);
             expect(result.processed).toBe(1);
@@ -275,7 +246,7 @@ describe("FormProcessor", () => {
 
     describe("process", () => {
         test("dry run logs without API calls", async () => {
-            const { context, fetchCalls } = createMockContext({ dryRun: true });
+            const { context, fetchCalls } = createContextWithFetch({ dryRun: true });
 
             const result = await FormProcessor.process(context);
 
@@ -290,7 +261,7 @@ describe("FormProcessor", () => {
             responses.set("search/cms-page", { ok: true, data: { data: [] } });
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: { success: true } });
-            const { context } = createMockContext({ fetchResponses: responses });
+            const { context } = createContextWithFetch({ fetchResponses: responses });
 
             const result = await FormProcessor.process(context);
             expect(result.processed).toBe(1);

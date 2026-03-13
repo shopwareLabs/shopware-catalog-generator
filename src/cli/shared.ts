@@ -1,13 +1,11 @@
 /**
- * Shared CLI utilities: error class, validation helpers, post-processor execution.
+ * Shared CLI utilities: error class, validation helpers.
  */
 
 import type { DataCache } from "../cache.js";
 import type { HydratedBlueprint } from "../types/index.js";
 
-import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
-import { createProvidersFromEnv } from "../providers/index.js";
-import { createApiHelpers, createShopwareAdminClient } from "../shopware/index.js";
+import { createShopwareAdminClient } from "../shopware/index.js";
 import { logger, validateSubdomainName } from "../utils/index.js";
 
 // =============================================================================
@@ -35,7 +33,7 @@ export interface CliArgs {
     name?: string;
     description?: string;
     products?: number;
-    product?: string;
+    target?: string;
     interactive?: boolean;
     only?: string[];
     dryRun?: boolean;
@@ -191,97 +189,4 @@ export async function verifyShopwareConnection(
             "SHOPWARE_CONNECTION_FAILED"
         );
     }
-}
-
-// =============================================================================
-// Run Post-Processors
-// =============================================================================
-
-export interface RunProcessorsParams {
-    salesChannelId: string;
-    salesChannelName: string;
-    blueprint: HydratedBlueprint;
-    cache: DataCache;
-    swEnvUrl: string;
-    getAccessToken: () => Promise<string>;
-    processors?: string[];
-    dryRun?: boolean;
-}
-
-export interface ProcessorsSummary {
-    totalProcessed: number;
-    totalErrors: number;
-}
-
-/**
- * Run post-processors with shared setup logic.
- * Used by generate, process, and image-fix commands.
- */
-export async function executePostProcessors(
-    params: RunProcessorsParams
-): Promise<ProcessorsSummary> {
-    const {
-        salesChannelId,
-        salesChannelName,
-        blueprint,
-        cache,
-        swEnvUrl,
-        getAccessToken,
-        processors,
-        dryRun = false,
-    } = params;
-
-    const adminClient = createShopwareAdminClient({
-        baseURL: swEnvUrl,
-        clientId: process.env.SW_CLIENT_ID,
-        clientSecret: process.env.SW_CLIENT_SECRET,
-    });
-    const apiHelpers = createApiHelpers(adminClient, swEnvUrl, getAccessToken);
-
-    const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-    const availableProcessors = registry.getNames();
-    const selectedProcessors = processors || availableProcessors;
-
-    for (const name of selectedProcessors) {
-        if (!registry.has(name)) {
-            throw new Error(
-                `Unknown processor "${name}". Available: ${availableProcessors.join(", ")}`
-            );
-        }
-    }
-
-    console.log(`Running processors: ${selectedProcessors.join(", ")}`);
-    if (dryRun) {
-        console.log("(Dry run mode - no changes will be made)");
-    }
-    console.log();
-
-    const results = await runProcessors(
-        {
-            salesChannelId,
-            salesChannelName,
-            blueprint,
-            cache,
-            textProvider,
-            imageProvider,
-            shopwareUrl: swEnvUrl,
-            getAccessToken,
-            api: apiHelpers,
-            options: {
-                ...DEFAULT_PROCESSOR_OPTIONS,
-                dryRun,
-            },
-        },
-        selectedProcessors
-    );
-
-    let totalProcessed = 0;
-    let totalErrors = 0;
-    for (const result of results) {
-        totalProcessed += result.processed;
-        totalErrors += result.errors.length;
-    }
-
-    return { totalProcessed, totalErrors };
 }

@@ -10,7 +10,8 @@ import { z } from "zod";
 
 import { DataCache } from "../../cache.js";
 import { cleanupProcessors, registry } from "../../post-processors/index.js";
-import { createApiHelpers, createShopwareAdminClient, DataHydrator } from "../../shopware/index.js";
+import { createProcessorDeps } from "../../services/shopware-context.js";
+import { DataHydrator } from "../../shopware/index.js";
 
 export function registerCleanupTools(server: FastMCP): void {
     const processorNames = registry.getNames();
@@ -150,23 +151,19 @@ export function registerCleanupTools(server: FastMCP): void {
                     hydratedAt: new Date().toISOString(),
                 };
 
-                // Create API helpers
-                const adminClient = createShopwareAdminClient({
+                const { apiHelpers } = createProcessorDeps({
                     baseURL: swEnvUrl,
+                    getAccessToken: () => hydrator.getAccessToken(),
                     clientId: process.env.SW_CLIENT_ID,
                     clientSecret: process.env.SW_CLIENT_SECRET,
+                    skipProviders: true,
                 });
-                const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
-                    hydrator.getAccessToken()
-                );
 
                 const context = {
                     salesChannelId,
                     salesChannelName: args.salesChannel,
                     blueprint,
                     cache,
-                    shopwareUrl: swEnvUrl,
-                    getAccessToken: async () => hydrator.getAccessToken(),
                     api: apiHelpers,
                     options: {
                         batchSize: 5,

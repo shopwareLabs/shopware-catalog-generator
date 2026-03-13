@@ -41,6 +41,16 @@ export class ShopwareClient {
     }
 
     /**
+     * Public accessor for the AdminApiClient.
+     * Useful for callers (e.g. E2E scripts) that need the raw client for
+     * operations not covered by the higher-level API helpers.
+     * Throws if not authenticated.
+     */
+    getAdminClient(): AdminApiClient {
+        return this.getClient();
+    }
+
+    /**
      * Execute the sync endpoint with typed payload.
      * GenericRecord from @shopware/api-client omits boolean, but the Shopware API
      * fully supports it for fields like active, visible, private, etc.

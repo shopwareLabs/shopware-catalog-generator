@@ -25,7 +25,7 @@ import {
     VIDEO_ELEMENTS_PAGE,
     WELCOME_PAGE,
 } from "../../fixtures/index.js";
-import { ConcurrencyLimiter, executeWithRetry, logger } from "../../utils/index.js";
+import { ConcurrencyLimiter, cloneDeep, executeWithRetry, logger } from "../../utils/index.js";
 
 /** Maps fixture pages to their processor names */
 const PAGE_PROCESSOR_MAP: Array<{ fixture: CmsPageFixture; processor: string }> = [
@@ -242,7 +242,7 @@ function applyHydratedTexts(
 ): CmsBlueprintPage {
     if (hydratedTexts.length === 0) return page;
 
-    const cloned = JSON.parse(JSON.stringify(page)) as CmsBlueprintPage;
+    const cloned = cloneDeep(page);
 
     for (let i = 0; i < slots.length && i < hydratedTexts.length; i++) {
         const ref = slots[i];

@@ -2,6 +2,9 @@ import { createHash } from "crypto";
 
 import type {
     CategoryNode,
+    MediaEntityPayload,
+    PricePayload,
+    ProductSyncPayload,
     ProductInput,
     ProductReview,
     PropertyGroup,
@@ -9,9 +12,10 @@ import type {
     SalesChannel,
     SalesChannelFull,
     SalesChannelInput,
+    TieredPricePayload,
 } from "../types/index.js";
 import type { Schemas } from "./admin-client.js";
-import type { SearchResult } from "./api-types.js";
+import type { SearchResult, SyncOperation } from "./api-types.js";
 
 import {
     buildCategoryPath,
@@ -289,6 +293,76 @@ export class ShopwareHydrator extends ShopwareClient {
         return propertyGroupsPayload;
     }
 
+    /** Cached "Always valid" rule ID for graduated pricing */
+    private alwaysValidRuleId: string | null | undefined = undefined;
+
+    /**
+     * Get the "Always valid" rule ID for graduated pricing (cached).
+     * Falls back to any available rule if the default is not found.
+     */
+    async getAlwaysValidRuleId(): Promise<string | null> {
+        if (this.alwaysValidRuleId !== undefined) return this.alwaysValidRuleId;
+
+        try {
+            const { data } = await this.getClient().invoke(
+                "searchRule post /search/rule" as never,
+                {
+                    body: {
+                        limit: 10,
+                        sort: [{ field: "priority", order: "DESC" }],
+                    },
+                } as never
+            );
+
+            const rules = (data as { data?: Array<{ id: string; name: string }> })?.data ?? [];
+            const alwaysValid = rules.find(
+                (r) =>
+                    r.name.toLowerCase().includes("always valid") ||
+                    r.name.toLowerCase().includes("always true")
+            );
+            if (!alwaysValid) {
+                logger.warn(
+                    'No "Always valid" / "Always true" rule found in Shopware — tiered pricing will be skipped',
+                    { cli: true }
+                );
+            }
+            this.alwaysValidRuleId = alwaysValid?.id ?? null;
+        } catch {
+            this.alwaysValidRuleId = null;
+        }
+
+        return this.alwaysValidRuleId;
+    }
+
+    /** Cached physical delivery time IDs (excludes instant/digital) */
+    private deliveryTimeIds: string[] | null = null;
+
+    /**
+     * Get delivery time IDs suitable for physical products (cached).
+     * Excludes digital delivery times (min=0, max=0) via API filter.
+     */
+    async getDeliveryTimeIds(): Promise<string[]> {
+        if (this.deliveryTimeIds) return this.deliveryTimeIds;
+
+        try {
+            const { data } = await this.getClient().invoke(
+                "searchDeliveryTime post /search/delivery-time" as never,
+                {
+                    body: {
+                        limit: 10,
+                        filter: [{ type: "range", field: "min", parameters: { gt: 0 } }],
+                    },
+                } as never
+            );
+            const response = data as { data?: Array<{ id: string }> };
+            this.deliveryTimeIds = (response.data ?? []).map((dt) => dt.id);
+        } catch {
+            this.deliveryTimeIds = [];
+        }
+
+        return this.deliveryTimeIds;
+    }
+
     /**
      * Direct product creation with explicit category IDs
      * Used by the new generate flow that passes all category assignments
@@ -302,6 +376,24 @@ export class ShopwareHydrator extends ShopwareClient {
             stock: number;
             categoryIds?: string[];
             options?: Array<{ id: string; name: string }>;
+            hasSalesPrice?: boolean;
+            salePercentage?: number;
+            hasTieredPricing?: boolean;
+            isTopseller?: boolean;
+            isNew?: boolean;
+            isShippingFree?: boolean;
+            weight?: number;
+            width?: number;
+            height?: number;
+            length?: number;
+            ean?: string;
+            manufacturerNumber?: string;
+            minPurchase?: number;
+            maxPurchase?: number;
+            purchaseSteps?: number;
+            metaTitle?: string;
+            metaDescription?: string;
+            deliveryTimeIndex?: number;
         }>,
         salesChannelId: string,
         navigationCategoryId: string
@@ -310,8 +402,14 @@ export class ShopwareHydrator extends ShopwareClient {
             return 0;
         }
 
-        const taxId = await this.getStandardTaxId();
-        const currencyId = await this.getCurrencyId();
+        const hasTieredProducts = products.some((p) => p.hasTieredPricing);
+
+        const [taxId, currencyId, deliveryTimeIds, ruleId] = await Promise.all([
+            this.getStandardTaxId(),
+            this.getCurrencyId(),
+            this.getDeliveryTimeIds(),
+            hasTieredProducts ? this.getAlwaysValidRuleId() : Promise.resolve(null),
+        ]);
 
         const productPayload = products.map((p) => {
             // Build category assignments - include navigation root + all assigned categories
@@ -324,24 +422,34 @@ export class ShopwareHydrator extends ShopwareClient {
                 }
             }
 
-            const product: Record<string, unknown> = {
+            // Build base price entry with optional listPrice for sale items
+            const priceEntry: PricePayload = {
+                currencyId: currencyId,
+                gross: p.price,
+                net: p.price,
+                linked: true,
+            };
+
+            if (p.hasSalesPrice && p.salePercentage) {
+                const originalPrice = Math.round((p.price / (1 - p.salePercentage)) * 100) / 100;
+                priceEntry.listPrice = {
+                    currencyId: currencyId,
+                    gross: originalPrice,
+                    net: originalPrice,
+                    linked: true,
+                };
+            }
+
+            const product: ProductSyncPayload = {
                 id: p.id,
                 productNumber: `AI-${p.id}`,
                 name: p.name,
                 description: p.description,
                 stock: p.stock,
                 taxId: taxId,
-                price: [
-                    {
-                        currencyId: currencyId,
-                        gross: p.price,
-                        net: p.price,
-                        linked: true,
-                    },
-                ],
+                price: [priceEntry],
                 visibilities: [
                     {
-                        // Use deterministic ID for idempotent upsert
                         id: this.generateVisibilityId(p.id, salesChannelId),
                         productId: p.id,
                         salesChannelId: salesChannelId,
@@ -349,11 +457,95 @@ export class ShopwareHydrator extends ShopwareClient {
                     },
                 ],
                 categories,
+                markAsTopseller: p.isTopseller ?? false,
+                shippingFree: p.isShippingFree ?? false,
+                weight: p.weight,
+                width: p.width,
+                height: p.height,
+                length: p.length,
+                ean: p.ean,
+                manufacturerNumber: p.manufacturerNumber,
             };
 
-            // Add property options if present
+            // "New" badge: always set to current upload time so the badge
+            // never ages out on the storefront, regardless of when the blueprint
+            // was originally generated.
+            if (p.isNew) {
+                product.releaseDate = new Date().toISOString();
+            }
+
+            // Delivery time (deterministic round-robin via index set in Phase 1)
+            if (p.deliveryTimeIndex !== undefined && deliveryTimeIds.length > 0) {
+                product.deliveryTimeId =
+                    deliveryTimeIds[p.deliveryTimeIndex % deliveryTimeIds.length];
+            }
+
+            // Purchase constraints
+            if (p.minPurchase) {
+                product.minPurchase = p.minPurchase;
+                product.purchaseSteps = p.purchaseSteps ?? p.minPurchase;
+            }
+            if (p.maxPurchase) {
+                product.maxPurchase = p.maxPurchase;
+            }
+
+            // SEO metadata
+            if (p.metaTitle) {
+                product.metaTitle = p.metaTitle;
+            }
+            if (p.metaDescription) {
+                product.metaDescription = p.metaDescription;
+            }
+
+            // Property options
             if (p.options && p.options.length > 0) {
                 product.properties = p.options.map((option) => ({ id: option.id }));
+            }
+
+            // Graduated/tiered pricing via product_price entities
+            if (p.hasTieredPricing && ruleId) {
+                const round = (v: number): number => Math.round(v * 100) / 100;
+                const tieredPrices: TieredPricePayload[] = [
+                    {
+                        ruleId,
+                        quantityStart: 1,
+                        quantityEnd: 9,
+                        price: [
+                            {
+                                currencyId,
+                                gross: round(p.price),
+                                net: round(p.price),
+                                linked: true,
+                            },
+                        ],
+                    },
+                    {
+                        ruleId,
+                        quantityStart: 10,
+                        quantityEnd: 49,
+                        price: [
+                            {
+                                currencyId,
+                                gross: round(p.price * 0.9),
+                                net: round(p.price * 0.9),
+                                linked: true,
+                            },
+                        ],
+                    },
+                    {
+                        ruleId,
+                        quantityStart: 50,
+                        price: [
+                            {
+                                currencyId,
+                                gross: round(p.price * 0.8),
+                                net: round(p.price * 0.8),
+                                linked: true,
+                            },
+                        ],
+                    },
+                ];
+                product.prices = tieredPrices;
             }
 
             return product;
@@ -406,12 +598,12 @@ export class ShopwareHydrator extends ShopwareClient {
         const productMediaFolderId = await this.getProductMediaFolderId();
 
         const mediaUploads: { id: string; image: { name: string; data: string } }[] = [];
-        const mediaPayload: Record<string, unknown>[] = [];
+        const mediaPayload: MediaEntityPayload[] = [];
 
         const productPayload = products.map((p: ProductInput) => {
             const UUID = generateUUID();
 
-            const product: Record<string, unknown> = {
+            const product: ProductSyncPayload = {
                 id: UUID,
                 productNumber: `AI-${UUID}`,
                 name: p.name,
@@ -444,9 +636,12 @@ export class ShopwareHydrator extends ShopwareClient {
             }
 
             if (p.options) {
-                product.properties = p.options.map((option: PropertyOption) => ({
-                    id: option.id,
-                }));
+                product.properties = p.options
+                    .filter(
+                        (option: PropertyOption): option is PropertyOption & { id: string } =>
+                            option.id != null
+                    )
+                    .map((option) => ({ id: option.id }));
             }
 
             if (p.image) {
@@ -458,11 +653,12 @@ export class ShopwareHydrator extends ShopwareClient {
                     image: p.image,
                 });
 
-                mediaPayload.push({
+                const mediaEntry: MediaEntityPayload = {
                     id: mediaId,
                     private: false,
                     ...(productMediaFolderId && { mediaFolderId: productMediaFolderId }),
-                });
+                };
+                mediaPayload.push(mediaEntry);
 
                 product.coverId = productMediaId;
                 product.media = [
@@ -486,11 +682,9 @@ export class ShopwareHydrator extends ShopwareClient {
         });
 
         // Build sync operations
-        const syncOps: Array<{
-            entity: string;
-            action: "upsert";
-            payload: Record<string, unknown>[];
-        }> = [{ entity: "product", action: "upsert", payload: productPayload }];
+        const syncOps: SyncOperation[] = [
+            { entity: "product", action: "upsert", payload: productPayload },
+        ];
 
         if (mediaPayload.length > 0) {
             syncOps.push({ entity: "media", action: "upsert", payload: mediaPayload });

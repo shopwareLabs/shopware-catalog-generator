@@ -3,24 +3,13 @@ import { describe, expect, mock, test } from "bun:test";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 import { ImagesProcessor } from "../../../../src/post-processors/cms/images-processor.js";
+import { createTestContext } from "../../../helpers/post-processor-context.js";
 import { MockImageProvider } from "../../../mocks/image-provider.mock.js";
 
-const MOCK_BASE64 =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-
-function createMockCache(options: { hasImages?: boolean } = {}) {
-    const hasImages = options.hasImages ?? false;
-    return {
-        getSalesChannelDir: mock(() => "/tmp/test-cache"),
-        loadProductMetadata: mock(() => null),
-        loadCmsBlueprint: mock(() => null),
-        images: {
-            hasImageForSalesChannel: mock(() => hasImages),
-            loadImageForSalesChannel: mock(() => (hasImages ? MOCK_BASE64 : null)),
-            saveImageForSalesChannel: mock(() => {}),
-        },
-    };
-}
+const CMS_IMAGE_KEYS = [
+    ...Array.from({ length: 5 }, (_, i) => `img-slider-${i}`),
+    ...Array.from({ length: 6 }, (_, i) => `img-gallery-${i}`),
+];
 
 interface FetchCall {
     url: string;
@@ -28,14 +17,18 @@ interface FetchCall {
     body?: unknown;
 }
 
-function createMockContext(
+function createContextWithFetch(
     options: {
         dryRun?: boolean;
         fetchResponses?: Map<string, { ok: boolean; data: unknown }>;
         imageProvider?: MockImageProvider;
-        hasImages?: boolean;
+        cachedImages?: Set<string>;
     } = {}
-): { context: PostProcessorContext; fetchCalls: FetchCall[] } {
+): {
+    context: PostProcessorContext;
+    fetchCalls: FetchCall[];
+    mockCache: ReturnType<typeof createTestContext>["mockCache"];
+} {
     const fetchCalls: FetchCall[] = [];
     const responses = options.fetchResponses || new Map();
 
@@ -70,31 +63,13 @@ function createMockContext(
         } as Response;
     }) as unknown as typeof fetch;
 
-    const context: PostProcessorContext = {
-        salesChannelId: "sc-123",
-        salesChannelName: "test-store",
-        blueprint: {
-            version: "1.0",
-            salesChannel: { name: "test-store", description: "Test store for demo" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
-        },
-        cache: createMockCache({
-            hasImages: options.hasImages,
-        }) as unknown as PostProcessorContext["cache"],
+    const { context, mockCache } = createTestContext({
+        dryRun: options.dryRun,
         imageProvider: options.imageProvider ?? new MockImageProvider(),
-        shopwareUrl: "https://test.shopware.com",
-        getAccessToken: async () => "test-token",
-        options: {
-            batchSize: 5,
-            dryRun: options.dryRun || false,
-        },
-    };
+        cachedImages: options.cachedImages,
+    });
 
-    return { context, fetchCalls };
+    return { context, fetchCalls, mockCache };
 }
 
 describe("ImagesProcessor", () => {
@@ -119,7 +94,7 @@ describe("ImagesProcessor", () => {
 
     describe("process", () => {
         test("dry run logs without API calls", async () => {
-            const { context, fetchCalls } = createMockContext({ dryRun: true });
+            const { context, fetchCalls } = createContextWithFetch({ dryRun: true });
 
             const result = await ImagesProcessor.process(context);
 
@@ -144,23 +119,18 @@ describe("ImagesProcessor", () => {
             responses.set("_action/sync", { ok: true, data: {} });
             responses.set("_action/media", { ok: true, data: {} });
 
-            const { context } = createMockContext({
+            const { context, mockCache } = createContextWithFetch({
                 fetchResponses: responses,
                 imageProvider,
-                hasImages: true,
+                cachedImages: new Set(CMS_IMAGE_KEYS),
             });
 
             const result = await ImagesProcessor.process(context);
 
             expect(result.errors).toEqual([]);
             expect(result.processed).toBe(1);
-            // Images come from cache, not from the image provider
             expect(imageProvider.callCount).toBe(0);
-            // Cache should have been read 11 times (5 slider + 6 gallery)
-            const loadCalls = (
-                context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>
-            ).mock.calls;
-            expect(loadCalls.length).toBe(11);
+            expect(mockCache.images.loadImageForSalesChannelMock.mock.calls.length).toBe(11);
         });
 
         test("reads correct image keys from cache", async () => {
@@ -177,20 +147,17 @@ describe("ImagesProcessor", () => {
             responses.set("_action/sync", { ok: true, data: {} });
             responses.set("_action/media", { ok: true, data: {} });
 
-            const { context } = createMockContext({
+            const { context, mockCache } = createContextWithFetch({
                 fetchResponses: responses,
                 imageProvider,
-                hasImages: true,
+                cachedImages: new Set(CMS_IMAGE_KEYS),
             });
 
             await ImagesProcessor.process(context);
 
-            const loadCalls = (
-                context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>
-            ).mock.calls;
+            const loadCalls = mockCache.images.loadImageForSalesChannelMock.mock.calls;
             const loadedKeys = loadCalls.map((call: unknown[]) => call[1]);
 
-            // 5 slider keys + 6 gallery keys
             for (let i = 0; i < 5; i++) {
                 expect(loadedKeys).toContain(`img-slider-${i}`);
             }
@@ -207,7 +174,7 @@ describe("ImagesProcessor", () => {
             responses.set("search/landing-page", { ok: true, data: { data: [] } });
             responses.set("_action/sync", { ok: true, data: {} });
 
-            const { context } = createMockContext({ fetchResponses: responses });
+            const { context } = createContextWithFetch({ fetchResponses: responses });
             context.imageProvider = undefined;
 
             const result = await ImagesProcessor.process(context);

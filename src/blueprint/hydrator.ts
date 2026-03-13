@@ -22,7 +22,12 @@ import {
     findPlaceholderProducts,
     fixPlaceholders as fixHydratedPlaceholders,
 } from "./fix-placeholders.js";
-import { applyCategoryHydration, hydrateCategories, ProductHydrator } from "./hydrators/index.js";
+import {
+    applyCategoryHydration,
+    hydrateBrandColors,
+    hydrateCategories,
+    ProductHydrator,
+} from "./hydrators/index.js";
 import { VariantResolver } from "./variant-resolver.js";
 
 /** Store context passed through hydration methods */
@@ -69,21 +74,30 @@ export class BlueprintHydrator {
             description: blueprint.salesChannel.description,
         };
 
-        // Step 1: Hydrate categories
-        logger.info("  [1/2] Generating category names and descriptions...", { cli: true });
-        logger.info("Hydrating categories...");
-        const hydratedCategories = await hydrateCategories(
-            this.textProvider,
-            blueprint.salesChannel.name,
-            blueprint.salesChannel.description,
-            blueprint.categories
-        );
+        // Step 1: Hydrate categories + brand colors in parallel
+        logger.info("  [1/3] Generating category names, descriptions, and brand colors...", {
+            cli: true,
+        });
+        logger.info("Hydrating categories + brand colors...");
+        const [hydratedCategories, brandColors] = await Promise.all([
+            hydrateCategories(
+                this.textProvider,
+                blueprint.salesChannel.name,
+                blueprint.salesChannel.description,
+                blueprint.categories
+            ),
+            hydrateBrandColors(
+                this.textProvider,
+                blueprint.salesChannel.name,
+                blueprint.salesChannel.description
+            ),
+        ]);
         logger.info("Categories hydrated", {
             data: { count: hydratedCategories.categories.length },
         });
 
         // Step 2: Hydrate products
-        logger.info("  [2/2] Generating product content...", { cli: true });
+        logger.info("  [2/3] Generating product content...", { cli: true });
         logger.info("Hydrating products...");
         const productHydrator = this.createProductHydrator();
         productHydrator.clearBatchCounter();
@@ -106,6 +120,7 @@ export class BlueprintHydrator {
             products: hydratedProducts,
             propertyGroups: [],
             hydratedAt: new Date().toISOString(),
+            brandColors,
         };
 
         logger.info("  Blueprint hydrated successfully", { cli: true });

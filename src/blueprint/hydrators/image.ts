@@ -9,6 +9,8 @@
  * to Shopware -- no AI calls at post-processing time.
  */
 
+import sharp from "sharp";
+
 import type { DataCache } from "../../cache.js";
 import type { HydratedBlueprint, ImageProvider } from "../../types/index.js";
 
@@ -286,6 +288,239 @@ export async function hydrateProductImages(
     return result;
 }
 
+// =============================================================================
+// Theme Media Hydration
+// =============================================================================
+
+interface ThemeImageSpec {
+    key: string;
+    prompt: string;
+    width: number;
+    height: number;
+    transparent?: boolean;
+    fitHeight?: boolean;
+}
+
+export interface ThemeMediaHydrationResult {
+    generated: number;
+    skipped: number;
+    failed: number;
+    total: number;
+}
+
+/**
+ * Strip the SalesChannel name prefix from descriptions when present.
+ * Descriptions sometimes start with "{storeName} is your ..." —
+ * we want just the product/category description for image prompts.
+ */
+function cleanStoreDescription(storeName: string, description: string): string {
+    const cleaned = description
+        .replace(new RegExp(`^${storeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*`, "i"), "")
+        .replace(/^is\s+(your\s+)?(one-stop\s+)?(shop|store|destination)\s+(for|of)\s+/i, "")
+        .trim();
+
+    return cleaned || description;
+}
+
+export function buildThemeImageSpecs(
+    storeName: string,
+    storeDescription: string,
+    brandColors?: { primary: string; secondary: string }
+): ThemeImageSpec[] {
+    const colorHint = brandColors
+        ? `Use brand colors: primary ${brandColors.primary}, secondary ${brandColors.secondary}.`
+        : "";
+
+    // Build a human-readable display name for use in logo prompts.
+    // Two classes of segments are stripped before title-casing:
+    //   • Leading technical prefixes: "e2e", "test" — never part of a real brand
+    //   • Trailing all-digit segment of 8+ chars — Unix timestamps from scripts
+    //     like `name-$(date +%s)`. Short numbers like "54" or "360" are kept.
+    const segments = storeName.split("-");
+    const LEADING_NOISE = new Set(["e2e", "test"]);
+    let start = 0;
+    while (start < segments.length && LEADING_NOISE.has(segments[start]!.toLowerCase())) {
+        start++;
+    }
+    const trimmed = segments
+        .slice(start)
+        .filter((w, i, arr) => !(i === arr.length - 1 && /^\d{8,}$/.test(w)));
+    const displayName = (trimmed.length > 0 ? trimmed : segments)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+
+    const productDescription = cleanStoreDescription(storeName, storeDescription);
+
+    return [
+        {
+            key: "store-logo",
+            prompt: [
+                `A compact logo for "${displayName}" — an online store selling ${productDescription}.`,
+                `The logo MUST include the text "${displayName}" as the main element.`,
+                `Small icon or symbol next to the store name. Compact landscape format, tightly cropped with no padding.`,
+                colorHint,
+                `Flat vector style, transparent background, no photorealism. Looks good at 237x35px.`,
+            ]
+                .filter(Boolean)
+                .join(" "),
+            width: 474,
+            height: 70,
+            transparent: true,
+            fitHeight: true,
+        },
+        {
+            key: "store-favicon",
+            prompt: [
+                `A bold, simple favicon icon for an online store selling ${productDescription}.`,
+                `Single flat-design shape representing the store category.`,
+                `Must be recognizable at 32x32px — no fine details, no text.`,
+                colorHint,
+                `Clean silhouette on transparent background, vector-style.`,
+            ]
+                .filter(Boolean)
+                .join(" "),
+            width: 96,
+            height: 96,
+            transparent: true,
+        },
+        {
+            key: "store-share",
+            prompt: [
+                `A social media sharing card for an online store selling ${productDescription}.`,
+                `Wide 1.91:1 format showing an appealing lifestyle scene of the products.`,
+                colorHint,
+                `Eye-catching, brand-appropriate, professional e-commerce photography. No text overlay.`,
+            ]
+                .filter(Boolean)
+                .join(" "),
+            width: 1200,
+            height: 630,
+        },
+    ];
+}
+
+interface TrimAndResizeOptions {
+    transparent?: boolean;
+    fitHeight?: boolean;
+}
+
+/**
+ * Trim whitespace from an AI-generated image and resize to target dimensions.
+ *
+ * AI image generators (e.g. OpenAI) only support fixed canvas sizes like 1536x1024,
+ * so a logo requested at 474x70 gets centered in a huge white canvas. This function
+ * trims the white border and resizes to the exact target dimensions.
+ *
+ * When `transparent` is true, outputs PNG with transparent background (for logos/favicons).
+ * When `fitHeight` is true, resizes to target height only (width scales proportionally) —
+ * ideal for logos where the storefront CSS handles width.
+ */
+export async function trimAndResize(
+    base64: string,
+    targetWidth: number,
+    targetHeight: number,
+    options: TrimAndResizeOptions | boolean = false
+): Promise<string> {
+    const opts: TrimAndResizeOptions =
+        typeof options === "boolean" ? { transparent: options } : options;
+
+    try {
+        const buffer = Buffer.from(base64, "base64");
+        const trimmed = await sharp(buffer).trim().toBuffer();
+        const background = opts.transparent
+            ? { r: 0, g: 0, b: 0, alpha: 0 }
+            : { r: 255, g: 255, b: 255, alpha: 1 };
+
+        const resizeOptions = opts.fitHeight
+            ? { height: targetHeight, withoutEnlargement: false }
+            : { width: targetWidth, height: targetHeight, fit: "contain" as const, background };
+
+        let pipeline = sharp(trimmed).resize(resizeOptions);
+        pipeline = opts.transparent ? pipeline.png() : pipeline.webp();
+        const resized = await pipeline.toBuffer();
+        return resized.toString("base64");
+    } catch {
+        return base64;
+    }
+}
+
+export async function hydrateThemeMedia(
+    imageProvider: ImageProvider,
+    cache: DataCache,
+    salesChannelName: string,
+    storeDescription: string,
+    brandColors?: { primary: string; secondary: string }
+): Promise<ThemeMediaHydrationResult> {
+    const specs = buildThemeImageSpecs(salesChannelName, storeDescription, brandColors);
+    const result: ThemeMediaHydrationResult = {
+        generated: 0,
+        skipped: 0,
+        failed: 0,
+        total: specs.length,
+    };
+
+    const pending = specs.filter(
+        (spec) => !cache.images.hasImageForSalesChannel(salesChannelName, spec.key, "theme_media")
+    );
+
+    result.skipped = specs.length - pending.length;
+
+    if (pending.length === 0) {
+        logger.info(`  Theme media: all ${specs.length} already cached`, { cli: true });
+        return result;
+    }
+
+    logger.info(
+        `  Theme media: generating ${pending.length}/${specs.length} (${result.skipped} cached)`,
+        { cli: true }
+    );
+
+    const limiter = new ConcurrencyLimiter(imageProvider.maxConcurrency);
+
+    await limiter.all(
+        pending.map((spec) => async () => {
+            try {
+                const base64 = await executeWithRetry(
+                    async () => {
+                        const data = await imageProvider.generateImage(spec.prompt, {
+                            width: spec.width,
+                            height: spec.height,
+                        });
+                        if (!data) throw new Error("Image generation returned null");
+                        return data;
+                    },
+                    { maxRetries: 3, baseDelay: 5000 }
+                );
+
+                const processed = await trimAndResize(base64, spec.width, spec.height, {
+                    transparent: spec.transparent,
+                    fitHeight: spec.fitHeight,
+                });
+
+                cache.images.saveImageForSalesChannel(
+                    salesChannelName,
+                    spec.key,
+                    spec.key,
+                    processed,
+                    spec.prompt,
+                    undefined,
+                    "theme_media"
+                );
+                result.generated++;
+            } catch {
+                result.failed++;
+                logger.warn(`    Failed to generate theme image "${spec.key}"`);
+            }
+        })
+    );
+
+    logger.info(`  Theme media: ${result.generated} generated, ${result.failed} failed`, {
+        cli: true,
+    });
+
+    return result;
+}
+
 function collectImageTasks(
     cache: DataCache,
     salesChannelName: string,
@@ -294,10 +529,14 @@ function collectImageTasks(
 ): ImageTask[] {
     const tasks: ImageTask[] = [];
 
-    // Product images from metadata
+    // Product images from the in-memory blueprint metadata.
+    // We intentionally do NOT load from cache.loadProductMetadata here because
+    // saveHydratedBlueprint (which writes the metadata files) is called AFTER
+    // hydrateProductImages in blueprint-service.ts. Reading from the blueprint
+    // directly avoids the ordering dependency.
     for (const product of blueprint.products) {
-        const metadata = cache.loadProductMetadata(salesChannelName, product.id);
-        if (!metadata || metadata.imageDescriptions.length === 0) continue;
+        const { metadata } = product;
+        if (!metadata.imageDescriptions || metadata.imageDescriptions.length === 0) continue;
 
         for (const desc of metadata.imageDescriptions) {
             const hasImage = cache.images.hasImageWithView(

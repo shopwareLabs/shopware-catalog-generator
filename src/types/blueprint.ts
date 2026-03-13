@@ -30,6 +30,14 @@ export interface Blueprint {
     createdAt: string;
 }
 
+/** AI-generated brand colors for theme customization (other colors derived via Material Design rules) */
+export interface BrandColors {
+    /** Primary brand color (headings, links, buy buttons) */
+    primary: string;
+    /** Secondary brand color (accents, hover states) */
+    secondary: string;
+}
+
 /** Hydrated blueprint after AI processing */
 export interface HydratedBlueprint extends Blueprint {
     /** Property groups derived from product properties */
@@ -37,6 +45,9 @@ export interface HydratedBlueprint extends Blueprint {
 
     /** Timestamp when blueprint was hydrated */
     hydratedAt: string;
+
+    /** AI-generated brand colors for theme customization */
+    brandColors?: BrandColors;
 }
 
 // =============================================================================
@@ -115,6 +126,18 @@ export interface BlueprintProduct {
 
     /** Metadata for post-processors */
     metadata: ProductMetadata;
+
+    /** SEO meta title (derived from product name, max 70 chars) */
+    metaTitle?: string;
+
+    /** SEO meta description (derived from product description, max 160 chars) */
+    metaDescription?: string;
+
+    /**
+     * Index into Shopware's deliveryTimeIds array (deterministic round-robin, set in Phase 1).
+     * Phase 3 resolves the actual ID via `deliveryTimeIds[deliveryTimeIndex % deliveryTimeIds.length]`.
+     */
+    deliveryTimeIndex?: number;
 }
 
 /** Product metadata for post-processors (stored in cache) */
@@ -154,6 +177,49 @@ export interface ProductMetadata {
 
     /** Sale percentage (e.g., 0.2 = 20% off) */
     salePercentage?: number;
+
+    /** Whether this product has tiered quantity pricing (~10%) */
+    hasTieredPricing: boolean;
+
+    // Storefront flags
+    /** Whether this product is marked as topseller (~10%) */
+    isTopseller: boolean;
+
+    /** Whether this product should show as "new" (recent releaseDate, ~15%) */
+    isNew: boolean;
+
+    /** Whether this product has free shipping (~8%) */
+    isShippingFree: boolean;
+
+    // Physical attributes
+    /** Weight in kg (0.1 - 25.0) */
+    weight: number;
+
+    /** Width in mm (50 - 1500) */
+    width: number;
+
+    /** Height in mm (20 - 1200) */
+    height: number;
+
+    /** Length in mm (50 - 2000) */
+    length: number;
+
+    // Product identifiers
+    /** EAN-13 barcode */
+    ean: string;
+
+    /** Manufacturer product number */
+    manufacturerNumber: string;
+
+    // Purchase constraints
+    /** Minimum purchase quantity (undefined = default 1) */
+    minPurchase?: number;
+
+    /** Maximum purchase quantity (undefined = unlimited) */
+    maxPurchase?: number;
+
+    /** Purchase step size (matches minPurchase when set) */
+    purchaseSteps?: number;
 }
 
 /** Variant configuration for a single property group */

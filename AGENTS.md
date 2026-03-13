@@ -11,6 +11,8 @@ This project uses **Bun** as the runtime instead of Node.js:
 - Built-in HTTP server with `Bun.serve`
 - Native fetch API (no axios)
 
+**Key dependencies:** `zod` (schema validation), `openai` (API client), `sharp` (image post-processing — trim whitespace, resize to exact dimensions), `@shopware/api-client` (official Shopware client).
+
 ## Project Structure
 
 ```
@@ -48,10 +50,15 @@ src/
 │
 ├── cli/                      # CLI command modules (main.ts delegates here)
 │   ├── AGENTS.md             # CLI reference (all commands, flags, options)
-│   ├── blueprint.ts          # blueprint create, hydrate, fix
-│   ├── generate.ts           # generate (full pipeline), process (post-processors)
-│   ├── image-fix.ts          # image fix - regenerate product images
+│   ├── blueprint.ts          # blueprint create, hydrate, fix (thin wrappers)
+│   ├── generate.ts           # generate (full pipeline), process (thin wrappers)
+│   ├── image-fix.ts          # image fix - thin wrapper
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
+│
+├── services/                 # Shared application logic (used by both CLI and MCP)
+│   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
+│   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
+│   └── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 │
 ├── blueprint/                # Blueprint-based generation
 │   ├── AGENTS.md             # Blueprint module documentation
@@ -65,7 +72,8 @@ src/
 │       ├── category.ts       # Category names/descriptions via AI
 │       ├── product.ts        # Product content via AI (parallel branches)
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
-│       └── image.ts          # Product/category/CMS image pre-generation
+│       ├── image.ts          # Product/category/CMS/theme image pre-generation
+│       └── theme.ts          # AI brand color generation
 │
 ├── post-processors/          # Post-processors (parallel execution)
 │   ├── AGENTS.md             # Post-processor documentation
@@ -83,13 +91,18 @@ src/
 │   │   ├── form-processor.ts # Form elements demo page
 │   │   ├── footer-pages-processor.ts # Shared footer and legal pages
 │   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
+│   ├── cross-selling-processor.ts # Category-based cross-selling
+│   ├── currency-utils.ts     # resolvePrimaryCurrencyId (USD → EUR → SalesChannel)
+│   ├── customer-processor.ts     # Demo customer accounts with B2B group
 │   ├── digital-product-processor.ts # Digital product with download
 │   ├── image-processor.ts    # Multi-view product image generation
 │   ├── category-image-processor.ts # Category banner images
 │   ├── image-utils.ts        # Shared image utilities
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
+│   ├── promotion-processor.ts # Demo promotion codes (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── variant-processor.ts  # Variant product creation
-│   └── review-processor.ts   # Variable review counts
+│   ├── review-processor.ts   # Variable review counts
+│   └── theme-processor.ts    # Child theme with brand colors + media
 │
 ├── fixtures/                 # Reusable data configurations
 │   ├── AGENTS.md             # Fixtures documentation
@@ -107,7 +120,9 @@ src/
 │   │   ├── form.ts           # Form elements page
 │   │   └── home-listing.ts   # Home listing page (root category)
 │   ├── color-images/         # SVG color swatch images
+│   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+│   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
 │
@@ -122,7 +137,7 @@ src/
 │   ├── validation.ts         # Subdomain validation
 │   ├── blueprint-validation.ts # Validate blueprints before sync (duplicates, placeholders)
 │   ├── retry.ts              # executeWithRetry, sleep, rate limit handling
-│   ├── strings.ts            # normalizeString, stripHtml, capitalizeString, createShortHash
+│   ├── strings.ts            # normalizeString, stripHtml, capitalizeString, createShortHash, generateNumericHash
 │   ├── category-tree.ts      # countCategories, getLeafCategories, etc.
 │   ├── property-collector.ts # Collect, deduplicate, merge properties
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
@@ -130,7 +145,15 @@ src/
 │   ├── uuid.ts               # UUID generation
 │   ├── arrays.ts             # Array utilities (randomPick, etc.)
 │   ├── shopware-request.ts   # Shopware API request helpers
+│   ├── clone.ts              # cloneDeep - typed structuredClone wrapper
 │   └── logger.ts             # File-based logging (logs/ folder)
+│
+├── services/                 # Shared application logic (CLI + MCP)
+│   ├── AGENTS.md             # Services documentation
+│   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
+│   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
+│   ├── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
+│   └── shopware-context.ts   # createProcessorDeps (API helpers + providers bootstrap)
 │
 ├── server/                   # HTTP server infrastructure
 │   ├── AGENTS.md             # Server documentation
@@ -167,12 +190,15 @@ tests/
 │   │   ├── hydrator.test.ts
 │   │   └── hydrators/
 │   │       ├── cms.test.ts
-│   │       └── image.test.ts
+│   │       ├── image.test.ts
+│   │       └── theme.test.ts
 │   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
+│   │   ├── customer-processor.test.ts
 │   │   ├── image-processor.test.ts
 │   │   ├── manufacturer-processor.test.ts
 │   │   ├── review-processor.test.ts
+│   │   ├── theme-processor.test.ts
 │   │   ├── variant-processor.test.ts
 │   │   ├── digital-product-processor.test.ts
 │   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
@@ -215,11 +241,16 @@ tests/
 ├── e2e/                      # E2E tests
 │   ├── verify.ts             # API verification script
 │   └── browser-checks.md     # Browser verification guide
+├── helpers/                  # Shared test factories
+│   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
+│   └── post-processor-context.ts # createTestContext — builds PostProcessorContext with mocks
 └── mocks/                    # Test mocks
-    ├── index.ts
-    ├── api-helpers.mock.ts
-    ├── text-provider.mock.ts
-    └── image-provider.mock.ts
+    ├── index.ts              # Re-exports + createMockProductMetadata
+    ├── admin-client.mock.ts  # createMockAdminClient, createMockAdminClientWithInvoke
+    ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
+    ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
+    ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
+    └── image-provider.mock.ts # MockImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Module Documentation
@@ -228,15 +259,16 @@ Detailed documentation for each module is in their respective folders:
 
 - **[src/blueprint/AGENTS.md](src/blueprint/AGENTS.md)** - Blueprint generator, hydrator, variant resolver, hydration flow
 - **[src/cli/AGENTS.md](src/cli/AGENTS.md)** - CLI command reference (all commands, flags, options)
-- **[src/fixtures/AGENTS.md](src/fixtures/AGENTS.md)** - Static data configurations (CMS pages, reviews, properties)
+- **[src/fixtures/AGENTS.md](src/fixtures/AGENTS.md)** - Static data configurations (CMS pages, reviews, properties, promotions)
 - **[src/mcp/AGENTS.md](src/mcp/AGENTS.md)** - MCP server for Cursor AI integration, adding tools
 - **[src/post-processors/AGENTS.md](src/post-processors/AGENTS.md)** - Post-processor system, registry, cleanup, adding new processors
 - **[src/providers/AGENTS.md](src/providers/AGENTS.md)** - AI provider interfaces, concurrency settings, adding new providers
 - **[src/server/AGENTS.md](src/server/AGENTS.md)** - HTTP server, ProcessManager, background tasks, API endpoints
+- **[src/services/AGENTS.md](src/services/AGENTS.md)** - Shared application logic for CLI and MCP (blueprint, generate, image-fix services)
 - **[src/shopware/AGENTS.md](src/shopware/AGENTS.md)** - Shopware API client, hydrator, cleanup, official client wrapper
 - **[src/templates/AGENTS.md](src/templates/AGENTS.md)** - Pre-generated catalog templates, template fetching
 - **[src/types/AGENTS.md](src/types/AGENTS.md)** - Centralized types, Zod schemas, conventions
-- **[src/utils/AGENTS.md](src/utils/AGENTS.md)** - Shared utilities (retry, strings, logging, etc.)
+- **[src/utils/AGENTS.md](src/utils/AGENTS.md)** - Shared utilities (retry, strings, logging, cloneDeep, etc.)
 
 ## Architecture
 
@@ -259,12 +291,14 @@ The architecture uses a 3-phase pipeline for faster generation:
 
 **Full hydration with images (~270 product + ~20 CMS + category banners):**
 
-| Provider              | Image Model   | Processing     | Time       |
-| --------------------- | ------------- | -------------- | ---------- |
-| OpenAI                | gpt-image-1.5 | Parallel (10x) | ~20-25 min |
-| Pollinations (sk\_\*) | flux          | Parallel (5x)  | ~15-20 min |
-| Pollinations (sk\_\*) | turbo         | Parallel (5x)  | ~10-15 min |
-| Pollinations (pk\_\*) | flux          | Limited (2x)   | ~40-50 min |
+| Provider              | Image Model      | Quality | Processing     | Time       |
+| --------------------- | ---------------- | ------- | -------------- | ---------- |
+| OpenAI                | gpt-image-1-mini | low     | Parallel (10x) | ~8-12 min  |
+| OpenAI                | gpt-image-1-mini | medium  | Parallel (10x) | ~12-18 min |
+| OpenAI                | gpt-image-1.5    | medium  | Parallel (10x) | ~20-25 min |
+| Pollinations (sk\_\*) | flux             | -       | Parallel (5x)  | ~15-20 min |
+| Pollinations (sk\_\*) | turbo            | -       | Parallel (5x)  | ~10-15 min |
+| Pollinations (pk\_\*) | flux             | -       | Limited (2x)   | ~40-50 min |
 
 > All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
 
@@ -353,25 +387,46 @@ interface PostProcessor {
     readonly dependsOn: string[]; // Dependency ordering
     process(context: PostProcessorContext): Promise<PostProcessorResult>;
 }
+
+interface PostProcessorContext {
+    salesChannelId: string;
+    salesChannelName: string;
+    blueprint: HydratedBlueprint;
+    cache: DataCache;
+    textProvider?: TextProvider;
+    imageProvider?: ImageProvider;
+    api: ShopwareApiHelpers; // Required — all API calls must go through this
+    options: PostProcessorOptions;
+}
+
+interface PostProcessorOptions {
+    dryRun: boolean;
+    activeProcessors?: string[]; // Populated by runProcessors() — use for conditional rendering
+}
 ```
 
 **Available processors:**
 
-| Processor         | Description                                  | Dependencies            |
-| ----------------- | -------------------------------------------- | ----------------------- |
-| `cms-home`        | Homepage layout on root category             | none                    |
-| `cms-text`        | Text elements demo page                      | none                    |
-| `cms-images`      | Image elements demo page                     | none                    |
-| `cms-video`       | Video elements demo page                     | none                    |
-| `cms-text-images` | Text & Images demo page                      | none                    |
-| `cms-commerce`    | Commerce elements demo page                  | none                    |
-| `cms-form`        | Form elements demo page                      | none                    |
-| `images`          | Upload pre-generated product/category images | none                    |
-| `manufacturers`   | Fictional manufacturer creation              | none                    |
-| `reviews`         | Variable review counts (0-10 per product)    | none                    |
-| `variants`        | Variant product creation                     | manufacturers           |
-| `digital-product` | Digital product with download                | none                    |
-| `cms-testing`     | Testing category hierarchy                   | cms-\*, digital-product |
+| Processor          | Description                                      | Dependencies                               |
+| ------------------ | ------------------------------------------------ | ------------------------------------------ |
+| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling` |
+| `cms-text`         | Text elements demo page                          | none                                       |
+| `cms-images`       | Image elements demo page                         | none                                       |
+| `cms-video`        | Video elements demo page                         | none                                       |
+| `cms-text-images`  | Text & Images demo page                          | none                                       |
+| `cms-commerce`     | Commerce elements demo page                      | `images`                                   |
+| `cms-form`         | Form elements demo page                          | none                                       |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                                       |
+| `cross-selling`    | Category-based cross-selling via product streams | none                                       |
+| `customers`        | Demo customer accounts with B2B group            | none                                       |
+| `images`           | Upload pre-generated product/category images     | none                                       |
+| `manufacturers`    | Fictional manufacturer creation                  | none                                       |
+| `promotions`       | Tiered pricing and promotion codes               | none                                       |
+| `reviews`          | Variable review counts (0-10 per product)        | none                                       |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                                       |
+| `variants`         | Variant product creation                         | `manufacturers`                            |
+| `digital-product`  | Digital product with download                    | none                                       |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product                    |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -423,6 +478,7 @@ Factory in `providers/factory.ts` creates providers from env vars:
 
 - `AI_PROVIDER`: openai | github-models | pollinations
 - `IMAGE_PROVIDER`: openai | pollinations | none
+- `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
 
 ### Shopware Module
 
@@ -473,9 +529,15 @@ import { executeWithRetry, sleep } from "./utils/index.js";
 await executeWithRetry(() => apiCall(), { maxRetries: 3, baseDelay: 2000 });
 
 // String normalization and hashing (utils/strings.ts)
-import { normalizeDescription, capitalizeString, createShortHash } from "./utils/index.js";
+import {
+    normalizeDescription,
+    capitalizeString,
+    createShortHash,
+    generateNumericHash,
+} from "./utils/index.js";
 const clean = normalizeDescription("<p>HTML &amp; entities</p>"); // "HTML & entities"
 const hash = createShortHash("long-option-name-suffix", 5); // deterministic 5-char alphanumeric hash
+const digits = generateNumericHash("product-id-ean", 12); // 12-digit deterministic numeric string (for EANs)
 
 // Category tree operations (utils/category-tree.ts)
 import { countCategories, getLeafCategories, collectCategoryIdsByPath } from "./utils/index.js";
@@ -518,8 +580,12 @@ generated/
             │   └── {categoryId}.webp
             ├── cms_media/
             │   └── *.webp          # CMS block images
-            └── property_images/
-                └── *.webp
+            ├── property_images/
+            │   └── *.webp
+            └── theme_media/
+                ├── store-logo.webp
+                ├── store-favicon.webp
+                └── store-share.webp
 
 logs/
 └── generator-{timestamp}.log       # Detailed API logs (not in generated/)
@@ -575,8 +641,21 @@ This applies to both **text** and **all images**:
 - **Text**: Hydrated via `BlueprintHydrator` (product/category) and `hydrateCmsBlueprint` (CMS pages)
 - **CMS images**: Pre-generated via `hydrateCmsImages()` in `src/blueprint/hydrators/image.ts` (20 CMS images)
 - **Product/category images**: Pre-generated via `hydrateProductImages()` in `src/blueprint/hydrators/image.ts`
+- **Theme media**: Logo, favicon, share icon via `hydrateThemeMedia()` in `src/blueprint/hydrators/image.ts`
 
 The image hydrator in `src/blueprint/hydrators/image.ts` centralizes ALL image generation.
+
+**Image post-processing with `sharp`:** AI image generators (e.g. OpenAI) only support fixed canvas
+sizes like 1024x1024 or 1536x1024. When specific dimensions are needed (e.g. 474x70 for a logo),
+the `trimAndResize()` function trims whitespace borders and resizes to the exact target dimensions.
+This is applied to all theme media (logo, favicon, share icon) during hydration.
+
+| Theme Image     | Target Size | Purpose                      |
+| --------------- | ----------- | ---------------------------- |
+| `store-logo`    | 474×70      | Desktop/tablet/mobile header |
+| `store-favicon` | 96×96       | Browser favicon              |
+| `store-share`   | 1200×630    | Social media sharing card    |
+
 Post-processors only read from cache and upload to Shopware. An architectural test
 (`tests/unit/post-processors/no-ai-in-processors.test.ts`) enforces this rule by scanning
 post-processor source files for `.generateImage(` and `.generateCompletion(` calls.
@@ -957,7 +1036,8 @@ AI_API_KEY=xxx  # Get Pollinations key at https://enter.pollinations.ai
 AI_MODEL=gpt-4o
 IMAGE_PROVIDER=pollinations|openai|none
 IMAGE_API_KEY=xxx
-IMAGE_MODEL=flux|turbo|klein
+IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-1, gpt-image-1.5, flux, turbo, klein
+IMAGE_QUALITY=low  # OpenAI only: low (fastest/cheapest), medium, high, auto
 
 # Shopware connection
 SW_ENV_URL=http://localhost:8000
@@ -1040,7 +1120,7 @@ bun run generate \
 ```bash
 bun run process \
   --name=NAME              # Required: SalesChannel name
-  --only=PROCESSORS        # Run specific processors (images,manufacturers,reviews,variants)
+  --only=PROCESSORS        # Run specific processors (images,manufacturers,reviews,variants,customers)
   --dry-run                # Preview without making changes
 ```
 
@@ -1049,9 +1129,13 @@ bun run process \
 ```bash
 bun run image fix \
   --name=NAME              # Required: SalesChannel name
-  --product=TARGET         # Product/category name or ID, or CMS page name
-  --type=TYPE              # "product" (default), "category", or "cms"
+  --target=TARGET          # Product/category name or ID, CMS page name, or theme media key
+  --type=TYPE              # "product" (default), "category", "cms", or "theme"
   --dry-run                # Preview without regenerating
+
+# Theme media examples
+bun run image fix --name=music --type=theme                  # Regenerate all theme media
+bun run image fix --name=music --type=theme --target=logo    # Regenerate logo only
 ```
 
 ### Cleanup (SalesChannel-centric)
@@ -1067,7 +1151,7 @@ bun run cleanup:media                                      # Delete orphaned pro
 
 **Processor-specific cleanup:** Use `--processors=<list>` to cleanup only entities created by specific
 post-processors. Each processor implements its own `cleanup()` method that knows how to remove its entities.
-Available processors with cleanup: `cms`.
+Available processors with cleanup: `cms`, `customers`.
 
 ### E2E Testing
 

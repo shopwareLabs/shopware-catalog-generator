@@ -1,6 +1,6 @@
 # Shopware Catalog Generator
 
-Generate AI-powered demo catalogs for Shopware. Creates SalesChannels with category trees, products, descriptions, images, reviews, variants, and CMS pages.
+Generate AI-powered demo catalogs for Shopware. Creates SalesChannels with category trees, products, descriptions, images, reviews, variants, CMS pages, cross-selling, demo customers, promotions, and themed storefronts (AI-generated brand colors, logo, favicon).
 
 > **Architecture details:** See [CONCEPTS.md](CONCEPTS.md) for diagrams and in-depth explanations.
 
@@ -24,7 +24,7 @@ SW_CLIENT_ID=your-access-key-id      # Settings → System → Integrations
 SW_CLIENT_SECRET=your-secret-key     # Settings → System → Integrations
 ```
 
-The `SW_CLIENT_ID` and `SW_CLIENT_SECRET` authenticate against the Shopware Admin API. Create an integration in your Shopware Admin under **Settings → System → Integrations**, then copy the *Access key ID* and *Secret access key* into your `.env`.
+The `SW_CLIENT_ID` and `SW_CLIENT_SECRET` authenticate against the Shopware Admin API. Create an integration in your Shopware Admin under **Settings → System → Integrations**, then copy the _Access key ID_ and _Secret access key_ into your `.env`.
 
 Generate a full catalog:
 
@@ -52,11 +52,11 @@ Templates require git access via SSH keys or credential helper.
 
 ## AI Providers & Performance
 
-| Provider | API Key | Images | Parallel | Best For |
-| --- | --- | --- | --- | --- |
-| `pollinations` | Required | Yes | With `sk_*` key | Testing, demos (default) |
-| `github-models` | Required | N/A | Limited (2x) | GitHub/Copilot users |
-| `openai` | Required | Paid | Yes (5x) | Production, high volume |
+| Provider        | API Key  | Images | Parallel        | Best For                 |
+| --------------- | -------- | ------ | --------------- | ------------------------ |
+| `pollinations`  | Required | Yes    | With `sk_*` key | Testing, demos (default) |
+| `github-models` | Required | N/A    | Limited (2x)    | GitHub/Copilot users     |
+| `openai`        | Required | Paid   | Yes (5x)        | Production, high volume  |
 
 > Get a Pollinations API key at **[enter.pollinations.ai](https://enter.pollinations.ai)**
 
@@ -81,28 +81,31 @@ AI_API_KEY=sk-your-openai-key
 ```env
 AI_MODEL=gpt-4o              # Override text model
 IMAGE_PROVIDER=none          # Disable images
-IMAGE_MODEL=turbo            # Pollinations: flux (default), turbo (fast), klein (quality)
+IMAGE_MODEL=gpt-image-1-mini # OpenAI default; or gpt-image-1.5, flux, turbo, klein
+IMAGE_QUALITY=low            # OpenAI only: low (fastest), medium, high, auto
 ```
 
 ### Expected Times (90 products)
 
 **Text generation only (blueprint hydration):**
 
-| Provider | Processing | Time |
-| --- | --- | --- |
-| OpenAI | Parallel (5x) | ~5 min |
-| Pollinations (sk\_\*) | Parallel (5x) | ~5 min |
-| GitHub Models | Limited (2x) | ~10 min |
-| Pollinations (pk\_\*) | Sequential | ~13 min |
+| Provider              | Processing    | Time    |
+| --------------------- | ------------- | ------- |
+| OpenAI                | Parallel (5x) | ~5 min  |
+| Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
+| GitHub Models         | Limited (2x)  | ~10 min |
+| Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full generation with images (~270 images at 3 views per product):**
 
-| Provider | Image Model | Time |
-| --- | --- | --- |
-| OpenAI | gpt-image-1.5 | ~35-40 min |
-| Pollinations | flux (default) | ~15-20 min |
-| Pollinations | turbo (fast) | ~10-15 min |
-| Any (images: none) | - | ~5-13 min |
+| Provider           | Image Model      | Quality | Time       |
+| ------------------ | ---------------- | ------- | ---------- |
+| OpenAI             | gpt-image-1-mini | low     | ~8-12 min  |
+| OpenAI             | gpt-image-1-mini | medium  | ~12-18 min |
+| OpenAI             | gpt-image-1.5    | medium  | ~20-25 min |
+| Pollinations       | flux (default)   | -       | ~15-20 min |
+| Pollinations       | turbo (fast)     | -       | ~10-15 min |
+| Any (images: none) | -                | -       | ~5-13 min  |
 
 > Image generation is the primary time factor. Use `IMAGE_PROVIDER=none` to skip images for faster testing.
 
@@ -118,17 +121,17 @@ To create integration credentials:
 
 1. Open Shopware Admin → **Settings → System → Integrations**
 2. Click **Add integration**
-3. Copy the *Access key ID* → `SW_CLIENT_ID`
-4. Copy the *Secret access key* → `SW_CLIENT_SECRET`
+3. Copy the _Access key ID_ → `SW_CLIENT_ID`
+4. Copy the _Secret access key_ → `SW_CLIENT_SECRET`
 
 ### Domains & Languages
 
 Every generated SalesChannel automatically gets two domains:
 
-| Domain | Language | Currency |
-| --- | --- | --- |
-| `{name}.localhost:8000` | English | USD |
-| `{name}-de.localhost:8000` | German | EUR |
+| Domain                     | Language | Currency |
+| -------------------------- | -------- | -------- |
+| `{name}.localhost:8000`    | English  | USD      |
+| `{name}-de.localhost:8000` | German   | EUR      |
 
 The German domain is only created if `de-DE` language and its snippet set are installed in Shopware. If not, a warning is logged and only the English domain is created.
 
@@ -181,22 +184,26 @@ bun run cache:restore -- --all        # Restore from trash
 
 Post-processors run after upload for resource-intensive tasks (images, reviews, CMS pages, etc.).
 
-| Processor | Description | Dependencies |
-| --- | --- | --- |
-| `cms-home` | Homepage layout with product listing | none |
-| `cms-text` | Text elements demo page | none |
-| `cms-images` | Image elements demo page | none |
-| `cms-video` | Video elements demo page | none |
-| `cms-text-images` | Text & Images demo page | none |
-| `cms-commerce` | Commerce elements demo page | images |
-| `cms-form` | Form elements demo page | none |
-| `cms-footer-pages` | Shared footer and legal pages | none |
-| `images` | Upload pre-generated product/category images | none |
-| `manufacturers` | Fictional manufacturer creation | none |
-| `reviews` | Product reviews (0-10 per product) | none |
-| `variants` | Variant product creation | manufacturers |
-| `digital-product` | Digital product (Gift Card) | none |
-| `cms-testing` | Testing category hierarchy | cms-\*, digital-product |
+| Processor          | Description                                      | Dependencies            |
+| ------------------ | ------------------------------------------------ | ----------------------- |
+| `cms-home`         | Homepage layout with product listing             | none                    |
+| `cms-text`         | Text elements demo page                          | none                    |
+| `cms-images`       | Image elements demo page                         | none                    |
+| `cms-video`        | Video elements demo page                         | none                    |
+| `cms-text-images`  | Text & Images demo page                          | none                    |
+| `cms-commerce`     | Commerce elements demo page                      | images                  |
+| `cms-form`         | Form elements demo page                          | none                    |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                    |
+| `cross-selling`    | Category-based cross-selling via product streams | none                    |
+| `customers`        | Demo customer accounts with B2B group            | none                    |
+| `images`           | Upload pre-generated product/category images     | none                    |
+| `manufacturers`    | Fictional manufacturer creation                  | none                    |
+| `promotions`       | Tiered pricing and promotion codes               | none                    |
+| `reviews`          | Product reviews (0-10 per product)               | none                    |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                    |
+| `variants`         | Variant product creation                         | manufacturers           |
+| `digital-product`  | Digital product (Gift Card)                      | none                    |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product |
 
 Processors run in parallel when possible, respecting dependency order. See [CONCEPTS.md](CONCEPTS.md#post-processor-system) for the execution diagram.
 
@@ -208,11 +215,11 @@ Run as an HTTP service with background processing:
 bun run server
 ```
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| POST | `/generate` | Start generation (returns process ID) |
-| GET | `/status/:id` | Poll process status, progress, and logs |
-| GET | `/health` | Health check and active process count |
+| Method | Endpoint      | Description                             |
+| ------ | ------------- | --------------------------------------- |
+| POST   | `/generate`   | Start generation (returns process ID)   |
+| GET    | `/status/:id` | Poll process status, progress, and logs |
+| GET    | `/health`     | Health check and active process count   |
 
 ```bash
 curl -X POST http://localhost:3000/generate \

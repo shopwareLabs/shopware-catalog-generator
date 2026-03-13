@@ -1,13 +1,13 @@
 import { mock } from "bun:test";
 import crypto from "node:crypto";
 
-import type { ShopwareFilter, SyncOperation } from "../../src/shopware/api-helpers.js";
+import type { ShopwareApi, ShopwareFilter, SyncOperation } from "../../src/shopware/api-helpers.js";
 
 /**
  * API call record for verification in tests
  */
 export interface ApiCall {
-    method: "get" | "post" | "patch" | "delete" | "postRaw";
+    method: "get" | "post" | "patch" | "delete" | "httpDelete" | "postRaw";
     endpoint: string;
     body?: unknown;
 }
@@ -40,11 +40,13 @@ export interface MockResponse<T = unknown> {
  * );
  * ```
  */
-export class MockApiHelpers {
+export class MockApiHelpers implements ShopwareApi {
     private calls: ApiCall[] = [];
     private searchResponses: Map<string, unknown[]> = new Map();
+    private searchResponseSequences: Map<string, unknown[][]> = new Map();
     private findByNameResponses: Map<string, string | null> = new Map();
     private postResponses: Map<string, unknown> = new Map();
+    private postFailures: Map<string, Error> = new Map();
     private getResponses: Map<string, unknown> = new Map();
     private defaultSearchResponse: unknown[] = [];
     private defaultPostResponse: unknown = {};
@@ -126,6 +128,24 @@ export class MockApiHelpers {
     }
 
     /**
+     * Mock a sequence of search responses for a specific entity type.
+     * Each call to searchEntities(entity) pops the next item from the sequence.
+     * After exhaustion, falls back to mockSearchResponse or default.
+     */
+    mockSearchResponseSequence<T>(entity: string, sequence: T[][]): this {
+        this.searchResponseSequences.set(entity, sequence);
+        return this;
+    }
+
+    /**
+     * Configure post() to throw for a specific endpoint (partial match)
+     */
+    mockPostFailure(endpoint: string, error: Error): this {
+        this.postFailures.set(endpoint, error);
+        return this;
+    }
+
+    /**
      * Set default search response when no specific mock is set
      */
     setDefaultSearchResponse<T>(data: T[]): this {
@@ -168,8 +188,10 @@ export class MockApiHelpers {
     reset(): this {
         this.calls = [];
         this.searchResponses.clear();
+        this.searchResponseSequences.clear();
         this.findByNameResponses.clear();
         this.postResponses.clear();
+        this.postFailures.clear();
         this.getResponses.clear();
         this.syncShouldSucceed = true;
         this.syncError = null;
@@ -230,6 +252,11 @@ export class MockApiHelpers {
             body: { _filters, _options },
         });
         this.searchEntitiesMock();
+
+        const sequence = this.searchResponseSequences.get(entity);
+        if (sequence && sequence.length > 0) {
+            return (sequence.shift() ?? []) as T[];
+        }
 
         const response = this.searchResponses.get(entity);
         if (response !== undefined) {
@@ -322,7 +349,11 @@ export class MockApiHelpers {
 
     async getCurrencyId(isoCode = "EUR"): Promise<string> {
         this.calls.push({ method: "post", endpoint: "search/currency", body: { isoCode } });
-        return "currency-id-mock";
+        const currencies = this.searchResponses.get("currency") as
+            | Array<{ id: string; isoCode?: string }>
+            | undefined;
+        const match = currencies?.find((c) => !c.isoCode || c.isoCode === isoCode);
+        return match?.id ?? `currency-${isoCode.toLowerCase()}-mock`;
     }
 
     async getStandardTaxId(): Promise<string> {
@@ -381,6 +412,12 @@ export class MockApiHelpers {
         this.calls.push({ method: "post", endpoint, body });
         this.postMock();
 
+        for (const [pattern, error] of this.postFailures) {
+            if (endpoint.includes(pattern)) {
+                throw error;
+            }
+        }
+
         const response = this.postResponses.get(endpoint);
         if (response !== undefined) {
             return response as T;
@@ -407,8 +444,8 @@ export class MockApiHelpers {
         return {} as T;
     }
 
-    async delete(endpoint: string): Promise<void> {
-        this.calls.push({ method: "delete", endpoint });
+    async httpDelete(endpoint: string): Promise<void> {
+        this.calls.push({ method: "httpDelete", endpoint });
         this.deleteMock();
     }
 

@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import type { HydratedBlueprint, ProductMetadata } from "../../../../src/types/index.js";
+import type { HydratedBlueprint } from "../../../../src/types/index.js";
 
 import {
     buildCmsImageSpecs,
+    buildThemeImageSpecs,
     hydrateCmsImages,
     hydrateProductImages,
+    hydrateThemeMedia,
 } from "../../../../src/blueprint/hydrators/image.js";
 import { DataCache } from "../../../../src/cache.js";
 import { NoOpImageProvider } from "../../../../src/providers/noop-provider.js";
@@ -223,8 +225,15 @@ describe("hydrateCmsImages", () => {
 // hydrateProductImages tests
 // =============================================================================
 
+type TestProduct = {
+    id: string;
+    name: string;
+    baseImagePrompt?: string;
+    imageDescriptions?: HydratedBlueprint["products"][number]["metadata"]["imageDescriptions"];
+};
+
 function createMinimalBlueprint(
-    products: Array<{ id: string; name: string }>,
+    products: TestProduct[],
     categories: HydratedBlueprint["categories"] = []
 ): HydratedBlueprint {
     return {
@@ -241,11 +250,22 @@ function createMinimalBlueprint(
             categoryIds: ["cat1"],
             metadata: {
                 imageCount: 1 as const,
-                imageDescriptions: [],
+                imageDescriptions: p.imageDescriptions ?? [],
+                baseImagePrompt: p.baseImagePrompt,
                 isVariant: false,
                 properties: [],
                 reviewCount: 0 as const,
                 hasSalesPrice: false,
+                hasTieredPricing: false,
+                isTopseller: false,
+                isNew: false,
+                isShippingFree: false,
+                weight: 1.0,
+                width: 100,
+                height: 100,
+                length: 100,
+                ean: "1234567890128",
+                manufacturerNumber: "MPN-TEST0001",
             },
         })),
         propertyGroups: [],
@@ -254,44 +274,30 @@ function createMinimalBlueprint(
     };
 }
 
-function saveProductMetadata(
-    cache: DataCache,
-    salesChannel: string,
-    productId: string,
-    metadata: Partial<ProductMetadata>
-): void {
-    const full: ProductMetadata = {
-        imageCount: 1,
-        imageDescriptions: [],
-        isVariant: false,
-        properties: [],
-        reviewCount: 0 as const,
-        hasSalesPrice: false,
-        ...metadata,
-    };
-    cache.saveProductMetadata(salesChannel, productId, full);
-}
-
 describe("hydrateProductImages", () => {
-    test("generates images for products with metadata", async () => {
+    test("generates images for products with metadata on the blueprint", async () => {
         const imageProvider = new MockImageProvider();
         const cache = createTestCache();
+        // imageDescriptions live on the blueprint in-memory (not pre-written to disk),
+        // matching the real call order in blueprint-service.ts where hydrateProductImages
+        // runs before saveHydratedBlueprint writes metadata files.
         const blueprint = createMinimalBlueprint([
-            { id: "p1", name: "Guitar" },
-            { id: "p2", name: "Piano" },
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A high-quality guitar",
+                imageDescriptions: [
+                    { view: "front", prompt: "Guitar front view" },
+                    { view: "side", prompt: "Guitar side view" },
+                ],
+            },
+            {
+                id: "p2",
+                name: "Piano",
+                baseImagePrompt: "A grand piano",
+                imageDescriptions: [{ view: "front", prompt: "Piano front view" }],
+            },
         ]);
-
-        saveProductMetadata(cache, "test-store", "p1", {
-            baseImagePrompt: "A high-quality guitar",
-            imageDescriptions: [
-                { view: "front", prompt: "Guitar front view" },
-                { view: "side", prompt: "Guitar side view" },
-            ],
-        });
-        saveProductMetadata(cache, "test-store", "p2", {
-            baseImagePrompt: "A grand piano",
-            imageDescriptions: [{ view: "front", prompt: "Piano front view" }],
-        });
 
         const result = await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
 
@@ -302,10 +308,11 @@ describe("hydrateProductImages", () => {
         expect(imageProvider.callCount).toBe(3);
     });
 
-    test("skips products without metadata", async () => {
+    test("skips products with no imageDescriptions", async () => {
         const imageProvider = new MockImageProvider();
         const cache = createTestCache();
         const blueprint = createMinimalBlueprint([{ id: "p1", name: "Guitar" }]);
+        // imageDescriptions defaults to [] — no tasks expected
 
         const result = await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
 
@@ -318,15 +325,17 @@ describe("hydrateProductImages", () => {
     test("skips images already in cache", async () => {
         const imageProvider = new MockImageProvider();
         const cache = createTestCache();
-        const blueprint = createMinimalBlueprint([{ id: "p1", name: "Guitar" }]);
-
-        saveProductMetadata(cache, "test-store", "p1", {
-            baseImagePrompt: "A guitar",
-            imageDescriptions: [
-                { view: "front", prompt: "Guitar front" },
-                { view: "side", prompt: "Guitar side" },
-            ],
-        });
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A guitar",
+                imageDescriptions: [
+                    { view: "front", prompt: "Guitar front" },
+                    { view: "side", prompt: "Guitar side" },
+                ],
+            },
+        ]);
 
         // Pre-cache the front view
         cache.images.saveImageWithView(
@@ -350,12 +359,14 @@ describe("hydrateProductImages", () => {
     test("detects and regenerates stale images", async () => {
         const imageProvider = new MockImageProvider();
         const cache = createTestCache();
-        const blueprint = createMinimalBlueprint([{ id: "p1", name: "Guitar" }]);
-
-        saveProductMetadata(cache, "test-store", "p1", {
-            baseImagePrompt: "A new guitar prompt",
-            imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
-        });
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A new guitar prompt",
+                imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
+            },
+        ]);
 
         // Save image with old prompt (stale)
         cache.images.saveImageWithView(
@@ -411,12 +422,14 @@ describe("hydrateProductImages", () => {
     test("handles NoOpImageProvider gracefully", async () => {
         const imageProvider = new NoOpImageProvider();
         const cache = createTestCache();
-        const blueprint = createMinimalBlueprint([{ id: "p1", name: "Guitar" }]);
-
-        saveProductMetadata(cache, "test-store", "p1", {
-            baseImagePrompt: "A guitar",
-            imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
-        });
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A guitar",
+                imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
+            },
+        ]);
 
         const result = await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
 
@@ -428,12 +441,14 @@ describe("hydrateProductImages", () => {
     test("reports all when fully cached", async () => {
         const imageProvider = new MockImageProvider();
         const cache = createTestCache();
-        const blueprint = createMinimalBlueprint([{ id: "p1", name: "Guitar" }]);
-
-        saveProductMetadata(cache, "test-store", "p1", {
-            baseImagePrompt: "A guitar",
-            imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
-        });
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A guitar",
+                imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
+            },
+        ]);
 
         cache.images.saveImageWithView(
             "test-store",
@@ -451,5 +466,227 @@ describe("hydrateProductImages", () => {
         expect(result.skipped).toBe(1);
         expect(result.total).toBe(1);
         expect(imageProvider.callCount).toBe(0);
+    });
+});
+
+// =============================================================================
+// Theme Media Tests
+// =============================================================================
+
+describe("buildThemeImageSpecs", () => {
+    test("returns 3 specs: logo, favicon, share", () => {
+        const specs = buildThemeImageSpecs("beauty", "Beauty products");
+        expect(specs).toHaveLength(3);
+
+        const keys = specs.map((s) => s.key);
+        expect(keys).toContain("store-logo");
+        expect(keys).toContain("store-favicon");
+        expect(keys).toContain("store-share");
+    });
+
+    test("logo has compact landscape dimensions", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo).toBeDefined();
+        expect(logo!.width).toBe(474);
+        expect(logo!.height).toBe(70);
+        expect(logo!.width).toBeGreaterThan(logo!.height);
+    });
+
+    test("favicon is square", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const favicon = specs.find((s) => s.key === "store-favicon");
+        expect(favicon).toBeDefined();
+        expect(favicon!.width).toBe(96);
+        expect(favicon!.height).toBe(96);
+    });
+
+    test("share icon has og:image dimensions", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const share = specs.find((s) => s.key === "store-share");
+        expect(share).toBeDefined();
+        expect(share!.width).toBe(1200);
+        expect(share!.height).toBe(630);
+    });
+
+    test("prompts include store description", () => {
+        const specs = buildThemeImageSpecs("garden-store", "Plants and garden accessories");
+
+        for (const spec of specs) {
+            expect(spec.prompt).toContain("Plants and garden accessories");
+        }
+    });
+
+    test("logo and favicon are transparent, share is not", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const logo = specs.find((s) => s.key === "store-logo");
+        const favicon = specs.find((s) => s.key === "store-favicon");
+        const share = specs.find((s) => s.key === "store-share");
+        expect(logo!.transparent).toBe(true);
+        expect(favicon!.transparent).toBe(true);
+        expect(share!.transparent).toBeUndefined();
+    });
+
+    test("logo uses fitHeight mode for optimal header sizing", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const logo = specs.find((s) => s.key === "store-logo");
+        const favicon = specs.find((s) => s.key === "store-favicon");
+        const share = specs.find((s) => s.key === "store-share");
+        expect(logo!.fitHeight).toBe(true);
+        expect(favicon!.fitHeight).toBeUndefined();
+        expect(share!.fitHeight).toBeUndefined();
+    });
+
+    test("logo and favicon prompts mention transparent background", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+        const logo = specs.find((s) => s.key === "store-logo");
+        const favicon = specs.find((s) => s.key === "store-favicon");
+        expect(logo!.prompt).toContain("transparent background");
+        expect(favicon!.prompt).toContain("transparent background");
+    });
+
+    test("cleans technical store name prefix from description", () => {
+        const specs = buildThemeImageSpecs(
+            "e2e-test-kids-store-1773308802",
+            "e2e-test-kids-store-1773308802 is your one-stop shop for engaging toys and games"
+        );
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo!.prompt).not.toContain("e2e-test-kids-store-1773308802 is your");
+        expect(logo!.prompt).toContain("engaging toys and games");
+    });
+
+    test("logo prompt includes humanized store name", () => {
+        const specs = buildThemeImageSpecs("kids-store", "Toys and games for children");
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo!.prompt).toContain("Kids Store");
+    });
+
+    test("strips leading e2e and test segments from logo display name", () => {
+        const specs = buildThemeImageSpecs("e2e-test-kids-store", "Toys");
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo!.prompt).toContain("Kids Store");
+        expect(logo!.prompt).not.toContain("E2e");
+        expect(logo!.prompt).not.toContain("Test");
+    });
+
+    test("strips trailing Unix-timestamp suffix (8+ digits) from logo display name", () => {
+        const specs = buildThemeImageSpecs("e2e-test-kids-store-1773326586", "Toys and games");
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo!.prompt).toContain("Kids Store");
+        expect(logo!.prompt).not.toContain("1773326586");
+        expect(logo!.prompt).not.toContain("E2e");
+        expect(logo!.prompt).not.toContain("Test");
+    });
+
+    test("preserves short numeric suffixes like studio-54 or camera-360", () => {
+        const specs54 = buildThemeImageSpecs("studio-54", "Music and entertainment");
+        const logo54 = specs54.find((s) => s.key === "store-logo");
+        expect(logo54!.prompt).toContain("Studio 54");
+
+        const specs360 = buildThemeImageSpecs("camera-360", "Photography gear");
+        const logo360 = specs360.find((s) => s.key === "store-logo");
+        expect(logo360!.prompt).toContain("Camera 360");
+    });
+
+    test("falls back to full name if all segments would be stripped", () => {
+        // A store named just "e2e-test" should still get some display name
+        const specs = buildThemeImageSpecs("e2e-test", "Testing store");
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo!.prompt).toContain("E2e Test");
+    });
+
+    test("prompts include brand color hex values when provided", () => {
+        const specs = buildThemeImageSpecs("beauty", "Cosmetics and skincare", {
+            primary: "#E91E63",
+            secondary: "#F8BBD0",
+        });
+
+        for (const spec of specs) {
+            expect(spec.prompt).toContain("#E91E63");
+            expect(spec.prompt).toContain("#F8BBD0");
+        }
+    });
+
+    test("prompts work without brand colors", () => {
+        const specs = buildThemeImageSpecs("music", "Musical instruments");
+
+        for (const spec of specs) {
+            expect(spec.prompt).not.toContain("#");
+            expect(spec.prompt.length).toBeGreaterThan(20);
+        }
+    });
+
+    test("all keys are unique", () => {
+        const specs = buildThemeImageSpecs("test", "Test store");
+        const keys = specs.map((s) => s.key);
+        expect(new Set(keys).size).toBe(keys.length);
+    });
+});
+
+describe("hydrateThemeMedia", () => {
+    test("generates all 3 images when cache is empty", async () => {
+        const imageProvider = new MockImageProvider();
+        const cache = createTestCache();
+
+        const result = await hydrateThemeMedia(imageProvider, cache, "test-store", "Test products");
+
+        expect(result.total).toBe(3);
+        expect(result.generated).toBe(3);
+        expect(result.skipped).toBe(0);
+        expect(result.failed).toBe(0);
+        expect(imageProvider.callCount).toBe(3);
+    });
+
+    test("skips images already in cache", async () => {
+        const imageProvider = new MockImageProvider();
+        const cache = createTestCache();
+
+        cache.images.saveImageForSalesChannel(
+            "test-store",
+            "store-logo",
+            "store-logo",
+            "dGVzdA==",
+            "logo prompt",
+            undefined,
+            "theme_media"
+        );
+
+        const result = await hydrateThemeMedia(imageProvider, cache, "test-store", "Test products");
+
+        expect(result.total).toBe(3);
+        expect(result.generated).toBe(2);
+        expect(result.skipped).toBe(1);
+        expect(imageProvider.callCount).toBe(2);
+    });
+
+    test("handles failed generations", async () => {
+        const imageProvider = new FailingImageProvider();
+        const cache = createTestCache();
+
+        const result = await hydrateThemeMedia(imageProvider, cache, "test-store", "Test products");
+
+        expect(result.total).toBe(3);
+        expect(result.generated).toBe(0);
+        expect(result.failed).toBe(3);
+    });
+
+    test("passes correct dimensions to image provider", async () => {
+        const imageProvider = new MockImageProvider();
+        const cache = createTestCache();
+
+        await hydrateThemeMedia(imageProvider, cache, "test-store", "Test products");
+
+        const calls = imageProvider.getCalls();
+        const logoCalls = calls.filter((c) => c.options?.width === 474);
+        expect(logoCalls).toHaveLength(1);
+        expect(logoCalls[0]?.options?.height).toBe(70);
+
+        const faviconCalls = calls.filter((c) => c.options?.width === 96);
+        expect(faviconCalls).toHaveLength(1);
+        expect(faviconCalls[0]?.options?.height).toBe(96);
+
+        const shareCalls = calls.filter((c) => c.options?.width === 1200);
+        expect(shareCalls).toHaveLength(1);
+        expect(shareCalls[0]?.options?.height).toBe(630);
     });
 });

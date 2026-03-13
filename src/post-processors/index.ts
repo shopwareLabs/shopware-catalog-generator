@@ -10,8 +10,8 @@
  * - Registry for processor discovery
  */
 
-import type { DataCache } from "../cache.js";
-import type { ShopwareApiHelpers } from "../shopware/api-helpers.js";
+import type { DataCacheApi } from "../cache.js";
+import type { ShopwareApi } from "../shopware/api-helpers.js";
 import type { HydratedBlueprint, ImageProvider, TextProvider } from "../types/index.js";
 
 import { logger } from "../utils/index.js";
@@ -32,7 +32,7 @@ export interface PostProcessorContext {
     blueprint: HydratedBlueprint;
 
     /** Cache for reading/writing metadata */
-    cache: DataCache;
+    cache: DataCacheApi;
 
     /** Text provider for AI generation (optional) */
     textProvider?: TextProvider;
@@ -40,22 +40,11 @@ export interface PostProcessorContext {
     /** Image provider for image generation (optional) */
     imageProvider?: ImageProvider;
 
-    /** Shopware API base URL */
-    shopwareUrl: string;
-
     /**
-     * Get a fresh Shopware API access token
-     * This function handles token refresh automatically when the token is about to expire.
-     * Post-processors should call this before each API request batch.
+     * Shopware API helpers — the single gateway for all Shopware calls.
+     * Required. Provides searchEntities, syncEntities, deleteEntities, post, patch, postRaw, etc.
      */
-    getAccessToken: () => Promise<string>;
-
-    /**
-     * Shopware API helpers for common operations
-     * Provides searchEntities, syncEntities, deleteEntities, etc.
-     * Optional for backwards compatibility - will be required in future versions.
-     */
-    api?: ShopwareApiHelpers;
+    api: ShopwareApi;
 
     /** Processing options */
     options: PostProcessorOptions;
@@ -68,6 +57,13 @@ export interface PostProcessorOptions {
 
     /** Dry run mode - log actions without executing */
     dryRun: boolean;
+
+    /**
+     * Names of processors in the current run.
+     * Populated by the orchestrator before constructing the context.
+     * Used by processors to conditionally render sections that depend on other processors.
+     */
+    activeProcessors?: string[];
 }
 
 /** Default processing options */
@@ -263,15 +259,25 @@ function groupParallelizable(processors: PostProcessor[], selected: string[]): P
         );
 
         if (depsComplete) {
-            // Can run in current batch or start new one
             const currentBatch = batches[batches.length - 1];
-            if (currentBatch?.every((p) => !p.dependsOn.includes(processor.name))) {
-                currentBatch.push(processor);
-            } else {
+            if (!currentBatch) {
                 batches.push([processor]);
+            } else {
+                const currentBatchNames = new Set(currentBatch.map((p) => p.name));
+                const hasDepsInCurrentBatch = processor.dependsOn.some(
+                    (dep) => selected.includes(dep) && currentBatchNames.has(dep)
+                );
+                const nothingDependsOnThis = currentBatch.every(
+                    (p) => !p.dependsOn.includes(processor.name)
+                );
+
+                if (!hasDepsInCurrentBatch && nothingDependsOnThis) {
+                    currentBatch.push(processor);
+                } else {
+                    batches.push([processor]);
+                }
             }
         } else {
-            // Start new batch
             batches.push([processor]);
         }
 
@@ -301,12 +307,20 @@ export async function runProcessors(
         }
     }
 
+    // Populate activeProcessors so processors can conditionally render optional sections
+    const contextWithActive: PostProcessorContext = {
+        ...context,
+        options: { ...context.options, activeProcessors: selected },
+    };
+
     // Group into parallel batches
     const batches = groupParallelizable(allProcessors, selected);
 
     logger.info(`Running ${selected.length} post-processors in ${batches.length} batch(es)...`, {
         cli: true,
     });
+
+    // Use contextWithActive from here on so each processor can read activeProcessors
 
     const allResults: PostProcessorResult[] = [];
 
@@ -322,7 +336,7 @@ export async function runProcessors(
             batch.map(async (processor) => {
                 const startTime = Date.now();
                 try {
-                    const result = await processor.process(context);
+                    const result = await processor.process(contextWithActive);
                     return {
                         ...result,
                         durationMs: Date.now() - startTime,
@@ -444,10 +458,14 @@ import {
     TextProcessor,
     VideoProcessor,
 } from "./cms/index.js";
+import { CrossSellingProcessor } from "./cross-selling-processor.js";
+import { CustomerProcessor } from "./customer-processor.js";
 import { DigitalProductProcessor } from "./digital-product-processor.js";
 import { ImageProcessor } from "./image-processor.js";
 import { ManufacturerProcessor } from "./manufacturer-processor.js";
+import { PromotionProcessor } from "./promotion-processor.js";
 import { ReviewProcessor } from "./review-processor.js";
+import { ThemeProcessor } from "./theme-processor.js";
 import { VariantProcessor } from "./variant-processor.js";
 
 // Re-export processors
@@ -462,10 +480,14 @@ export {
     TextProcessor,
     VideoProcessor,
 } from "./cms/index.js";
+export { CrossSellingProcessor } from "./cross-selling-processor.js";
+export { CustomerProcessor } from "./customer-processor.js";
 export { DigitalProductProcessor } from "./digital-product-processor.js";
 export { ImageProcessor } from "./image-processor.js";
 export { ManufacturerProcessor } from "./manufacturer-processor.js";
+export { PromotionProcessor } from "./promotion-processor.js";
 export { ReviewProcessor } from "./review-processor.js";
+export { ThemeProcessor } from "./theme-processor.js";
 export { VariantProcessor } from "./variant-processor.js";
 
 // Register all processors with the registry
@@ -484,7 +506,11 @@ registry.register(DigitalProductProcessor);
 // CMS orchestrator (creates Testing category hierarchy, runs last)
 registry.register(TestingProcessor);
 // Other processors
+registry.register(CrossSellingProcessor);
+registry.register(CustomerProcessor);
 registry.register(ImageProcessor);
 registry.register(ManufacturerProcessor);
+registry.register(PromotionProcessor);
 registry.register(ReviewProcessor);
+registry.register(ThemeProcessor);
 registry.register(VariantProcessor);

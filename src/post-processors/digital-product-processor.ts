@@ -14,6 +14,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import type { ProductSyncPayload } from "../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -23,6 +24,7 @@ import type {
 
 import { GIFT_CARD_50 } from "../fixtures/digital-products.js";
 import { apiPost, generateUUID, logger } from "../utils/index.js";
+import { resolvePrimaryCurrencyId } from "./currency-utils.js";
 
 /** Cache file for storing digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
@@ -43,159 +45,142 @@ class DigitalProductProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { options } = context;
-        const errors: string[] = [];
         const startTime = Date.now();
+        const result = (
+            processed: number,
+            skipped: number,
+            errors: string[] = []
+        ): PostProcessorResult => ({
+            name: this.name,
+            processed,
+            skipped,
+            errors,
+            durationMs: Date.now() - startTime,
+        });
 
-        if (options.dryRun) {
+        if (context.options.dryRun) {
             logger.info(`    [DRY RUN] Would create gift card digital product`, { cli: true });
-            return {
-                name: this.name,
-                processed: 1,
-                skipped: 0,
-                errors: [],
-                durationMs: Date.now() - startTime,
-            };
+            return result(1, 0);
         }
 
         try {
-            // Check if already processed for this SalesChannel
-            const cached = this.loadCache(context);
-            if (cached) {
-                const cacheStillValid = await this.isCachedGiftCardValid(context, cached.productId);
-                if (!cacheStillValid) {
-                    logger.warn(
-                        `    ⚠ Stale digital-product cache detected, rebuilding gift card state`,
-                        { cli: true }
-                    );
-                    this.clearCache(context);
-                } else {
-                    logger.info(`    ⊘ Gift card already exists (${cached.productId})`, {
-                        cli: true,
-                    });
-                    return {
-                        name: this.name,
-                        processed: 0,
-                        skipped: 1,
-                        errors: [],
-                        durationMs: Date.now() - startTime,
-                    };
-                }
-            }
+            const cached = await this.handleCachedProduct(context);
+            if (cached) return result(0, 1);
 
-            // Step 1: Check if gift card product already exists globally
-            let productId = await this.findExistingGiftCard(context);
-            let createdNew = false;
+            const productId = await this.ensureGiftCardProduct(context);
+            if (!productId) return result(0, 0, ["Failed to create gift card product"]);
 
-            if (!productId) {
-                // Step 2: Get required IDs for product creation
-                const taxId = await this.getDefaultTaxId(context);
-                if (!taxId) {
-                    errors.push("Could not find default tax rate");
-                    return {
-                        name: this.name,
-                        processed: 0,
-                        skipped: 0,
-                        errors,
-                        durationMs: Date.now() - startTime,
-                    };
-                }
+            await this.ensureCoverImage(context, productId);
+            await this.ensureVisibility(context, productId);
+            const downloadResult = await this.ensureDownload(context, productId);
+            if (downloadResult.error) return result(0, 0, [downloadResult.error]);
 
-                // Step 3: Create the gift card product
-                productId = await this.createGiftCardProduct(context, taxId);
-                if (!productId) {
-                    errors.push("Failed to create gift card product");
-                    return {
-                        name: this.name,
-                        processed: 0,
-                        skipped: 0,
-                        errors,
-                        durationMs: Date.now() - startTime,
-                    };
-                }
-                createdNew = true;
-                logger.info(`    ✓ Created gift card product "${GIFT_CARD_50.name}"`, {
-                    cli: true,
-                });
-
-                // Step 3b: Upload product cover image
-                const coverUploaded = await this.uploadProductCoverImage(context, productId);
-                if (coverUploaded) {
-                    logger.info(`    ✓ Uploaded gift card cover image`, { cli: true });
-                }
-            } else {
-                logger.info(`    ⊘ Gift card product already exists globally`, { cli: true });
-            }
-
-            // Step 4: Add visibility for this SalesChannel
-            const visibilityAdded = await this.addSalesChannelVisibility(context, productId);
-            if (!visibilityAdded) {
-                logger.info(`    ⊘ Gift card already visible in SalesChannel`, { cli: true });
-            } else {
-                logger.info(`    ✓ Added gift card to SalesChannel`, { cli: true });
-            }
-
-            // Step 5: Create download media if not exists
-            let mediaId = await this.findExistingDownloadMedia(context, productId);
-            let downloadId: string | null = null;
-
-            if (!mediaId) {
-                mediaId = await this.createDownloadMedia(context);
-                if (!mediaId) {
-                    errors.push("Failed to create download media");
-                    return {
-                        name: this.name,
-                        processed: 0,
-                        skipped: 0,
-                        errors,
-                        durationMs: Date.now() - startTime,
-                    };
-                }
-
-                // Step 6: Create download association
-                downloadId = await this.createProductDownload(context, productId, mediaId);
-                if (!downloadId) {
-                    errors.push("Failed to create product download");
-                    return {
-                        name: this.name,
-                        processed: 0,
-                        skipped: 0,
-                        errors,
-                        durationMs: Date.now() - startTime,
-                    };
-                }
-                logger.info(`    ✓ Created downloadable voucher`, { cli: true });
-            } else {
-                logger.info(`    ⊘ Download media already exists`, { cli: true });
-            }
-
-            // Save to cache for TestingProcessor
             this.saveCache(context, {
                 productId,
-                mediaId: mediaId || "",
-                downloadId: downloadId || "",
-                createdNew,
+                mediaId: downloadResult.mediaId,
+                downloadId: downloadResult.downloadId,
+                createdNew: downloadResult.createdNew ?? false,
             });
 
-            return {
-                name: this.name,
-                processed: 1,
-                skipped: 0,
-                errors: [],
-                durationMs: Date.now() - startTime,
-            };
+            return result(1, 0);
         } catch (error) {
-            errors.push(
-                `Digital product creation failed: ${error instanceof Error ? error.message : String(error)}`
-            );
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: 0,
-                errors,
-                durationMs: Date.now() - startTime,
-            };
+            const message = error instanceof Error ? error.message : String(error);
+            return result(0, 0, [`Digital product creation failed: ${message}`]);
         }
+    }
+
+    /**
+     * Returns true if a valid cached product was found (caller should skip).
+     * Clears stale cache and returns false to continue with fresh setup.
+     */
+    private async handleCachedProduct(context: PostProcessorContext): Promise<boolean> {
+        const cached = this.loadCache(context);
+        if (!cached) return false;
+
+        const valid = await this.isCachedGiftCardValid(context, cached.productId);
+        if (!valid) {
+            logger.warn(`    ⚠ Stale digital-product cache detected, rebuilding gift card state`, {
+                cli: true,
+            });
+            this.clearCache(context);
+            return false;
+        }
+
+        await this.ensureCoverImage(context, cached.productId);
+        logger.info(`    ⊘ Gift card already exists (${cached.productId})`, { cli: true });
+        return true;
+    }
+
+    /**
+     * Find or create the gift card product. Returns the product ID or null on failure.
+     */
+    private async ensureGiftCardProduct(context: PostProcessorContext): Promise<string | null> {
+        const existingId = await this.findExistingGiftCard(context);
+        if (existingId) {
+            logger.info(`    ⊘ Gift card product already exists globally`, { cli: true });
+            return existingId;
+        }
+
+        const taxId = await this.getDefaultTaxId(context);
+        if (!taxId) return null;
+
+        const productId = await this.createGiftCardProduct(context, taxId);
+        if (productId) {
+            logger.info(`    ✓ Created gift card product "${GIFT_CARD_50.name}"`, { cli: true });
+        }
+        return productId;
+    }
+
+    private async ensureCoverImage(
+        context: PostProcessorContext,
+        productId: string
+    ): Promise<void> {
+        const hasCover = await this.productHasCoverImage(context, productId);
+        if (hasCover) return;
+
+        const uploaded = await this.uploadProductCoverImage(context, productId);
+        if (uploaded) {
+            logger.info(`    ✓ Uploaded gift card cover image`, { cli: true });
+        }
+    }
+
+    private async ensureVisibility(
+        context: PostProcessorContext,
+        productId: string
+    ): Promise<void> {
+        const added = await this.addSalesChannelVisibility(context, productId);
+        if (added) {
+            logger.info(`    ✓ Added gift card to SalesChannel`, { cli: true });
+            return;
+        }
+        logger.info(`    ⊘ Gift card already visible in SalesChannel`, { cli: true });
+    }
+
+    private async ensureDownload(
+        context: PostProcessorContext,
+        productId: string
+    ): Promise<{
+        mediaId: string;
+        downloadId: string;
+        createdNew?: boolean;
+        error?: string;
+    }> {
+        const existingMediaId = await this.findExistingDownloadMedia(context, productId);
+        if (existingMediaId) {
+            logger.info(`    ⊘ Download media already exists`, { cli: true });
+            return { mediaId: existingMediaId, downloadId: "" };
+        }
+
+        const mediaId = await this.createDownloadMedia(context);
+        if (!mediaId)
+            return { mediaId: "", downloadId: "", error: "Failed to create download media" };
+
+        const downloadId = await this.createProductDownload(context, productId, mediaId);
+        if (!downloadId)
+            return { mediaId, downloadId: "", error: "Failed to create product download" };
+
+        logger.info(`    ✓ Created downloadable voucher`, { cli: true });
+        return { mediaId, downloadId, createdNew: true };
     }
 
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
@@ -355,6 +340,25 @@ class DigitalProductProcessorImpl implements PostProcessor {
     }
 
     /**
+     * Get the "Instant download" delivery time ID (min=0)
+     */
+    private async getInstantDeliveryTimeId(context: PostProcessorContext): Promise<string | null> {
+        try {
+            const response = await apiPost(context, "search/delivery-time", {
+                limit: 1,
+                filter: [{ type: "equals", field: "min", value: 0 }],
+            });
+
+            if (!response.ok) return null;
+
+            const data = (await response.json()) as { data?: Array<{ id: string }> };
+            return data.data?.[0]?.id ?? null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * Create the gift card product using fixture data
      */
     private async createGiftCardProduct(
@@ -362,34 +366,37 @@ class DigitalProductProcessorImpl implements PostProcessor {
         taxId: string
     ): Promise<string | null> {
         const productId = generateUUID();
+        const deliveryTimeId = await this.getInstantDeliveryTimeId(context);
+        const currencyId = await resolvePrimaryCurrencyId(context.api, context.salesChannelId);
 
         try {
+            const payload: ProductSyncPayload = {
+                id: productId,
+                productNumber: GIFT_CARD_50.productNumber,
+                name: GIFT_CARD_50.name,
+                description: GIFT_CARD_50.description,
+                stock: 9999,
+                taxId,
+                price: [
+                    {
+                        currencyId,
+                        gross: GIFT_CARD_50.price,
+                        net: GIFT_CARD_50.price,
+                        linked: false,
+                    },
+                ],
+                active: true,
+                shippingFree: true,
+                isCloseout: false,
+                markAsTopseller: false,
+                deliveryTimeId: deliveryTimeId ?? undefined,
+            };
+
             const response = await apiPost(context, "_action/sync", {
                 createProduct: {
                     entity: "product",
                     action: "upsert",
-                    payload: [
-                        {
-                            id: productId,
-                            productNumber: GIFT_CARD_50.productNumber,
-                            name: GIFT_CARD_50.name,
-                            description: GIFT_CARD_50.description,
-                            stock: 9999,
-                            taxId,
-                            price: [
-                                {
-                                    currencyId: "b7d2554b0ce847cd82f3ac9bd1c0dfca", // EUR
-                                    gross: GIFT_CARD_50.price,
-                                    net: GIFT_CARD_50.price, // Gift cards are typically tax-exempt
-                                    linked: false,
-                                },
-                            ],
-                            active: true,
-                            shippingFree: true, // Digital product
-                            isCloseout: false,
-                            markAsTopseller: false,
-                        },
-                    ],
+                    payload: [payload],
                 },
             });
 
@@ -405,6 +412,32 @@ class DigitalProductProcessorImpl implements PostProcessor {
         } catch (error) {
             logger.warn("Failed to create gift card product", { data: error });
             return null;
+        }
+    }
+
+    /**
+     * Check if a product already has a cover image assigned
+     */
+    private async productHasCoverImage(
+        context: PostProcessorContext,
+        productId: string
+    ): Promise<boolean> {
+        try {
+            const response = await apiPost(context, "search/product", {
+                ids: [productId],
+                limit: 1,
+                associations: { cover: { associations: { media: {} } } },
+            });
+
+            if (!response.ok) return false;
+
+            const data = (await response.json()) as {
+                data?: Array<{ coverId: string | null; cover?: { media?: { url?: string } } }>;
+            };
+            const product = data.data?.[0];
+            return !!product?.coverId;
+        } catch {
+            return false;
         }
     }
 
@@ -451,20 +484,11 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             // Read and upload image file
             const imageBuffer = fs.readFileSync(GIFT_CARD_50.imagePath);
-            const token = await context.getAccessToken();
-            const uploadUrl = `${context.shopwareUrl}/api/_action/media/${mediaId}/upload?extension=png&fileName=gift-card-50-cover`;
-
-            const uploadResponse = await fetch(uploadUrl, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "image/png",
-                },
-                body: imageBuffer,
-            });
-
-            if (!uploadResponse.ok) {
-                logger.apiError("media upload (cover)", uploadResponse.status, {});
+            try {
+                const uniqueName = `gift-card-50-cover-${mediaId.slice(0, 8)}`;
+                await context.api.uploadMedia(mediaId, imageBuffer, uniqueName, "png");
+            } catch (uploadError) {
+                logger.apiError("media upload (cover)", 500, uploadError);
                 return false;
             }
 
@@ -649,22 +673,12 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 .replace("{{CODE}}", voucherCode)
                 .replace("{{DATE}}", voucherDate);
 
-            const token = await context.getAccessToken();
-            const uploadUrl = `${context.shopwareUrl}/api/_action/media/${mediaId}/upload?extension=txt&fileName=gift-card-voucher`;
-
-            const uploadResponse = await fetch(uploadUrl, {
-                method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "text/plain",
-                },
-                body: voucherContent,
-            });
-
-            if (!uploadResponse.ok) {
-                logger.apiError("media upload", uploadResponse.status, {});
-                return null;
-            }
+            await context.api.uploadMedia(
+                mediaId,
+                Buffer.from(voucherContent),
+                "gift-card-voucher",
+                "txt"
+            );
 
             return mediaId;
         } catch (error) {
@@ -723,16 +737,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
         id: string
     ): Promise<boolean> {
         try {
-            const token = await context.getAccessToken();
-            const response = await fetch(`${context.shopwareUrl}/api/${entity}/${id}`, {
-                method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-            });
-
-            return response.ok || response.status === 404;
+            return await context.api.deleteEntity(entity, id);
         } catch (error) {
             logger.warn(`Failed to delete ${entity}/${id}`, { data: error });
             return false;

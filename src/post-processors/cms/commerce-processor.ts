@@ -9,7 +9,7 @@ import type { CmsPageFixture } from "../../fixtures/index.js";
 import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { COMMERCE_ELEMENTS_PAGE } from "../../fixtures/index.js";
-import { apiPost, logger } from "../../utils/index.js";
+import { apiPost, cloneDeep, logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class CommerceProcessorImpl extends BaseCmsProcessor {
@@ -180,7 +180,7 @@ class CommerceProcessorImpl extends BaseCmsProcessor {
         fixture: CmsPageFixture,
         products: ProductWithMedia[]
     ): CmsPageFixture {
-        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const cloned = cloneDeep(fixture);
         const productIds = products.map((p) => p.id);
         const firstProductMedia = products[0]?.mediaIds ?? [];
 

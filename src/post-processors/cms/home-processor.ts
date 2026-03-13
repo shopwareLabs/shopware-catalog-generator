@@ -17,42 +17,167 @@ import type {
     PostProcessorResult,
 } from "../index.js";
 
-import { HOME_LISTING_PAGE } from "../../fixtures/index.js";
+import {
+    DEMO_CUSTOMERS,
+    DEMO_PASSWORD,
+    HOME_LISTING_PAGE,
+    PROMOTIONS,
+} from "../../fixtures/index.js";
 import { getSalesChannelNavigationCategoryId } from "../../shopware/api-helpers.js";
-import { apiPost, capitalizeString, countCategories, logger } from "../../utils/index.js";
+import {
+    apiPost,
+    capitalizeString,
+    cloneDeep,
+    countCategories,
+    logger,
+} from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
-/**
- * Build the homepage welcome text with dynamic store data.
- *
- * Exported for testing.
- */
-export function buildHomePageText(
-    storeName: string,
+function buildIntroHtml(
+    displayName: string,
     description: string,
     productCount: number,
     categoryCount: number
 ): string {
-    const displayName = capitalizeString(storeName);
     return [
         `<h2>Welcome to the ${displayName} Demo-Store!</h2>`,
         `<p>This store was generated with the&nbsp;`,
-        `<a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-generator" rel="noopener">shopware-catalog-generator</a>.&nbsp;</p>`,
-        `<p>The prompt to <b>generate</b> this store was:</p>`,
+        `<a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-generator" rel="noopener">shopware-catalog-generator</a>.`,
+        `<br>The prompt to <b>generate</b> this store was:</p>`,
         `<blockquote>${description}</blockquote>`,
         `<p>It includes ${productCount} Products and ${categoryCount} Categories.</p>`,
-        `<h4>Supported Features:</h4>`,
-        `<ul>`,
+    ].join("");
+}
+
+export interface HomeFeatures {
+    includeCredentials: boolean;
+    includePromotions: boolean;
+    includeCrossSelling: boolean;
+}
+
+function buildFeaturesHtml(features: HomeFeatures): string {
+    const items = [
         `<li>Simple Products,&nbsp;Variant Products and&nbsp;Digital Product</li>`,
-        `<li>Product have Properties and multiple different Images</li>`,
+        ...(features.includeCrossSelling
+            ? [`<li>Products have Properties, Images and Cross-Selling</li>`]
+            : [`<li>Products have Properties and Images</li>`]),
+        ...(features.includeCredentials
+            ? [`<li>Demo Customer Accounts with B2B Customer Group</li>`]
+            : []),
+        ...(features.includePromotions
+            ? [`<li>Promotion Codes and Tiered Quantity Pricing</li>`]
+            : []),
         `<li>CMS-Pages and all CMS-Elements for Testing</li>`,
         `<li>Both default Category-Layouts with Pagination</li>`,
+    ];
+    return [
+        `<h4>Supported Features:</h4>`,
+        `<ul>`,
+        ...items,
         `</ul>`,
-        `<p>We have different reusable templates you can find here:<br>`,
-        `<a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-templates" rel="noopener">shopware-catalog-templates</a></p>`,
-        `<p>All the technical details can be found in the README.</p>`,
-        `<p>Enjoy this ${storeName.toLowerCase()} demo-store.&nbsp;\u{1F607}</p>`,
+        `<p>The linked <a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-templates" rel="noopener">catalog templates</a> provide reusable setups for different store types. `,
+        `See the <a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-generator#readme" rel="noopener">README</a> for technical details.</p>`,
     ].join("");
+}
+
+function buildCredentialsHtml(): string {
+    const cellStyle = `style="padding: 4px 16px 4px 0"`;
+    const headerStyle = `style="padding: 4px 16px 4px 0; text-align: left"`;
+
+    const rows = DEMO_CUSTOMERS.map((c) => {
+        const groupLabel = c.group === "b2b" ? "B2B (net prices)" : "Standard";
+        return `<tr><td ${cellStyle}>${c.email}</td><td ${cellStyle}>${DEMO_PASSWORD}</td><td ${cellStyle}>${groupLabel}</td></tr>`;
+    });
+
+    return [
+        `<h4>Demo Accounts</h4>`,
+        `<table style="border-collapse: collapse; margin-bottom: 1em"><thead>`,
+        `<tr><th ${headerStyle}>Email</th><th ${headerStyle}>Password</th><th ${headerStyle}>Group</th></tr>`,
+        `</thead><tbody>`,
+        ...rows,
+        `</tbody></table>`,
+    ].join("");
+}
+
+function buildPromotionCodesHtml(): string {
+    const cellStyle = `style="padding: 4px 16px 4px 0"`;
+    const headerStyle = `style="padding: 4px 16px 4px 0; text-align: left"`;
+
+    const rows = PROMOTIONS.map((p) => {
+        const description =
+            p.scope === "delivery"
+                ? "Free Shipping"
+                : p.discountType === "percentage"
+                  ? `${p.discountValue}% off${p.maxValue ? ` (max $${p.maxValue})` : ""}`
+                  : `$${p.discountValue} off`;
+
+        return `<tr><td ${cellStyle}><code>${p.code}</code></td><td ${cellStyle}>${description}</td></tr>`;
+    });
+
+    return [
+        `<h4>Promotion Codes</h4>`,
+        `<table style="border-collapse: collapse; margin-bottom: 1em"><thead>`,
+        `<tr><th ${headerStyle}>Code</th><th ${headerStyle}>Discount</th></tr>`,
+        `</thead><tbody>`,
+        ...rows,
+        `</tbody></table>`,
+    ].join("");
+}
+
+/**
+ * Build the hero section text: intro, features, and links.
+ *
+ * Exported for testing.
+ */
+export function buildHeroText(
+    storeName: string,
+    description: string,
+    productCount: number,
+    categoryCount: number,
+    features: HomeFeatures = {
+        includeCredentials: true,
+        includePromotions: true,
+        includeCrossSelling: true,
+    }
+): string {
+    const displayName = capitalizeString(storeName);
+    return [
+        buildIntroHtml(displayName, description, productCount, categoryCount),
+        buildFeaturesHtml(features),
+    ].join("");
+}
+
+/**
+ * Build the reference section: credentials + promotion codes side-by-side, plus closing.
+ * Only includes sections for processors that are active in the current run.
+ *
+ * Exported for testing.
+ */
+export function buildReferenceText(
+    storeName: string,
+    features: HomeFeatures = {
+        includeCredentials: true,
+        includePromotions: true,
+        includeCrossSelling: true,
+    }
+): string {
+    const parts: string[] = [];
+
+    if (features.includeCredentials || features.includePromotions) {
+        const cells: string[] = [];
+        if (features.includeCredentials) {
+            cells.push(
+                `<td style="vertical-align: top; padding-right: 3em">${buildCredentialsHtml()}</td>`
+            );
+        }
+        if (features.includePromotions) {
+            cells.push(`<td style="vertical-align: top">${buildPromotionCodesHtml()}</td>`);
+        }
+        parts.push(`<table style="border-collapse: collapse"><tr>${cells.join("")}</tr></table>`);
+    }
+
+    parts.push(`<p>Enjoy this <b>${storeName.toLowerCase()}</b> demo-store.&nbsp;\u{1F607}</p>`);
+    return parts.join("");
 }
 
 const HOME_HERO_IMAGE_KEY = "home-hero";
@@ -61,7 +186,7 @@ class HomeProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     readonly name = "cms-home";
     readonly description = "Create homepage layout with welcome text and product listing";
     readonly pageFixture = HOME_LISTING_PAGE;
-    override readonly dependsOn: string[] = [];
+    override readonly dependsOn: string[] = ["customers", "promotions", "cross-selling"];
 
     override async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { options } = context;
@@ -170,32 +295,50 @@ class HomeProcessorImpl extends BaseCmsProcessor implements PostProcessor {
      * Build the fixture with dynamic text and hero image populated.
      */
     private async buildPopulatedFixture(context: PostProcessorContext): Promise<CmsPageFixture> {
-        const cloned = JSON.parse(JSON.stringify(this.pageFixture)) as CmsPageFixture;
-        const teaserBlock = cloned.sections[0]?.blocks[0];
-        if (!teaserBlock) return cloned;
+        const cloned = cloneDeep(this.pageFixture);
+        const { salesChannel } = context.blueprint;
+        const productCount = context.blueprint.products.length;
+        const categoryCount = countCategories(context.blueprint.categories);
+        const active = context.options.activeProcessors ?? [];
+        const features: HomeFeatures = {
+            includeCredentials: active.includes("customers"),
+            includePromotions: active.includes("promotions"),
+            includeCrossSelling: active.includes("cross-selling"),
+        };
 
-        // Populate hero image (left slot) - image should be pre-cached from hydration
-        const imageSlot = teaserBlock.slots.find((s) => s.type === "image");
-        if (imageSlot) {
-            const mediaId = await this.uploadHeroImage(context);
-            if (mediaId) {
-                imageSlot.config.media = { source: "static", value: mediaId };
+        // Section 0: Hero teaser (image + intro/features)
+        const teaserBlock = cloned.sections[0]?.blocks[0];
+        if (teaserBlock) {
+            const imageSlot = teaserBlock.slots.find((s) => s.type === "image");
+            if (imageSlot) {
+                const mediaId = await this.uploadHeroImage(context);
+                if (mediaId) {
+                    imageSlot.config.media = { source: "static", value: mediaId };
+                }
+            }
+
+            const heroSlot = teaserBlock.slots.find((s) => s.type === "text");
+            if (heroSlot) {
+                heroSlot.config.content = {
+                    source: "static",
+                    value: buildHeroText(
+                        salesChannel.name,
+                        salesChannel.description,
+                        productCount,
+                        categoryCount,
+                        features
+                    ),
+                };
             }
         }
 
-        // Populate welcome text (right slot)
-        const textSlot = teaserBlock.slots.find((s) => s.type === "text");
-        if (textSlot) {
-            const { salesChannel } = context.blueprint;
-            const productCount = context.blueprint.products.length;
-            const categoryCount = countCategories(context.blueprint.categories);
-            const html = buildHomePageText(
-                salesChannel.name,
-                salesChannel.description,
-                productCount,
-                categoryCount
-            );
-            textSlot.config.content = { source: "static", value: html };
+        // Section 1: Reference info (credentials + promotions side-by-side)
+        const referenceSlot = cloned.sections[1]?.blocks[0]?.slots[0];
+        if (referenceSlot) {
+            referenceSlot.config.content = {
+                source: "static",
+                value: buildReferenceText(salesChannel.name, features),
+            };
         }
 
         return cloned;

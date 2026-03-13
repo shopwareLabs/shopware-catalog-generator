@@ -2,35 +2,14 @@
  * Unit tests for multi-domain/multi-language/multi-currency SalesChannel creation.
  */
 
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
 import type { AdminApiClient } from "../../../src/shopware/admin-client.js";
 
 import { ShopwareClient } from "../../../src/shopware/client.js";
 import { ShopwareHydrator } from "../../../src/shopware/hydrator.js";
 import { logger } from "../../../src/utils/index.js";
-
-// =============================================================================
-// Mock helpers
-// =============================================================================
-
-/**
- * Build a mock AdminApiClient whose `invoke` method dispatches by operation
- * string, returning pre-configured responses.
- */
-function createMockClient(responses: Record<string, unknown>): AdminApiClient {
-    return {
-        invoke: mock(async (operation: string) => {
-            for (const [key, value] of Object.entries(responses)) {
-                if (operation.includes(key)) {
-                    return { data: value };
-                }
-            }
-            return { data: { data: [], total: 0 } };
-        }),
-        getSessionData: () => ({ accessToken: "test-token" }),
-    } as unknown as AdminApiClient;
-}
+import { createMockAdminClient, createMockAdminClientWithInvoke } from "../../mocks/index.js";
 
 /** Minimal Storefront SalesChannel response used when cloning */
 const STOREFRONT_RESPONSE = {
@@ -59,7 +38,7 @@ const STOREFRONT_RESPONSE = {
 describe("ShopwareClient.getLanguageId", () => {
     test("returns language ID when found", async () => {
         const client = new ShopwareClient(
-            createMockClient({
+            createMockAdminClient({
                 "search/language": { data: [{ id: "de-lang-id" }], total: 1 },
             })
         );
@@ -69,7 +48,7 @@ describe("ShopwareClient.getLanguageId", () => {
 
     test("returns null when language is not installed", async () => {
         const client = new ShopwareClient(
-            createMockClient({
+            createMockAdminClient({
                 "search/language": { data: [], total: 0 },
             })
         );
@@ -79,7 +58,7 @@ describe("ShopwareClient.getLanguageId", () => {
 
     test("returns null when data is missing", async () => {
         const client = new ShopwareClient(
-            createMockClient({
+            createMockAdminClient({
                 "search/language": { total: 0 },
             })
         );
@@ -95,7 +74,7 @@ describe("ShopwareClient.getLanguageId", () => {
 describe("ShopwareClient.getSnippetSetId", () => {
     test("returns snippet set ID when found", async () => {
         const client = new ShopwareClient(
-            createMockClient({
+            createMockAdminClient({
                 "search/snippet-set": { data: [{ id: "de-snippet-id" }], total: 1 },
             })
         );
@@ -105,7 +84,7 @@ describe("ShopwareClient.getSnippetSetId", () => {
 
     test("returns null when snippet set is not installed", async () => {
         const client = new ShopwareClient(
-            createMockClient({
+            createMockAdminClient({
                 "search/snippet-set": { data: [], total: 0 },
             })
         );
@@ -135,9 +114,8 @@ function buildHydratorMockClient({
 } = {}): { client: AdminApiClient; capturedSyncPayloads: unknown[] } {
     const capturedSyncPayloads: unknown[] = [];
 
-    const client = {
-        invoke: mock(async (operation: string, params: { body?: unknown }) => {
-            // findSalesChannelByName - not found (new SalesChannel)
+    const client = createMockAdminClientWithInvoke(
+        async (operation: string, params: { body?: unknown }) => {
             if (
                 operation.includes("search/sales-channel") &&
                 JSON.stringify(params?.body).includes('"Beauty"')
@@ -145,12 +123,10 @@ function buildHydratorMockClient({
                 return { data: { data: [], total: 0 } };
             }
 
-            // getFullSalesChannel for "Storefront"
             if (operation.includes("search/sales-channel")) {
                 return { data: STOREFRONT_RESPONSE };
             }
 
-            // getCurrencyId
             if (operation.includes("search/currency")) {
                 const body = params?.body as { filter?: Array<{ value: string }> };
                 const iso = body?.filter?.[0]?.value;
@@ -164,34 +140,28 @@ function buildHydratorMockClient({
                 return { data: { data: [], total: 0 } };
             }
 
-            // getLanguageId
             if (operation.includes("search/language")) {
                 if (!germanLanguageId) return { data: { data: [], total: 0 } };
                 return { data: { data: [{ id: germanLanguageId }], total: 1 } };
             }
 
-            // getSnippetSetId
             if (operation.includes("search/snippet-set")) {
                 if (!germanSnippetSetId) return { data: { data: [], total: 0 } };
                 return { data: { data: [{ id: germanSnippetSetId }], total: 1 } };
             }
 
-            // createRootCategory - not found, create new
             if (operation.includes("search/category")) {
                 return { data: { data: [], total: 0 } };
             }
 
-            // getThemeForSalesChannel
             if (operation.includes("search/theme")) {
                 return { data: { data: [{ id: "theme-id", salesChannels: [] }], total: 1 } };
             }
 
-            // assignTheme
             if (operation.includes("theme") && operation.includes("assign")) {
                 return { data: {} };
             }
 
-            // sync (category creation + SalesChannel creation)
             if (operation.includes("_action/sync")) {
                 const ops = params?.body as Array<{ entity: string; payload: unknown[] }>;
                 for (const op of ops ?? []) {
@@ -201,9 +171,8 @@ function buildHydratorMockClient({
             }
 
             return { data: { data: [], total: 0 } };
-        }),
-        getSessionData: () => ({ accessToken: "test-token" }),
-    } as unknown as AdminApiClient;
+        }
+    );
 
     return { client, capturedSyncPayloads };
 }
@@ -385,7 +354,7 @@ describe("ShopwareHydrator.createSalesChannel - multi-domain", () => {
     test("returns isNew: false for existing SalesChannel without modification", async () => {
         logger.setMcpMode(true);
 
-        const client = createMockClient({
+        const client = createMockAdminClient({
             "search/sales-channel": {
                 data: [
                     {

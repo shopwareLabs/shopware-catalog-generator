@@ -56,12 +56,67 @@ interface SearchResponse<T = Record<string, unknown>> {
 export type TokenGetter = () => Promise<string>;
 
 /**
+ * Public contract for Shopware API helpers.
+ *
+ * Typed against by PostProcessorContext so that both ShopwareApiHelpers
+ * (production) and MockApiHelpers (tests) satisfy it without casts.
+ */
+export interface ShopwareApi {
+    setTokenGetter(getter: TokenGetter): void;
+    capitalizeString(s: string): string;
+    searchEntities<T = Record<string, unknown>>(
+        entity: string,
+        filters?: ShopwareFilter[],
+        options?: {
+            associations?: Record<string, unknown>;
+            limit?: number;
+            ids?: string[];
+            includes?: Record<string, string[]>;
+            sort?: Array<{ field: string; order: "ASC" | "DESC" }>;
+        }
+    ): Promise<T[]>;
+    getEntity<T = Record<string, unknown>>(
+        entity: string,
+        id: string,
+        associations?: Record<string, unknown>
+    ): Promise<T | null>;
+    findByName(
+        entity: string,
+        name: string,
+        additionalFilters?: ShopwareFilter[]
+    ): Promise<string | null>;
+    syncEntities(operations: Record<string, SyncOperation>): Promise<void>;
+    upsertEntity(entity: string, payload: Record<string, unknown>): Promise<void>;
+    deleteEntity(entity: string, id: string): Promise<boolean>;
+    deleteEntities(entity: string, ids: string[]): Promise<void>;
+    uploadMedia(mediaId: string, file: Buffer, fileName: string, extension: string): Promise<void>;
+    getCurrencyId(isoCode?: string): Promise<string>;
+    getStandardTaxId(): Promise<string>;
+    getSalesChannelByName(name: string): Promise<{
+        id: string;
+        navigationCategoryId: string;
+        currencyId?: string;
+    } | null>;
+    getProductMediaFolderId(): Promise<string | null>;
+    getCategoryMediaFolderId(): Promise<string | null>;
+    findCmsPageByName(name: string): Promise<string | null>;
+    findCategoryByName(name: string, parentId: string): Promise<string | null>;
+    findLandingPageByName(name: string): Promise<string | null>;
+    generateAccessKey(): string;
+    post<T = unknown>(endpoint: string, body?: unknown): Promise<T>;
+    postRaw(endpoint: string, body: Buffer, headers: Record<string, string>): Promise<void>;
+    get<T = unknown>(endpoint: string): Promise<T>;
+    httpDelete(endpoint: string): Promise<void>;
+    patch<T = unknown>(endpoint: string, body?: unknown): Promise<T>;
+}
+
+/**
  * Shopware API Helpers class
  *
  * Uses the AdminApiClient's session data for authentication.
  * Falls back to a custom TokenGetter if the client has no session yet.
  */
-export class ShopwareApiHelpers {
+export class ShopwareApiHelpers implements ShopwareApi {
     private client: AdminApiClient;
     private baseURL: string;
     private customTokenGetter: TokenGetter | undefined;

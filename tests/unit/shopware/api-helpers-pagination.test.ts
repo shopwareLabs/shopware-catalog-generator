@@ -1,6 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
-
-import type { PostProcessorContext } from "../../../src/post-processors/index.js";
+import { describe, expect, test } from "bun:test";
 
 import {
     findCategoryIdByName,
@@ -9,64 +7,35 @@ import {
     searchAllByEqualsAny,
     searchAllByFilter,
 } from "../../../src/shopware/api-helpers.js";
+import { createTestContext } from "../../helpers/post-processor-context.js";
 import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
 
-function createContext(mockApi?: MockApiHelpers): PostProcessorContext {
-    return {
-        salesChannelId: "sc-123",
-        salesChannelName: "test-store",
-        blueprint: {
-            version: "1.0",
-            salesChannel: { name: "test-store", description: "Test store" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
-        },
-        cache: {} as PostProcessorContext["cache"],
-        shopwareUrl: "https://test.shopware.com",
-        getAccessToken: async () => "token",
-        api: mockApi as unknown as PostProcessorContext["api"],
-        options: { batchSize: 5, dryRun: false },
-    };
+function createContext(mockApi?: MockApiHelpers) {
+    return createTestContext({ mockApi }).context;
 }
 
 describe("shopware api pagination helpers", () => {
     test("getSalesChannelNavigationCategoryId returns navigationCategoryId", async () => {
-        globalThis.fetch = mock(async () => {
-            return {
-                ok: true,
-                status: 200,
-                json: async () => ({ data: [{ id: "sc-123", navigationCategoryId: "root-1" }] }),
-                text: async () => "{}",
-            } as Response;
-        }) as unknown as typeof fetch;
+        const mockApi = createMockApiHelpers();
+        mockApi.mockPostResponse("search/sales-channel", {
+            data: [{ id: "sc-123", navigationCategoryId: "root-1" }],
+        });
 
-        const id = await getSalesChannelNavigationCategoryId(createContext());
+        const id = await getSalesChannelNavigationCategoryId(createContext(mockApi));
         expect(id).toBe("root-1");
     });
 
     test("findCategoryIdByName returns category id", async () => {
-        globalThis.fetch = mock(async () => {
-            return {
-                ok: true,
-                status: 200,
-                json: async () => ({ data: [{ id: "cat-1" }] }),
-                text: async () => "{}",
-            } as Response;
-        }) as unknown as typeof fetch;
+        const mockApi = createMockApiHelpers();
+        mockApi.mockPostResponse("search/category", { data: [{ id: "cat-1" }] });
 
-        const id = await findCategoryIdByName(createContext(), "Testing", "parent-1");
+        const id = await findCategoryIdByName(createContext(mockApi), "Testing", "parent-1");
         expect(id).toBe("cat-1");
     });
 
     test("searchAllByFilter uses api helper path when result < 500", async () => {
         const mockApi = createMockApiHelpers();
-        (mockApi as { searchEntities: unknown }).searchEntities = mock(async () => [
-            { id: "1" },
-            { id: "2" },
-        ]);
+        mockApi.mockSearchResponse("product", [{ id: "1" }, { id: "2" }]);
         const context = createContext(mockApi);
 
         const result = await searchAllByFilter<{ id: string }>(context, "product", []);
@@ -75,14 +44,17 @@ describe("shopware api pagination helpers", () => {
 
     test("searchAllByFilter falls back to paginated apiPost when api helper hits cap", async () => {
         const mockApi = createMockApiHelpers();
-        (mockApi as { searchEntities: unknown }).searchEntities = mock(async () =>
+        mockApi.mockSearchResponse(
+            "product",
             Array.from({ length: 500 }, (_, i) => ({ id: `seed-${i}` }))
         );
-        (mockApi as { post: unknown }).post = mock(async (_endpoint: string, body?: unknown) => {
+        mockApi.mockPostResponse("search/product", { fallback: true });
+        const originalPost = mockApi.post.bind(mockApi);
+        mockApi.post = (async (_endpoint: string, body?: unknown) => {
             const page = (body as { page?: number } | undefined)?.page ?? 1;
             if (page === 1) return { data: [{ id: "a" }, { id: "b" }], total: 3 };
             return { data: [{ id: "c" }], total: 3 };
-        });
+        }) as typeof originalPost;
         const context = createContext(mockApi);
 
         const result = await searchAllByFilter<{ id: string }>(context, "product", [], {
@@ -110,10 +82,7 @@ describe("shopware api pagination helpers", () => {
 
     test("getAllSalesChannelProductIds returns mapped product ids", async () => {
         const mockApi = createMockApiHelpers();
-        (mockApi as { searchEntities: unknown }).searchEntities = mock(async () => [
-            { id: "p1" },
-            { id: "p2" },
-        ]);
+        mockApi.mockSearchResponse("product", [{ id: "p1" }, { id: "p2" }]);
         const context = createContext(mockApi);
 
         const ids = await getAllSalesChannelProductIds(context);

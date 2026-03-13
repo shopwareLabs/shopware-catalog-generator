@@ -420,6 +420,23 @@ export async function syncProducts(
         stock: number;
         options?: Array<{ id: string; name: string }>;
         categoryIds?: string[];
+        hasSalesPrice?: boolean;
+        salePercentage?: number;
+        hasTieredPricing?: boolean;
+        isTopseller: boolean;
+        isNew: boolean;
+        isShippingFree: boolean;
+        weight: number;
+        width: number;
+        height: number;
+        length: number;
+        ean: string;
+        manufacturerNumber: string;
+        minPurchase?: number;
+        maxPurchase?: number;
+        purchaseSteps?: number;
+        metaTitle?: string;
+        metaDescription?: string;
     };
 
     const productsToCreate: ProductToCreate[] = blueprint.products.map((p) => {
@@ -445,6 +462,26 @@ export async function syncProducts(
             stock: p.stock,
             categoryIds: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : p.categoryIds,
             ...(options.length > 0 && { options }),
+            hasSalesPrice: p.metadata.hasSalesPrice,
+            salePercentage: p.metadata.salePercentage,
+            hasTieredPricing: p.metadata.hasTieredPricing,
+            isTopseller: p.metadata.isTopseller,
+            isNew: p.metadata.isNew,
+            isShippingFree: p.metadata.isShippingFree,
+            weight: p.metadata.weight,
+            width: p.metadata.width,
+            height: p.metadata.height,
+            length: p.metadata.length,
+            ean: p.metadata.ean,
+            manufacturerNumber: p.metadata.manufacturerNumber,
+            ...(p.metadata.minPurchase && {
+                minPurchase: p.metadata.minPurchase,
+                purchaseSteps: p.metadata.purchaseSteps,
+            }),
+            ...(p.metadata.maxPurchase && { maxPurchase: p.metadata.maxPurchase }),
+            ...(p.metaTitle && { metaTitle: p.metaTitle }),
+            ...(p.metaDescription && { metaDescription: p.metaDescription }),
+            ...(p.deliveryTimeIndex !== undefined && { deliveryTimeIndex: p.deliveryTimeIndex }),
         };
     });
 

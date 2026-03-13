@@ -21,16 +21,38 @@ import { ImageCache } from "./image-cache.js";
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
 import { logger } from "./utils/logger.js";
 
-export { ImageCache, type MediaType } from "./image-cache.js";
+export { ImageCache, type ImageCacheApi, type MediaType } from "./image-cache.js";
 
 // Re-export types for convenience
 export type { CacheOptions, PropertyGroup, PropertyOption } from "./types/index.js";
 export { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
 
 /**
+ * Public contract for data cache access used by post-processors.
+ *
+ * Typed against by PostProcessorContext so that both DataCache (production)
+ * and MockDataCache (tests) satisfy it without casts.
+ */
+export interface DataCacheApi {
+    /** Image cache for product and category images */
+    readonly images: import("./image-cache.js").ImageCacheApi;
+    getSalesChannelDir(salesChannel: string): string;
+    loadCmsBlueprint(salesChannel: string): import("./types/index.js").CmsBlueprint | null;
+    loadProductMetadata(
+        salesChannel: string,
+        productId: string
+    ): import("./types/index.js").ProductMetadata | null;
+    saveManufacturers(
+        salesChannel: string,
+        manufacturers: import("./types/index.js").Manufacturer[]
+    ): void;
+    loadManufacturers(salesChannel: string): import("./types/index.js").Manufacturer[] | null;
+}
+
+/**
  * Data cache for storing generated products and images locally
  */
-export class DataCache {
+export class DataCache implements DataCacheApi {
     private readonly cacheDir: string;
     private readonly trashDir: string;
     private readonly options: CacheOptions;

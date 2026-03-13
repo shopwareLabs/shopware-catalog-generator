@@ -1,82 +1,8 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
-import type { PostProcessorContext } from "../../../src/post-processors/index.js";
-import type { HydratedBlueprint } from "../../../src/types/index.js";
-
-// Mock the ManufacturerProcessor by importing the module
-// We need to test the exported singleton
 import { ManufacturerProcessor } from "../../../src/post-processors/manufacturer-processor.js";
-import { createMockApiHelpers, type MockApiHelpers } from "../../mocks/index.js";
-
-// Helper to create a minimal mock blueprint
-function createMockBlueprint(
-    products: Array<{
-        id: string;
-        name: string;
-        manufacturerName?: string;
-    }>
-): HydratedBlueprint {
-    return {
-        version: "1.0",
-        salesChannel: { name: "test-store", description: "Test store" },
-        categories: [],
-        products: products.map((p) => ({
-            id: p.id,
-            name: p.name,
-            description: "Test description",
-            price: 29.99,
-            stock: 10,
-            primaryCategoryId: "cat1",
-            categoryIds: ["cat1"],
-            metadata: {
-                imageCount: 1 as const,
-                imageDescriptions: [],
-                isVariant: false,
-                properties: [],
-                manufacturerName: p.manufacturerName,
-                reviewCount: 0 as const,
-                hasSalesPrice: false,
-            },
-        })),
-        propertyGroups: [],
-        createdAt: new Date().toISOString(),
-        hydratedAt: new Date().toISOString(),
-    };
-}
-
-// Helper to create mock cache
-function createMockCache() {
-    const manufacturers: Array<{ id: string; name: string }> = [];
-    return {
-        loadManufacturers: mock(() => (manufacturers.length > 0 ? manufacturers : null)),
-        saveManufacturers: mock(
-            (_salesChannelName: string, mfgs: Array<{ id: string; name: string }>) => {
-                manufacturers.push(...mfgs);
-            }
-        ),
-        loadProductMetadata: mock(() => null),
-    };
-}
-
-// Helper to create mock context
-function createMockContext(
-    blueprint: HydratedBlueprint,
-    options: { dryRun?: boolean; mockApi?: MockApiHelpers } = {}
-): PostProcessorContext {
-    return {
-        salesChannelId: "sc-123",
-        salesChannelName: "test-store",
-        blueprint,
-        cache: createMockCache() as unknown as PostProcessorContext["cache"],
-        shopwareUrl: "https://test.shopware.com",
-        getAccessToken: async () => "test-token",
-        api: options.mockApi as unknown as PostProcessorContext["api"],
-        options: {
-            batchSize: 5,
-            dryRun: options.dryRun || false,
-        },
-    };
-}
+import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
+import { createTestContext } from "../../helpers/post-processor-context.js";
 
 describe("ManufacturerProcessor", () => {
     describe("metadata", () => {
@@ -96,11 +22,13 @@ describe("ManufacturerProcessor", () => {
 
     describe("process", () => {
         test("returns error when no manufacturers in products", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1" },
-                { id: "p2", name: "Product 2" },
-            ]);
-            const context = createMockContext(blueprint);
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({ id: "p1", name: "Product 1" }),
+                    createTestProduct({ id: "p2", name: "Product 2" }),
+                ],
+            });
+            const { context } = createTestContext({ blueprint });
 
             const result = await ManufacturerProcessor.process(context);
 
@@ -110,12 +38,26 @@ describe("ManufacturerProcessor", () => {
         });
 
         test("collects unique manufacturer names from products", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1", manufacturerName: "Acme Corp" },
-                { id: "p2", name: "Product 2", manufacturerName: "Acme Corp" },
-                { id: "p3", name: "Product 3", manufacturerName: "Best Inc" },
-            ]);
-            const context = createMockContext(blueprint, { dryRun: true });
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: { manufacturerName: "Acme Corp" },
+                    }),
+                    createTestProduct({
+                        id: "p2",
+                        name: "Product 2",
+                        metadata: { manufacturerName: "Acme Corp" },
+                    }),
+                    createTestProduct({
+                        id: "p3",
+                        name: "Product 3",
+                        metadata: { manufacturerName: "Best Inc" },
+                    }),
+                ],
+            });
+            const { context } = createTestContext({ blueprint, dryRun: true });
 
             const result = await ManufacturerProcessor.process(context);
 
@@ -124,12 +66,26 @@ describe("ManufacturerProcessor", () => {
         });
 
         test("skips empty manufacturer names", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1", manufacturerName: "" },
-                { id: "p2", name: "Product 2", manufacturerName: "   " },
-                { id: "p3", name: "Product 3", manufacturerName: "Valid Corp" },
-            ]);
-            const context = createMockContext(blueprint, { dryRun: true });
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: { manufacturerName: "" },
+                    }),
+                    createTestProduct({
+                        id: "p2",
+                        name: "Product 2",
+                        metadata: { manufacturerName: "   " },
+                    }),
+                    createTestProduct({
+                        id: "p3",
+                        name: "Product 3",
+                        metadata: { manufacturerName: "Valid Corp" },
+                    }),
+                ],
+            });
+            const { context } = createTestContext({ blueprint, dryRun: true });
 
             const result = await ManufacturerProcessor.process(context);
 
@@ -138,10 +94,16 @@ describe("ManufacturerProcessor", () => {
         });
 
         test("dry run mode logs without creating", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1", manufacturerName: "Test Manufacturer" },
-            ]);
-            const context = createMockContext(blueprint, { dryRun: true });
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: { manufacturerName: "Test Manufacturer" },
+                    }),
+                ],
+            });
+            const { context } = createTestContext({ blueprint, dryRun: true });
 
             const result = await ManufacturerProcessor.process(context);
 
@@ -150,20 +112,28 @@ describe("ManufacturerProcessor", () => {
         });
 
         test("skips creating manufacturers that already exist in Shopware", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1", manufacturerName: "Existing Corp" },
-                { id: "p2", name: "Product 2", manufacturerName: "New Corp" },
-            ]);
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: { manufacturerName: "Existing Corp" },
+                    }),
+                    createTestProduct({
+                        id: "p2",
+                        name: "Product 2",
+                        metadata: { manufacturerName: "New Corp" },
+                    }),
+                ],
+            });
 
-            const mockApi = createMockApiHelpers();
+            const { context, mockApi } = createTestContext({ blueprint, dryRun: false });
 
-            // Mock existing manufacturer search
             mockApi.mockPostResponse("search/product-manufacturer", {
                 total: 1,
                 data: [{ id: "existing-mfg-id", name: "Existing Corp" }],
             });
 
-            // Mock product search - products don't have manufacturers assigned yet
             mockApi.mockPostResponse("search/product", {
                 data: blueprint.products.map((p) => ({
                     id: p.id,
@@ -171,11 +141,8 @@ describe("ManufacturerProcessor", () => {
                 })),
             });
 
-            // Mock sync
             mockApi.setDefaultPostResponse({ success: true });
             mockApi.mockSyncSuccess();
-
-            const context = createMockContext(blueprint, { dryRun: false, mockApi });
             const result = await ManufacturerProcessor.process(context);
 
             // Only New Corp should be created (Existing Corp already exists)
@@ -199,20 +166,28 @@ describe("ManufacturerProcessor", () => {
         });
 
         test("skips product updates when manufacturer already assigned", async () => {
-            const blueprint = createMockBlueprint([
-                { id: "p1", name: "Product 1", manufacturerName: "Test Corp" },
-                { id: "p2", name: "Product 2", manufacturerName: "Test Corp" },
-            ]);
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: { manufacturerName: "Test Corp" },
+                    }),
+                    createTestProduct({
+                        id: "p2",
+                        name: "Product 2",
+                        metadata: { manufacturerName: "Test Corp" },
+                    }),
+                ],
+            });
 
-            const mockApi = createMockApiHelpers();
+            const { context, mockApi } = createTestContext({ blueprint, dryRun: false });
 
-            // Mock manufacturer exists
             mockApi.mockPostResponse("search/product-manufacturer", {
                 total: 1,
                 data: [{ id: "mfg-123", name: "Test Corp" }],
             });
 
-            // Mock product search - p1 already has manufacturer, p2 doesn't
             mockApi.mockPostResponse("search/product", {
                 data: [
                     { id: "p1", manufacturerId: "mfg-123" },
@@ -220,11 +195,8 @@ describe("ManufacturerProcessor", () => {
                 ],
             });
 
-            // Mock sync
             mockApi.setDefaultPostResponse({ success: true });
             mockApi.mockSyncSuccess();
-
-            const context = createMockContext(blueprint, { dryRun: false, mockApi });
             await ManufacturerProcessor.process(context);
 
             // Check that only p2 was updated (p1 already has correct manufacturer)

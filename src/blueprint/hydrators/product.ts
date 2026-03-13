@@ -842,12 +842,28 @@ Return JSON in this exact format:
                 }
             }
 
+            // Derive SEO metadata from AI-generated content (no extra AI call)
+            const metaTitle = h.name.slice(0, 70);
+            const cleanDesc = h.description
+                .replace(/<[^>]*>/g, "")
+                .replace(/&amp;/g, "&")
+                .replace(/&lt;/g, "<")
+                .replace(/&gt;/g, ">")
+                .replace(/&quot;/g, '"')
+                .replace(/&#039;/g, "'")
+                .replace(/\s+/g, " ")
+                .trim();
+            const metaDescription =
+                cleanDesc.length > 157 ? cleanDesc.slice(0, 157) + "..." : cleanDesc;
+
             results.push({
                 ...product,
                 name: h.name,
                 description: h.description,
                 categoryIds,
                 primaryCategoryId,
+                metaTitle,
+                metaDescription,
                 metadata: {
                     ...product.metadata,
                     properties: h.properties as ProductProperty[],

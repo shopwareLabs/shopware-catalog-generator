@@ -22,36 +22,56 @@ mcp/
 
 ## Available Tools
 
-| Tool | CLI Equivalent |
-| --- | --- |
-| `generate` | `bun run generate --name=...` |
-| `process` | `bun run process --name=...` |
-| `blueprint_create` | `bun run blueprint create ...` |
-| `blueprint_hydrate` | `bun run blueprint hydrate ...` |
-| `blueprint_fix` | `bun run blueprint fix ...` |
-| `image_fix` | `bun run image fix ...` |
-| `cleanup` | `bun run cleanup -- ...` |
-| `cleanup_media` | `bun run cleanup:media` |
-| `cleanup_unused_props` | `bun run cleanup:props` |
-| `cache_list` | `bun run cache:list` |
-| `cache_clear` | `bun run cache:clear` |
-| `cache_trash` | `bun run cache:trash` |
-| `cache_restore` | `bun run cache:restore` |
-| `cache_empty_trash` | `bun run cache:empty-trash` |
-| `list_saleschannels` | (lookup only) |
-| `list_processors` | (lookup only) |
-| `restart` | Restarts the MCP server process |
+| Tool                   | CLI Equivalent                  |
+| ---------------------- | ------------------------------- |
+| `generate`             | `bun run generate --name=...`   |
+| `process`              | `bun run process --name=...`    |
+| `blueprint_create`     | `bun run blueprint create ...`  |
+| `blueprint_hydrate`    | `bun run blueprint hydrate ...` |
+| `blueprint_fix`        | `bun run blueprint fix ...`     |
+| `image_fix`            | `bun run image fix ...`         |
+| `cleanup`              | `bun run cleanup -- ...`        |
+| `cleanup_media`        | `bun run cleanup:media`         |
+| `cleanup_unused_props` | `bun run cleanup:props`         |
+| `cache_list`           | `bun run cache:list`            |
+| `cache_clear`          | `bun run cache:clear`           |
+| `cache_trash`          | `bun run cache:trash`           |
+| `cache_restore`        | `bun run cache:restore`         |
+| `cache_empty_trash`    | `bun run cache:empty-trash`     |
+| `list_saleschannels`   | (lookup only)                   |
+| `list_processors`      | (lookup only)                   |
+| `restart`              | Restarts the MCP server process |
+
+## Architecture: Shared Services Layer
+
+MCP tools and CLI handlers are **thin wrappers** around `src/services/`. All application logic lives in the service layer, which returns `string[]` for output. This ensures CLI and MCP tools always stay in sync:
+
+```
+src/services/blueprint-service.ts    ← shared logic
+       ↑                       ↑
+src/cli/blueprint.ts       src/mcp/tools/blueprint.ts
+(prints string[] lines)    (joins string[] lines, returns text)
+```
 
 ## Adding a New Tool
 
-1. Create or update the tool file in `src/mcp/tools/`
-2. Use Zod schemas matching the CLI parameters
-3. Call the same underlying functions as the CLI (don't duplicate logic)
-4. Register via `server.addTool()` in the registration function
-5. Export the registration function from `src/mcp/tools/index.ts`
-6. Call it in `src/mcp/index.ts` if it's a new category
+1. Implement the logic in `src/services/<category>-service.ts` (returns `string[]`)
+2. Create or update the tool file in `src/mcp/tools/`
+3. Use Zod schemas matching the CLI parameters
+4. Import and call the service function — do NOT duplicate logic
+5. Register via `server.addTool()` in the registration function
+6. Export the registration function from `src/mcp/tools/index.ts`
+7. Call it in `src/mcp/index.ts` if it's a new category
 
 ```typescript
+// src/services/my-service.ts
+export async function doSomething(args: MyArgs): Promise<string[]> {
+    const output: string[] = [];
+    output.push(`✓ Done with ${args.name}`);
+    return output;
+}
+
+// src/mcp/tools/my-tools.ts
 export function registerMyTools(server: FastMCP): void {
     server.addTool({
         name: "my_tool",
@@ -60,8 +80,8 @@ export function registerMyTools(server: FastMCP): void {
             name: z.string().describe("SalesChannel name"),
         }),
         execute: async (args) => {
-            // Reuse existing logic from CLI modules
-            return "Result message";
+            const lines = await doSomething(args);
+            return lines.join("\n");
         },
     });
 }

@@ -3,42 +3,19 @@ import { describe, expect, test } from "bun:test";
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 
 import { CategoryImageProcessor } from "../../../src/post-processors/category-image-processor.js";
-import { createMockApiHelpers } from "../../mocks/index.js";
-
-function createContext(): PostProcessorContext {
-    const mockApi = createMockApiHelpers();
-    return {
-        salesChannelId: "sc-1",
-        salesChannelName: "music",
-        blueprint: {
-            version: "1.0",
-            salesChannel: { name: "music", description: "Music store" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
-        },
-        cache: {
-            loadProductMetadata: () => null,
-            loadCmsBlueprint: () => null,
-            images: {
-                hasImageForSalesChannel: () => false,
-                loadImageForSalesChannel: () => null,
-                saveImageForSalesChannel: () => {},
-            },
-        } as unknown as PostProcessorContext["cache"],
-        shopwareUrl: "https://shopware.test",
-        getAccessToken: async () => "token",
-        api: mockApi as unknown as PostProcessorContext["api"],
-        options: { batchSize: 5, dryRun: false },
-    };
-}
+import { createTestBlueprint } from "../../helpers/blueprint-factory.js";
+import { createTestContext } from "../../helpers/post-processor-context.js";
 
 describe("CategoryImageProcessor", () => {
     test("skips upload when category already has image and cleanup disabled", async () => {
-        const context = createContext();
-        const mockApi = context.api as unknown as ReturnType<typeof createMockApiHelpers>;
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
         mockApi.mockPostResponse("search/category", {
             data: [{ id: "cat-1", mediaId: "media-existing" }],
         });
@@ -57,8 +34,14 @@ describe("CategoryImageProcessor", () => {
     });
 
     test("uploads and links new category media when none exists", async () => {
-        const context = createContext();
-        const mockApi = context.api as unknown as ReturnType<typeof createMockApiHelpers>;
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
         mockApi.mockPostResponse("search/category", { data: [{ id: "cat-1", mediaId: null }] });
         mockApi.mockPostResponse("search/media", { data: [] });
         mockApi.mockPostResponse("search/media-default-folder", {
@@ -81,8 +64,14 @@ describe("CategoryImageProcessor", () => {
     });
 
     test("cleanupCategoryImages clears media for categories under sales channel root", async () => {
-        const context = createContext();
-        const mockApi = context.api as unknown as ReturnType<typeof createMockApiHelpers>;
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
         mockApi.mockSearchResponse("sales-channel", [
             { id: "sc-1", navigationCategoryId: "root-cat" },
         ]);
@@ -100,16 +89,29 @@ describe("CategoryImageProcessor", () => {
     });
 
     test("clearCategoryImage skips cleanup when api is unavailable", async () => {
-        const context = createContext();
-        context.api = undefined;
+        const { context: baseContext } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+        const { api: _api, ...rest } = baseContext;
+        const contextWithoutApi = { ...rest } as PostProcessorContext;
 
         const processor = new CategoryImageProcessor();
-        await processor.clearCategoryImage(context, "cat-1", "Guitars", "media-1");
+        await processor.clearCategoryImage(contextWithoutApi, "cat-1", "Guitars", "media-1");
     });
 
     test("clearCategoryImage tolerates media delete errors", async () => {
-        const context = createContext();
-        const mockApi = context.api as unknown as ReturnType<typeof createMockApiHelpers>;
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
         mockApi.deleteEntityMock.mockImplementation(() => {
             throw new Error("still referenced");
         });

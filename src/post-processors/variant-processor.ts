@@ -27,6 +27,7 @@ import {
     sleep,
     toKebabCase,
 } from "../utils/index.js";
+import { resolvePrimaryCurrencyId } from "./currency-utils.js";
 
 interface PropertyOption {
     id: string;
@@ -59,8 +60,8 @@ class VariantProcessorImpl implements PostProcessor {
 
     // Cache for property groups from Shopware
     private shopwareGroupCache: Map<string, PropertyGroup> = new Map();
-    // Cache for currency ID
-    private currencyId: string | null = null;
+    // Cached currency ID (resolved once per run)
+    private resolvedCurrencyId: string | null = null;
     // Track which groups we've ensured exist in Shopware
     private ensuredGroups: Set<string> = new Set();
     // Property cache for group definitions
@@ -239,38 +240,16 @@ class VariantProcessorImpl implements PostProcessor {
     }
 
     /**
-     * Get the default currency ID
+     * Get the primary currency ID, caching the result for subsequent calls.
+     * Delegates to the shared resolvePrimaryCurrencyId() utility.
      */
     private async getCurrencyId(context: PostProcessorContext): Promise<string> {
-        if (this.currencyId) {
-            return this.currencyId;
-        }
-
-        try {
-            interface CurrencyResponse {
-                data?: Array<{ id: string }>;
-            }
-
-            const response = await apiPost(context, "search/currency", {
-                filter: [{ type: "equals", field: "isoCode", value: "EUR" }],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as CurrencyResponse;
-                const currency = data.data?.[0];
-                if (currency) {
-                    this.currencyId = currency.id;
-                    return this.currencyId;
-                }
-            }
-        } catch (error) {
-            logger.warn("Failed to get currency ID", { data: error });
-        }
-
-        // Fallback to Shopware's default EUR currency ID
-        this.currencyId = "b7d2554b0ce847cd82f3ac9bd1c0dfca";
-        return this.currencyId;
+        if (this.resolvedCurrencyId) return this.resolvedCurrencyId;
+        this.resolvedCurrencyId = await resolvePrimaryCurrencyId(
+            context.api,
+            context.salesChannelId
+        );
+        return this.resolvedCurrencyId;
     }
 
     /**

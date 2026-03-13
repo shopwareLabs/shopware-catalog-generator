@@ -12,10 +12,9 @@ import { DataCache } from "./cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
 import { processManager } from "./server/index.js";
+import { createProcessorDeps } from "./services/shopware-context.js";
 import {
     buildPropertyMaps,
-    createApiHelpers,
-    createShopwareAdminClient,
     DataHydrator,
     syncCategories,
     syncProducts,
@@ -232,31 +231,22 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         ctx.log(`Running post-processors: ${processorNames.join(", ")}`);
         ctx.setProgress("processors", 0, processorNames.length);
 
-        // Get providers for processors
-        const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-        // Create API helpers for processors
-        const adminClient = createShopwareAdminClient({
+        const deps = createProcessorDeps({
             baseURL: envPath,
+            getAccessToken: () => dataHydrator.getAccessToken(),
             username: shopwareUser,
             password: shopwarePassword,
         });
-        const apiHelpers = createApiHelpers(adminClient, envPath, () =>
-            dataHydrator.getAccessToken()
-        );
 
-        // Run all registered processors
         const results = await runProcessors(
             {
                 salesChannelId: salesChannelEntity.id,
                 salesChannelName: salesChannel,
                 blueprint: hydratedBlueprint,
                 cache,
-                textProvider,
-                imageProvider,
-                shopwareUrl: envPath,
-                getAccessToken: () => dataHydrator.getAccessToken(),
-                api: apiHelpers,
+                textProvider: deps.textProvider,
+                imageProvider: deps.imageProvider,
+                api: deps.apiHelpers,
                 options: DEFAULT_PROCESSOR_OPTIONS,
             },
             processorNames

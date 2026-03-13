@@ -21,8 +21,14 @@ export {
     VIDEO_ELEMENTS_PAGE,
     WELCOME_PAGE,
 } from "./cms/index.js";
+// Demo Customers
+export { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "./demo-customers.js";
+export type { CustomerGroupKey, DemoAddress, DemoCustomer } from "./demo-customers.js";
 // Digital Products
 export { GIFT_CARD_50 } from "./digital-products.js";
+// Promotions
+export { PROMOTIONS } from "./promotions.js";
+export type { DiscountScope, DiscountType, PromotionDefinition } from "./promotions.js";
 // Property Groups (universal groups for seeding generated/properties/)
 export {
     colorHasImage,

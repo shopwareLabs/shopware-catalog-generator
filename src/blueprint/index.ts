@@ -7,11 +7,14 @@ export {
 } from "./fix-placeholders.js";
 export {
     buildCmsImageSpecs,
+    buildThemeImageSpecs,
     flattenCategories,
     generateCmsBlueprint,
+    hydrateBrandColors,
     hydrateCmsBlueprint,
     hydrateCmsImages,
     hydrateProductImages,
+    hydrateThemeMedia,
     ProductHydrator,
 } from "./hydrators/index.js";
 export { VariantResolver } from "./variant-resolver.js";

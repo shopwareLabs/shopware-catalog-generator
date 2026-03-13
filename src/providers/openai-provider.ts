@@ -54,23 +54,25 @@ export class OpenAITextProvider implements TextProvider {
 }
 
 /**
- * OpenAI image generation provider (DALL-E)
+ * OpenAI image generation provider (GPT Image models)
  * Supports parallel processing with high rate limits
  * OpenAI Tier 1+ allows 50+ images/min, so 10 concurrent is safe
  */
 export class OpenAIImageProvider implements ImageProvider {
     private readonly client: OpenAI;
     private readonly model: string;
+    private readonly quality: "low" | "medium" | "high" | "auto";
 
     readonly isSequential = false;
     readonly maxConcurrency = 10;
     readonly name = "openai";
 
-    constructor(apiKey: string, model: string = "gpt-image-1.5") {
+    constructor(apiKey: string, model: string = "gpt-image-1-mini", quality: string = "low") {
         this.client = new OpenAI({
             apiKey,
         });
         this.model = model;
+        this.quality = this.parseQuality(quality);
     }
 
     async generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null> {
@@ -80,11 +82,17 @@ export class OpenAIImageProvider implements ImageProvider {
                 model: this.model,
                 prompt,
                 size,
+                quality: this.quality,
+                output_format: "webp",
                 n: 1,
             });
 
             const imageData = response.data?.[0];
             if (!imageData) return null;
+
+            if (imageData.b64_json) {
+                return imageData.b64_json;
+            }
 
             if (imageData.url) {
                 const imageResponse = await fetch(imageData.url);
@@ -92,15 +100,20 @@ export class OpenAIImageProvider implements ImageProvider {
                 return Buffer.from(buffer).toString("base64");
             }
 
-            if (imageData.b64_json) {
-                return imageData.b64_json;
-            }
-
             return null;
         } catch (error) {
             logger.warn(`OpenAI image generation failed:`, { data: error });
             return null;
         }
+    }
+
+    private parseQuality(quality: string): "low" | "medium" | "high" | "auto" {
+        const valid = ["low", "medium", "high", "auto"] as const;
+        const normalized = quality.toLowerCase();
+        if (valid.includes(normalized as (typeof valid)[number])) {
+            return normalized as "low" | "medium" | "high" | "auto";
+        }
+        return "low";
     }
 
     /**

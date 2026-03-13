@@ -1,44 +1,19 @@
 /**
  * Generate and Process Tools for MCP Server
  *
- * Exposes the main generate and process commands.
+ * Thin wrappers that delegate to src/services/generate-service.ts and return output.
  */
 
 import type { FastMCP } from "fastmcp";
 
 import { z } from "zod";
 
-import type { ExistingProperty } from "../../utils/index.js";
-
+import { registry } from "../../post-processors/index.js";
 import {
-    BlueprintGenerator,
-    BlueprintHydrator,
-    generateCmsBlueprint,
-    hydrateCmsBlueprint,
-    hydrateCmsImages,
-    hydrateProductImages,
-} from "../../blueprint/index.js";
-import { createCacheFromEnv } from "../../cache.js";
-import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../../post-processors/index.js";
-import { createProvidersFromEnv } from "../../providers/index.js";
-import {
-    buildPropertyMaps,
-    createApiHelpers,
-    createShopwareAdminClient,
-    DataHydrator,
-    syncCategories,
-    syncProducts,
-    syncPropertyGroups,
-    syncPropertyIdsToBlueprint,
-} from "../../shopware/index.js";
-import { createTemplateFetcherFromEnv } from "../../templates/index.js";
-import {
-    countCategories,
-    logger,
-    PropertyCollector,
-    validateBlueprint,
-    validateSubdomainName,
-} from "../../utils/index.js";
+    generate as generateService,
+    runProcessorsForSalesChannel,
+} from "../../services/generate-service.js";
+import { validateSubdomainName } from "../../utils/index.js";
 
 export function registerGenerateTools(server: FastMCP): void {
     // generate - Full pipeline: create + hydrate + upload
@@ -63,7 +38,6 @@ export function registerGenerateTools(server: FastMCP): void {
                 .describe("Skip checking for pre-generated templates"),
         }),
         execute: async (args) => {
-            // Validate name
             const validation = validateSubdomainName(args.name);
             if (!validation.valid) {
                 return `Error: Invalid name - ${validation.error}`;
@@ -71,245 +45,12 @@ export function registerGenerateTools(server: FastMCP): void {
             const salesChannelName = validation.sanitized;
             const description = args.description || `${salesChannelName} webshop`;
 
-            // Configure logger
-            logger.configure({ enabled: true });
-
-            const cache = createCacheFromEnv();
-            const results: string[] = [];
-            results.push(`=== Shopware Data Generator ===`);
-            results.push(`Name: ${salesChannelName}`);
-            results.push(`Description: ${description}`);
-            results.push(``);
-
-            // Check for pre-generated template
-            let usedTemplate = false;
-            if (!args.noTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-                const templateFetcher = createTemplateFetcherFromEnv();
-                usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
-                if (usedTemplate) {
-                    results.push(`Using pre-generated template for "${salesChannelName}"`);
-                }
-            }
-
-            // Step 1: Create blueprint if not exists
-            if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
-                results.push(`Step 1: Creating blueprint...`);
-                const generator = new BlueprintGenerator({
-                    totalProducts: args.products,
-                    productsPerBranch: Math.ceil(args.products / 3),
-                });
-                const blueprint = generator.generateBlueprint(salesChannelName, description);
-                cache.saveBlueprint(salesChannelName, blueprint);
-                const categoryCount = countCategories(blueprint.categories);
-                results.push(
-                    `  Created ${categoryCount} categories, ${blueprint.products.length} products`
-                );
-            } else {
-                results.push(`Step 1: Using existing blueprint`);
-            }
-
-            // Step 2: Hydrate blueprint if not exists
-            if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-                results.push(`Step 2: Hydrating blueprint with AI...`);
-                const blueprint = cache.loadBlueprint(salesChannelName);
-                if (!blueprint) {
-                    return `Error: Failed to load blueprint`;
-                }
-
-                const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-                // Get existing properties
-                let existingProperties: ExistingProperty[] = [];
-                try {
-                    const hydrator = new DataHydrator();
-                    const swEnvUrl = process.env.SW_ENV_URL;
-                    if (swEnvUrl) {
-                        await hydrator.authenticateWithClientCredentials(
-                            swEnvUrl,
-                            process.env.SW_CLIENT_ID,
-                            process.env.SW_CLIENT_SECRET
-                        );
-                        existingProperties = await hydrator.getExistingPropertyGroups();
-                    }
-                } catch {
-                    // Proceed without existing properties
-                }
-
-                const hydrator = new BlueprintHydrator(textProvider);
-                const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
-
-                const collector = new PropertyCollector();
-                const propertyGroups = collector.collectFromBlueprint(
-                    hydratedBlueprint,
-                    existingProperties
-                );
-                hydratedBlueprint.propertyGroups = propertyGroups;
-
-                cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
-
-                const cmsBlueprint = generateCmsBlueprint(salesChannelName);
-                const cmsDescription =
-                    blueprint.salesChannel.description || `${salesChannelName} webshop`;
-                const hydratedCms = await hydrateCmsBlueprint(
-                    cmsBlueprint,
-                    textProvider,
-                    cmsDescription
-                );
-                cache.saveCmsBlueprint(salesChannelName, hydratedCms);
-
-                await hydrateCmsImages(imageProvider, cache, salesChannelName, cmsDescription);
-
-                if (imageProvider.name !== "noop") {
-                    await hydrateProductImages(
-                        imageProvider,
-                        cache,
-                        salesChannelName,
-                        hydratedBlueprint
-                    );
-                }
-
-                results.push(`  Hydrated with ${propertyGroups.length} property groups`);
-            } else {
-                results.push(`Step 2: Using existing hydrated blueprint`);
-            }
-
-            // Load hydrated blueprint
-            const blueprint = cache.loadHydratedBlueprint(salesChannelName);
-            if (!blueprint) {
-                return `Error: Failed to load hydrated blueprint`;
-            }
-
-            // Validate and auto-fix
-            const validationResult = validateBlueprint(blueprint, {
-                autoFix: true,
-                logFixes: false,
+            const lines = await generateService(salesChannelName, description, {
+                products: args.products,
+                dryRun: args.dryRun,
+                noTemplate: args.noTemplate,
             });
-            if (!validationResult.valid) {
-                const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
-                return `Error: Blueprint validation failed:\n${issues}`;
-            }
-            if (validationResult.fixesApplied > 0) {
-                cache.saveHydratedBlueprint(salesChannelName, blueprint);
-            }
-
-            // Step 3: Upload to Shopware
-            results.push(`Step 3: Syncing to Shopware...`);
-            const swEnvUrl = process.env.SW_ENV_URL;
-            if (!swEnvUrl) {
-                return `Error: SW_ENV_URL is required in environment`;
-            }
-
-            if (args.dryRun) {
-                results.push(`  [DRY RUN] Would sync to ${swEnvUrl}`);
-                results.push(``);
-                results.push(`=== Dry Run Complete ===`);
-                return results.join("\n");
-            }
-
-            const dataHydrator = new DataHydrator();
-            await dataHydrator.authenticateWithClientCredentials(
-                swEnvUrl,
-                process.env.SW_CLIENT_ID,
-                process.env.SW_CLIENT_SECRET
-            );
-
-            // Check if SalesChannel exists
-            let salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
-            const isNewSalesChannel = !salesChannel;
-
-            if (!salesChannel) {
-                salesChannel = await dataHydrator.createSalesChannel({
-                    name: salesChannelName,
-                    description: blueprint.salesChannel.description,
-                });
-                results.push(`  Created SalesChannel: ${salesChannel.name}`);
-            } else {
-                results.push(`  Using existing SalesChannel: ${salesChannel.name}`);
-            }
-
-            // Sync categories
-            const categoryIdMap = await syncCategories(
-                dataHydrator,
-                blueprint,
-                salesChannel,
-                isNewSalesChannel
-            );
-            results.push(`  Synced ${categoryIdMap.size} categories`);
-
-            // Sync property groups
-            await syncPropertyGroups(dataHydrator, blueprint);
-            results.push(`  Synced ${blueprint.propertyGroups.length} property groups`);
-
-            // Build property maps
-            const propertyMaps = buildPropertyMaps(blueprint);
-            syncPropertyIdsToBlueprint(blueprint, propertyMaps);
-            cache.saveHydratedBlueprint(salesChannelName, blueprint);
-
-            // Sync products
-            await syncProducts(
-                dataHydrator,
-                blueprint,
-                salesChannel,
-                categoryIdMap,
-                propertyMaps.propertyOptionMap
-            );
-            results.push(`  Synced ${blueprint.products.length} products`);
-
-            // Run post-processors
-            results.push(``);
-            results.push(`Running post-processors...`);
-
-            const adminClient = createShopwareAdminClient({
-                baseURL: swEnvUrl,
-                clientId: process.env.SW_CLIENT_ID,
-                clientSecret: process.env.SW_CLIENT_SECRET,
-            });
-            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
-                dataHydrator.getAccessToken()
-            );
-
-            const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-            const processorResults = await runProcessors(
-                {
-                    salesChannelId: salesChannel.id,
-                    salesChannelName,
-                    blueprint,
-                    cache,
-                    textProvider,
-                    imageProvider,
-                    shopwareUrl: swEnvUrl,
-                    getAccessToken: () => dataHydrator.getAccessToken(),
-                    api: apiHelpers,
-                    options: DEFAULT_PROCESSOR_OPTIONS,
-                },
-                registry.getNames()
-            );
-
-            let totalProcessed = 0;
-            let totalErrors = 0;
-            for (const result of processorResults) {
-                totalProcessed += result.processed;
-                totalErrors += result.errors.length;
-            }
-            results.push(`  Processed: ${totalProcessed}, Errors: ${totalErrors}`);
-
-            // Per-processor breakdown (always show for visibility)
-            for (const result of processorResults) {
-                const status = result.errors.length === 0 ? "✓" : "✗";
-                const errorSuffix =
-                    result.errors.length > 0 ? ` [${result.errors.join("; ")}]` : "";
-                results.push(
-                    `  ${status} ${result.name}: ${result.processed} processed, ${result.skipped} skipped${errorSuffix}`
-                );
-            }
-
-            results.push(``);
-            results.push(`=== Generation Complete ===`);
-            results.push(`SalesChannel: ${salesChannelName}`);
-            results.push(`Storefront: ${blueprint.salesChannel.baseUrl}`);
-
-            return results.join("\n");
+            return lines.join("\n");
         },
     });
 
@@ -358,112 +99,19 @@ export function registerGenerateTools(server: FastMCP): void {
             dryRun: z.boolean().default(false).describe("Preview actions without making changes"),
         }),
         execute: async (args) => {
-            // Validate name
             const validation = validateSubdomainName(args.name);
             if (!validation.valid) {
                 return `Error: Invalid name - ${validation.error}`;
             }
             const salesChannelName = validation.sanitized;
+            const processors = args.processors ?? [];
 
-            // Load hydrated blueprint
-            const cache = createCacheFromEnv();
-            const blueprint = cache.loadHydratedBlueprint(salesChannelName);
-
-            if (!blueprint) {
-                return `Error: No hydrated blueprint found for "${salesChannelName}"
-
-Run generate first:
-  generate(name: "${salesChannelName}", description: "Your store description")`;
-            }
-
-            // Get SalesChannel from Shopware
-            const swEnvUrl = process.env.SW_ENV_URL;
-            if (!swEnvUrl) {
-                return `Error: SW_ENV_URL is required in environment`;
-            }
-
-            const dataHydrator = new DataHydrator();
-            await dataHydrator.authenticateWithClientCredentials(
-                swEnvUrl,
-                process.env.SW_CLIENT_ID,
-                process.env.SW_CLIENT_SECRET
+            const lines = await runProcessorsForSalesChannel(
+                salesChannelName,
+                processors,
+                args.dryRun
             );
-
-            const salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
-            if (!salesChannel) {
-                return `Error: SalesChannel "${salesChannelName}" not found in Shopware
-
-Run generate first to create it.`;
-            }
-
-            // Determine which processors to run
-            const availableProcessors = registry.getNames();
-            const selectedProcessors =
-                args.processors && args.processors.length > 0
-                    ? args.processors
-                    : availableProcessors;
-
-            const results: string[] = [];
-            results.push(`=== Post-Processors ===`);
-            results.push(`SalesChannel: ${salesChannelName}`);
-            results.push(`Processors: ${selectedProcessors.join(", ")}`);
-            if (args.dryRun) {
-                results.push(`Mode: Dry run (no changes)`);
-            }
-            results.push(``);
-
-            // Create API helpers
-            const adminClient = createShopwareAdminClient({
-                baseURL: swEnvUrl,
-                clientId: process.env.SW_CLIENT_ID,
-                clientSecret: process.env.SW_CLIENT_SECRET,
-            });
-            const apiHelpers = createApiHelpers(adminClient, swEnvUrl, () =>
-                dataHydrator.getAccessToken()
-            );
-
-            const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-            // Run processors
-            const processorResults = await runProcessors(
-                {
-                    salesChannelId: salesChannel.id,
-                    salesChannelName,
-                    blueprint,
-                    cache,
-                    textProvider,
-                    imageProvider,
-                    shopwareUrl: swEnvUrl,
-                    getAccessToken: () => dataHydrator.getAccessToken(),
-                    api: apiHelpers,
-                    options: {
-                        ...DEFAULT_PROCESSOR_OPTIONS,
-                        dryRun: args.dryRun,
-                    },
-                },
-                selectedProcessors
-            );
-
-            // Summarize results
-            for (const result of processorResults) {
-                results.push(
-                    `${result.name}: ${result.processed} processed, ${result.errors.length} errors`
-                );
-            }
-
-            let totalProcessed = 0;
-            let totalErrors = 0;
-            for (const result of processorResults) {
-                totalProcessed += result.processed;
-                totalErrors += result.errors.length;
-            }
-
-            results.push(``);
-            results.push(`=== Complete ===`);
-            results.push(`Total processed: ${totalProcessed}`);
-            results.push(`Total errors: ${totalErrors}`);
-
-            return results.join("\n");
+            return lines.join("\n");
         },
     });
 }

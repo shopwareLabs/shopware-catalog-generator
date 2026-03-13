@@ -23,7 +23,9 @@ fixtures/
 │   ├── text-images.ts    # Text & Images page
 │   ├── commerce.ts       # Commerce elements page
 │   └── form.ts           # Form elements page
+├── demo-customers.ts     # Demo customer accounts + B2B group (credentials for homepage)
 ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 ├── property-groups.ts    # Universal property groups (Color with hex codes)
 ├── review-data.ts        # Reviewer names and review content templates
 └── color-images/         # SVG color swatch images
@@ -64,6 +66,26 @@ export const TEXT_ELEMENTS_PAGE: CmsPageFixture = {
 - **Reusable:** Same content across all SalesChannels
 - **Testable:** Fixture data can be unit tested for structure validity
 - **Maintainable:** Content changes are isolated from processor logic
+
+## promotions.ts
+
+Pre-defined discount codes used by the `promotions` post-processor and displayed on the homepage:
+
+```typescript
+import { PROMOTIONS, PromotionDefinition } from "../fixtures/index.js";
+
+// PROMOTIONS: readonly PromotionDefinition[]
+// - WELCOME10: 10% off cart
+// - SUMMER20:  20% off cart (max $50)
+// - SAVE15:    $15 flat off cart
+// - FREESHIP:  100% off delivery (free shipping)
+```
+
+`PromotionDefinition` fields: `name`, `code`, `discountType` (`"percentage" | "absolute"`),
+`discountValue`, `scope` (`"cart" | "delivery"`), optional `maxValue`, optional `freeShipping`.
+
+> **Note:** Demo promotions are global (not scoped to a SalesChannel). Cleanup deletes them
+> by name across all SalesChannels. This is intentional — promotion codes are store-wide.
 
 ## Adding a New Fixture
 

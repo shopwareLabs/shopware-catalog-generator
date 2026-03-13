@@ -3,6 +3,9 @@ import { describe, expect, test } from "bun:test";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 import { FooterPagesProcessor } from "../../../../src/post-processors/cms/footer-pages-processor.js";
+import { createTestBlueprint } from "../../../helpers/blueprint-factory.js";
+import { createTestContext } from "../../../helpers/post-processor-context.js";
+import { MockApiHelpers } from "../../../mocks/index.js";
 
 interface CategoryRow {
     id: string;
@@ -33,75 +36,79 @@ interface MockDb {
     salesChannels: SalesChannelRow[];
 }
 
-function createContext(db: MockDb, dryRun = false): PostProcessorContext {
-    const mockFetch = async (
-        input: string | URL | Request,
-        init?: RequestInit
-    ): Promise<Response> => {
-        const url = typeof input === "string" ? input : input.toString();
-        const method = init?.method ?? "GET";
+/**
+ * Stateful mock API helpers that simulate a DB for footer pages tests.
+ * Overrides post/searchEntities/deleteEntity to maintain state.
+ */
+class FooterMockApiHelpers extends MockApiHelpers {
+    constructor(private db: MockDb) {
+        super();
+    }
 
-        if (method === "DELETE") {
-            const parts = url.split("/");
-            const id = parts[parts.length - 1];
-            const entity = parts[parts.length - 2];
-
-            if (entity === "category") {
-                db.categories = db.categories.filter((c) => c.id !== id);
-            }
-            if (entity === "cms-page") {
-                db.cmsPages = db.cmsPages.filter((p) => p.id !== id);
-            }
-            return new Response(null, { status: 204 });
+    override async searchEntities<T = Record<string, unknown>>(
+        entity: string,
+        _filters?: import("../../../../src/shopware/api-helpers.js").ShopwareFilter[],
+        _options?: Record<string, unknown>
+    ): Promise<T[]> {
+        if (entity === "sales-channel") {
+            return this.db.salesChannels as unknown as T[];
         }
+        return [];
+    }
 
-        const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : {};
+    override async post<T = unknown>(endpoint: string, body?: unknown): Promise<T> {
+        const b = (body as Record<string, unknown>) ?? {};
 
-        if (url.includes("/api/search/category")) {
-            const filter = (body.filter as Array<{ field?: string; value?: unknown }>) ?? [];
+        if (endpoint === "search/category") {
+            const filter =
+                (b.filter as Array<{ field?: string; value?: unknown }> | undefined) ?? [];
             const name = filter.find((f) => f.field === "name")?.value as string | undefined;
-            const parentId = (filter.find((f) => f.field === "parentId")?.value ?? undefined) as
+            const parentId = filter.find((f) => f.field === "parentId")?.value as
                 | string
                 | null
                 | undefined;
-            let rows = db.categories;
+            let rows = this.db.categories;
             if (name !== undefined) rows = rows.filter((r) => r.name === name);
             if (parentId !== undefined) rows = rows.filter((r) => r.parentId === parentId);
-            return Response.json({ data: rows.slice(0, 50) });
+            return { data: rows.slice(0, 50) } as unknown as T;
         }
 
-        if (url.includes("/api/search/cms-page")) {
+        if (endpoint === "search/cms-page") {
             const filter =
-                (body.filter as Array<{ type?: string; field?: string; value?: unknown }>) ?? [];
-            const name = filter.find((f) => f.field === "name")?.value as string | undefined;
-            const contains = filter.find((f) => f.field === "name")?.value as string | undefined;
-            const queryType = (filter[0]?.type as string | undefined) ?? "equals";
-            const rows =
-                queryType === "contains" && contains
-                    ? db.cmsPages.filter((r) => r.name.includes(contains))
-                    : name
-                      ? db.cmsPages.filter((r) => r.name === name)
-                      : db.cmsPages;
-            return Response.json({ data: rows.slice(0, 50) });
+                (b.filter as
+                    | Array<{ type?: string; field?: string; value?: unknown }>
+                    | undefined) ?? [];
+            const name = filter.find((f) => f.field === "name" && f.type !== "contains")?.value as
+                | string
+                | undefined;
+            const contains = filter.find((f) => f.type === "contains")?.value as string | undefined;
+            let rows = this.db.cmsPages;
+            if (contains) rows = rows.filter((r) => r.name.includes(contains));
+            else if (name) rows = rows.filter((r) => r.name === name);
+            return { data: rows.slice(0, 50) } as unknown as T;
         }
 
-        if (url.includes("/api/search/sales-channel")) {
-            return Response.json({ data: db.salesChannels });
+        if (endpoint === "search/sales-channel") {
+            return { data: this.db.salesChannels } as unknown as T;
         }
 
-        if (url.includes("/api/_action/sync")) {
-            for (const op of Object.values(body)) {
-                const operation = op as {
+        if (endpoint === "_action/sync") {
+            const operations = b as Record<
+                string,
+                {
                     entity?: string;
                     action?: string;
                     payload?: Array<Record<string, unknown>>;
-                };
-                if (!operation.entity || !Array.isArray(operation.payload)) continue;
+                }
+            >;
 
-                if (operation.entity === "category" && operation.action === "upsert") {
-                    for (const payload of operation.payload) {
+            for (const op of Object.values(operations)) {
+                if (!op.entity || !Array.isArray(op.payload)) continue;
+
+                if (op.entity === "category" && op.action === "upsert") {
+                    for (const payload of op.payload) {
                         const id = String(payload.id);
-                        const existing = db.categories.find((c) => c.id === id);
+                        const existing = this.db.categories.find((c) => c.id === id);
                         const row: CategoryRow = {
                             id,
                             name: String(payload.name ?? existing?.name ?? ""),
@@ -114,60 +121,64 @@ function createContext(db: MockDb, dryRun = false): PostProcessorContext {
                         if (existing) {
                             Object.assign(existing, row);
                         } else {
-                            db.categories.push(row);
+                            this.db.categories.push(row);
                         }
                     }
                 }
 
-                if (operation.entity === "cms_page" && operation.action === "upsert") {
-                    for (const payload of operation.payload) {
+                if (op.entity === "cms_page" && op.action === "upsert") {
+                    for (const payload of op.payload) {
                         const id = String(payload.id);
-                        const existing = db.cmsPages.find((p) => p.id === id);
+                        const existing = this.db.cmsPages.find((p) => p.id === id);
                         const row: CmsPageRow = { id, name: String(payload.name) };
                         if (existing) {
                             Object.assign(existing, row);
                         } else {
-                            db.cmsPages.push(row);
+                            this.db.cmsPages.push(row);
                         }
                     }
                 }
 
-                if (operation.entity === "sales_channel" && operation.action === "upsert") {
-                    for (const payload of operation.payload) {
+                if (op.entity === "sales_channel" && op.action === "upsert") {
+                    for (const payload of op.payload) {
                         const id = String(payload.id);
-                        const existing = db.salesChannels.find((s) => s.id === id);
+                        const existing = this.db.salesChannels.find((s) => s.id === id);
                         if (!existing) continue;
                         Object.assign(existing, payload);
                     }
                 }
             }
-            return Response.json({});
+            return {} as T;
         }
 
-        return Response.json({ data: [] });
-    };
-    globalThis.fetch = mockFetch as typeof fetch;
+        return {} as T;
+    }
 
-    return {
+    override async deleteEntity(entity: string, id: string): Promise<boolean> {
+        if (entity === "category") {
+            this.db.categories = this.db.categories.filter((c) => c.id !== id);
+            return true;
+        }
+        if (entity === "cms-page" || entity === "cms_page") {
+            this.db.cmsPages = this.db.cmsPages.filter((p) => p.id !== id);
+            return true;
+        }
+        return true;
+    }
+}
+
+function createContext(db: MockDb, dryRun = false): PostProcessorContext {
+    const mockApi = new FooterMockApiHelpers(db);
+    const { context } = createTestContext({
+        mockApi,
         salesChannelId: "sc-1",
         salesChannelName: "store-one",
-        blueprint: {
-            version: "1.0",
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
+        blueprint: createTestBlueprint({
             salesChannel: { name: "store-one", description: "Store" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-        },
-        cache: {
-            getSalesChannelDir: () => "/tmp/test",
-            loadCmsBlueprint: () => null,
-        } as unknown as PostProcessorContext["cache"],
-        shopwareUrl: "https://example.test",
-        getAccessToken: async () => "token",
-        options: { batchSize: 5, dryRun },
-    };
+        }),
+        dryRun,
+    });
+    return context;
 }
 
 function createDb(): MockDb {

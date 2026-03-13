@@ -297,8 +297,6 @@ async function main(): Promise<void> {
             salesChannelName: salesChannel,
             blueprint,
             cache,
-            shopwareUrl: swEnvUrl,
-            getAccessToken: async () => hydrator.getAccessToken(),
             api: apiHelpers,
             options: {
                 batchSize: 5,

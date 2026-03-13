@@ -134,6 +134,41 @@ export function toFixtureUrlSlug(name: string): string {
 }
 
 /**
+ * Generate a deterministic numeric-only hash from a string using the djb2 algorithm.
+ * Unlike createShortHash, this produces purely decimal digits with no length cap,
+ * making it suitable for generating EAN-13 barcodes and other numeric identifiers.
+ *
+ * @param input - The string to hash
+ * @param length - Desired output length (no upper cap)
+ * @returns Decimal string of exactly `length` digits
+ *
+ * @example
+ * generateNumericHash("product-1-ean", 12) // "748392016284"
+ * generateNumericHash("product-2-ean", 12) // "519274038471"
+ */
+export function generateNumericHash(input: string, length: number): string {
+    const safeLength = Math.max(1, length);
+
+    // djb2 hash
+    let hash = 5381;
+    for (let i = 0; i < input.length; i++) {
+        hash = (hash * 33) ^ input.charCodeAt(i);
+        hash = hash >>> 0;
+    }
+
+    let result = "";
+    let remaining = hash;
+    for (let i = 0; i < safeLength; i++) {
+        result += String(remaining % 10);
+        remaining = Math.floor(remaining / 10);
+        if (remaining === 0) {
+            remaining = ((hash * (i + 2)) ^ (i * 7919)) >>> 0;
+        }
+    }
+    return result;
+}
+
+/**
  * Create a short deterministic hash from a string using djb2 algorithm.
  * Useful for generating unique suffixes when strings must be truncated.
  *

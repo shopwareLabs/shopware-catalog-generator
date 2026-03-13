@@ -43,11 +43,16 @@ tests/
 ├── e2e/                      # End-to-end tests
 │   ├── verify.ts             # API verification script
 │   └── browser-checks.md     # Browser verification guide
+├── helpers/                  # Shared test factories
+│   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
+│   └── post-processor-context.ts  # createTestContext — PostProcessorContext with mock API + cache
 └── mocks/                    # Shared test mocks
-    ├── index.ts
-    ├── api-helpers.mock.ts
-    ├── text-provider.mock.ts
-    └── image-provider.mock.ts
+    ├── index.ts              # Re-exports + createMockProductMetadata
+    ├── admin-client.mock.ts  # createMockAdminClient, createMockAdminClientWithInvoke
+    ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
+    ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
+    ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
+    └── image-provider.mock.js # MockImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Running Tests
@@ -214,6 +219,93 @@ describe("utilityFunction", () => {
     });
 });
 ```
+
+## Test Helpers
+
+Shared factories in `tests/helpers/` avoid duplicating fixture setup across test files.
+
+### blueprint-factory.ts
+
+```typescript
+import { createTestProduct, createTestCategory, createTestBlueprint } from "../../helpers/blueprint-factory.js";
+
+// Create a single product with sensible defaults
+const product = createTestProduct({ name: "Guitar", price: 99.99 });
+
+// Create a category node
+const cat = createTestCategory({ id: "cat-guitars", name: "Guitars" });
+
+// Create a full HydratedBlueprint
+const blueprint = createTestBlueprint({ products: [product], categories: [cat] });
+```
+
+All three functions accept partial override objects. `createTestProduct` also accepts
+`metadata?: Partial<ProductMetadata>` (handled specially to merge with defaults).
+
+### post-processor-context.ts
+
+```typescript
+import { createTestContext, TestContextOptions } from "../../helpers/post-processor-context.js";
+
+const { context, mockApi, mockCache } = createTestContext({
+    dryRun: true,
+    blueprint: createTestBlueprint({ products: [product] }),
+    cachedImages: new Set(["prod-1-main"]),
+    activeProcessors: ["images", "reviews"],
+});
+
+// context  — fully typed PostProcessorContext
+// mockApi  — MockApiHelpers (call mockApi.mockPostResponse(...) to stub API calls)
+// mockCache — MockDataCache (inspect mockCache.loadProductMetadataMock.calls)
+```
+
+`TestContextOptions` fields: `dryRun`, `salesChannelId`, `salesChannelName`, `blueprint`,
+`metadataMap`, `cachedImages`, `staleImages`, `imageProvider`, `activeProcessors`, `options`, `mockApi`.
+
+## Mock Providers and Test Utilities
+
+### mocks/index.ts
+
+```typescript
+import { createMockProductMetadata } from "../../mocks/index.js";
+
+// Complete ProductMetadata with sensible defaults, accepting partial overrides
+const meta = createMockProductMetadata({ isVariant: true, reviewCount: 3 });
+```
+
+### admin-client.mock.ts
+
+```typescript
+import { createMockAdminClient, createMockAdminClientWithInvoke } from "../../mocks/index.js";
+
+// Dispatch-by-key: first matching key wins, unmatched → empty result
+const client = createMockAdminClient({
+    "search/currency": { data: [{ id: "usd-id", isoCode: "USD" }], total: 1 },
+});
+
+// Custom handler: use when tests need body inspection
+const client = createMockAdminClientWithInvoke(async (operation, { body }) => {
+    return { data: { id: "new-id" } };
+});
+```
+
+### data-cache.mock.ts
+
+```typescript
+import { createMockDataCache, MockDataCache, MockImageCache } from "../../mocks/index.js";
+
+const mockCache = createMockDataCache({
+    metadataMap: new Map([["prod-1", { reviewCount: 5 }]]),
+    cachedImages: new Set(["prod-1-main"]),
+    staleImages: new Set(["prod-1-angle"]), // hasImage=true but load returns null
+});
+
+// Inspect calls
+expect(mockCache.loadProductMetadataMock).toHaveBeenCalledWith("test-store", "prod-1");
+```
+
+`MockDataCache` implements `DataCacheApi`. It exposes mock functions for all methods:
+`loadProductMetadataMock`, `saveManufacturersMock`, `loadManufacturersMock`, `loadCmsBlueprintMock`.
 
 ## Mock Providers
 

@@ -12,6 +12,7 @@ export type {
     BlueprintPropertyOption,
     BlueprintSalesChannel,
     BlueprintVersion,
+    BrandColors,
     CmsBlueprint,
     CmsBlueprintBlock,
     CmsBlueprintPage,
@@ -58,14 +59,24 @@ export { PROVIDER_DEFAULTS } from "./providers.js";
 // Shopware entity types and Zod schemas
 export type {
     CategoryNode,
+    CategorySyncPayload,
+    CustomerAddressPayload,
+    CustomerSyncPayload,
     ProductImage,
     ProductInput,
     ProductReview,
+    MediaEntityPayload,
+    PricePayload,
+    ProductSyncPayload,
+    ProductVisibilityPayload,
+    PromotionDiscountPayload,
     PropertyGroup,
     PropertyOption,
     SalesChannel,
     SalesChannelFull,
     SalesChannelInput,
+    SalesChannelUpdatePayload,
+    TieredPricePayload,
 } from "./shopware.js";
 
 // Zod schemas for AI response validation

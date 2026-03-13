@@ -9,7 +9,7 @@ import type { CmsPageFixture } from "../../fixtures/index.js";
 import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { IMAGES_ELEMENTS_PAGE } from "../../fixtures/index.js";
-import { logger } from "../../utils/index.js";
+import { cloneDeep, logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class ImagesProcessorImpl extends BaseCmsProcessor {
@@ -130,7 +130,7 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
     private populateMediaIds(fixture: CmsPageFixture, mediaIds: string[]): CmsPageFixture {
         if (mediaIds.length === 0) return fixture;
 
-        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const cloned = cloneDeep(fixture);
         const sliderMediaIds = mediaIds.slice(0, 5);
         const galleryMediaIds = mediaIds.slice(5, 11);
 

@@ -9,7 +9,7 @@ import type { CmsPageFixture } from "../../fixtures/index.js";
 import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { TEXT_IMAGES_ELEMENTS_PAGE } from "../../fixtures/index.js";
-import { logger } from "../../utils/index.js";
+import { cloneDeep, logger } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 class TextImagesProcessorImpl extends BaseCmsProcessor {
@@ -132,7 +132,7 @@ class TextImagesProcessorImpl extends BaseCmsProcessor {
         fixture: CmsPageFixture,
         imageMap: Record<string, string | null>
     ): CmsPageFixture {
-        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const cloned = cloneDeep(fixture);
 
         // Map: block index -> slot assignments
         const slotAssignments: Record<number, Record<string, string | null>> = {

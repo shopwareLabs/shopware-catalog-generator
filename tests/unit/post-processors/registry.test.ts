@@ -15,6 +15,7 @@ import {
     VideoProcessor,
 } from "../../../src/post-processors/index.js";
 import { logger } from "../../../src/utils/index.js";
+import { MockApiHelpers } from "../../mocks/index.js";
 
 // Mock context for testing
 function createMockContext(): PostProcessorContext {
@@ -34,8 +35,7 @@ function createMockContext(): PostProcessorContext {
             propertyGroups: [],
         },
         cache: {} as PostProcessorContext["cache"],
-        shopwareUrl: "http://localhost:8000",
-        getAccessToken: async () => "test-token",
+        api: new MockApiHelpers(),
         options: {
             batchSize: 5,
             dryRun: false,
@@ -88,11 +88,12 @@ describe("PostProcessor Registry", () => {
 
     test("getAll returns all processors", () => {
         const all = registry.getAll();
-        // 9 CMS processors + 5 other processors = 14 total
-        expect(all.length).toBe(14);
+        // 9 CMS processors + 9 other processors = 18 total
+        expect(all.length).toBe(18);
         expect(all.map((p) => p.name)).toContain("cms-video");
         expect(all.map((p) => p.name)).toContain("cms-footer-pages");
         expect(all.map((p) => p.name)).toContain("cms-testing");
+        expect(all.map((p) => p.name)).toContain("cross-selling");
         expect(all.map((p) => p.name)).toContain("digital-product");
         expect(all.map((p) => p.name)).toContain("images");
         expect(all.map((p) => p.name)).toContain("manufacturers");

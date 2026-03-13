@@ -1,4 +1,5 @@
 // Array utilities
+export { cloneDeep } from "./clone.js";
 export {
     chunkArray,
     cartesianProduct,
@@ -45,6 +46,7 @@ export {
     COLOR_PALETTE,
     findClosestColor,
     getColorHex,
+    getContrastTextColor,
     getViewSuffix,
     VIEW_SUFFIXES,
 } from "./color-palette.js";
@@ -71,13 +73,14 @@ export {
 } from "./retry.js";
 // Shopware request utilities
 export type { ShopwareRequestContext } from "./shopware-request.js";
-export { apiPost, apiUpload } from "./shopware-request.js";
+export { apiPatch, apiPost, apiUpload } from "./shopware-request.js";
 // String utilities
 export {
     capitalizeString,
     createShortHash,
     decodeHtmlEntities,
     generateCategoryPlaceholder,
+    generateNumericHash,
     generateProductPlaceholder,
     generatePropertyGroupPlaceholder,
     normalizeDescription,

@@ -50,6 +50,11 @@ const title = capitalizeString("hello"); // "Hello"
 // Deterministic short hash (djb2 algorithm) - useful for unique suffixes
 const hash = createShortHash("long-option-name-suffix", 5); // e.g. "a3x1k"
 const hash2 = createShortHash("long-option-name-suffix", 5); // same: "a3x1k"
+
+// Deterministic numeric-only hash - used for EAN generation (collision-resistant)
+import { generateNumericHash } from "./utils/index.js";
+const digits = generateNumericHash("product-id-ean", 12); // "847392018473"
+// Same input always produces the same 12-digit string; uses djb2 + digit cycling to avoid collisions
 ```
 
 ### category-tree.ts
@@ -77,14 +82,21 @@ const results = await limiter.all(tasks.map((t) => () => processTask(t)));
 
 ### color-palette.ts
 
-Color handling and fuzzy matching:
+Color handling, fuzzy matching, and contrast utilities:
 
 ```typescript
-import { getHexColor, findClosestColor } from "./utils/index.js";
+import { getHexColor, findClosestColor, getContrastTextColor } from "./utils/index.js";
 
 const hex = getHexColor("red"); // "#FF0000"
 const match = findClosestColor("burgundy"); // { name: "Red", hex: "#FF0000" }
+
+// WCAG 2.0 relative luminance — returns "#000000" or "#ffffff" for optimal contrast
+const textColor = getContrastTextColor("#E91E63"); // "#ffffff" (white on dark pink)
+const textColor2 = getContrastTextColor("#FFD700"); // "#000000" (black on gold)
 ```
+
+`getContrastTextColor()` is used by the theme processor to derive `sw-color-buy-button-text`
+from the brand primary color, ensuring readable button text regardless of the chosen brand color.
 
 ### property-collector.ts
 
@@ -182,6 +194,19 @@ Logs are written to `logs/generator-{timestamp}.log`.
 - Use `logger.info/warn/error("msg", { cli: true })` for user-facing output (respects MCP mode)
 - Use `logger.info/warn/error()` for diagnostic logging (file only)
 - Only CLI entry points (`main.ts`, `*-cli.ts`, `server.ts`) may use `console.*` directly
+
+### clone.ts
+
+Typed deep-clone wrapper around `structuredClone`:
+
+```typescript
+import { cloneDeep } from "./utils/index.js";
+
+const copy = cloneDeep(original); // same type as original, fully independent copy
+```
+
+Use this instead of `structuredClone` directly — it provides a single change point if the
+cloning strategy ever needs to be swapped (e.g. JSON round-trip fallback, validation, logging).
 
 ## Import Pattern
 

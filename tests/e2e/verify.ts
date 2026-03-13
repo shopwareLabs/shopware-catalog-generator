@@ -7,7 +7,9 @@
  * - SalesChannel exists
  * - Categories exist (no placeholders)
  * - Products exist (no placeholders)
+ * - Product detail fields (sale prices, topseller, shipping, dimensions, EAN, SEO)
  * - Manufacturers exist (if generated)
+ * - CMS pages and Testing category
  */
 
 import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
@@ -34,18 +36,35 @@ async function search<T>(
     };
 }
 
+interface ProductFieldCounts {
+    withListPrice: number;
+    withTopseller: number;
+    withShippingFree: number;
+    withDeliveryTime: number;
+    withWeight: number;
+    withEan: number;
+    withMetaTitle: number;
+    withTieredPricing: number;
+}
+
 interface VerificationResult {
     salesChannel: { found: boolean; id?: string; navigationCategoryId?: string };
     categories: { count: number; expected: number; placeholders: string[] };
     products: { count: number; expected: number; placeholders: string[] };
+    productFields: ProductFieldCounts;
     propertyGroups: { count: number; productsWithProperties: number };
     manufacturers: { count: number };
     images: { productsWithImages: number; totalProducts: number };
+    promotions: { count: number };
     cms: {
         landingPages: number;
         homePage: boolean;
         testingCategory: boolean;
         cookieSettingsLink: boolean;
+    };
+    theme: {
+        childThemeExists: boolean;
+        hasCustomColors: boolean;
     };
     passed: boolean;
     errors: string[];
@@ -64,14 +83,29 @@ async function verifyGeneration(
         salesChannel: { found: false },
         categories: { count: 0, expected: expected.categories, placeholders: [] },
         products: { count: 0, expected: expected.products, placeholders: [] },
+        productFields: {
+            withListPrice: 0,
+            withTopseller: 0,
+            withShippingFree: 0,
+            withDeliveryTime: 0,
+            withWeight: 0,
+            withEan: 0,
+            withMetaTitle: 0,
+            withTieredPricing: 0,
+        },
         propertyGroups: { count: 0, productsWithProperties: 0 },
         manufacturers: { count: 0 },
         images: { productsWithImages: 0, totalProducts: 0 },
+        promotions: { count: 0 },
         cms: {
             landingPages: 0,
             homePage: false,
             testingCategory: false,
             cookieSettingsLink: false,
+        },
+        theme: {
+            childThemeExists: false,
+            hasCustomColors: false,
         },
         passed: false,
         errors: [],
@@ -116,7 +150,7 @@ async function verifyGeneration(
     console.log(`  ✓ Navigation Category: ${salesChannel.navigationCategoryId}`);
 
     // Get the AdminApiClient from the hydrator for direct queries
-    const client = (hydrator as unknown as { client: AdminApiClient }).client;
+    const client = hydrator.getAdminClient();
 
     // Verify categories
     console.log(`Verifying categories...`);
@@ -219,6 +253,107 @@ async function verifyGeneration(
         );
         result.errors.push(
             `Product query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
+    // Verify product detail fields (prices, flags, dimensions, identifiers, SEO)
+    console.log(`Verifying product detail fields...`);
+    try {
+        interface ProductFieldsRow {
+            id?: string;
+            price?: Array<{ listPrice?: unknown }>;
+            prices?: Array<{ quantityStart?: number }>;
+            markAsTopseller?: boolean;
+            shippingFree?: boolean;
+            deliveryTimeId?: string;
+            weight?: number;
+            ean?: string;
+            metaTitle?: string;
+        }
+
+        const fieldsResponse = await search<ProductFieldsRow>(
+            client,
+            "searchProduct post /search/product",
+            {
+                limit: 500,
+                filter: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: salesChannel.id,
+                    },
+                ],
+                associations: {
+                    prices: {},
+                },
+            }
+        );
+
+        const counts = result.productFields;
+        for (const p of fieldsResponse.data) {
+            const priceEntry = p.price?.[0];
+            if (priceEntry?.listPrice) counts.withListPrice++;
+            if (p.prices && p.prices.length > 1) counts.withTieredPricing++;
+            if (p.markAsTopseller) counts.withTopseller++;
+            if (p.shippingFree) counts.withShippingFree++;
+            if (p.deliveryTimeId) counts.withDeliveryTime++;
+            if (p.weight && p.weight > 0) counts.withWeight++;
+            if (p.ean) counts.withEan++;
+            if (p.metaTitle) counts.withMetaTitle++;
+        }
+
+        console.log(
+            `  Sale prices: ${counts.withListPrice}, Topseller: ${counts.withTopseller}, ShippingFree: ${counts.withShippingFree}, TieredPricing: ${counts.withTieredPricing}`
+        );
+        console.log(
+            `  DeliveryTime: ${counts.withDeliveryTime}, Weight: ${counts.withWeight}, EAN: ${counts.withEan}, MetaTitle: ${counts.withMetaTitle}`
+        );
+
+        // Hard checks: all products should have weight, EAN, metaTitle
+        const hardChecks: Array<[string, number]> = [
+            ["weight", counts.withWeight],
+            ["EAN", counts.withEan],
+            ["metaTitle", counts.withMetaTitle],
+        ];
+        for (const [field, count] of hardChecks) {
+            if (count === 0) {
+                result.errors.push(`Expected all products to have ${field}, found 0`);
+                console.log(`  ✗ No products with ${field}`);
+            } else {
+                console.log(`  ✓ ${field}: ${count}/${fieldsResponse.total}`);
+            }
+        }
+
+        // Hard checks: at least 1 product should have these probabilistic flags
+        const atLeastOneChecks: Array<[string, number]> = [
+            ["listPrice (sale)", counts.withListPrice],
+            ["markAsTopseller", counts.withTopseller],
+            ["shippingFree", counts.withShippingFree],
+            ["tieredPricing", counts.withTieredPricing],
+        ];
+        for (const [field, count] of atLeastOneChecks) {
+            if (count === 0) {
+                result.errors.push(`Expected at least 1 product with ${field}, found 0`);
+                console.log(`  ✗ No products with ${field}`);
+            } else {
+                console.log(`  ✓ ${field}: ${count}`);
+            }
+        }
+
+        // Soft check: deliveryTime depends on Shopware having delivery_time entities
+        if (counts.withDeliveryTime === 0) {
+            console.log(
+                `  ⚠ No products with deliveryTime (Shopware may have no delivery_time entities)`
+            );
+        } else {
+            console.log(`  ✓ deliveryTime: ${counts.withDeliveryTime}/${fieldsResponse.total}`);
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Product fields query failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+        result.errors.push(
+            `Product fields query failed: ${error instanceof Error ? error.message : String(error)}`
         );
     }
 
@@ -390,6 +525,49 @@ async function verifyGeneration(
         );
     }
 
+    // Verify promotions
+    console.log(`Verifying promotions...`);
+    try {
+        interface PromotionRow {
+            id?: string;
+            name?: string;
+            code?: string;
+            active?: boolean;
+        }
+
+        const promotionResponse = await search<PromotionRow>(
+            client,
+            "searchPromotion post /search/promotion",
+            {
+                limit: 50,
+                filter: [
+                    {
+                        type: "equalsAny",
+                        field: "code",
+                        value: "WELCOME10|SUMMER20|SAVE15|FREESHIP",
+                    },
+                ],
+            }
+        );
+
+        result.promotions.count = promotionResponse.total;
+        console.log(`  Found ${promotionResponse.total} demo promotions`);
+
+        if (promotionResponse.total === 0) {
+            result.errors.push("Expected at least 1 demo promotion, found 0");
+            console.log(`  ✗ No demo promotions found`);
+        } else {
+            console.log(`  ✓ Promotions: ${promotionResponse.total}`);
+            for (const p of promotionResponse.data) {
+                console.log(`    - ${p.name} (${p.code})`);
+            }
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Promotion check failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
     // Verify CMS landing pages
     console.log(`Verifying CMS pages...`);
     try {
@@ -485,6 +663,55 @@ async function verifyGeneration(
         console.log(`  ⊘ CMS blueprint not cached (CMS used fixture defaults)`);
     }
 
+    // Verify theme customization
+    console.log(`Verifying theme...`);
+    try {
+        const capitalizedName =
+            salesChannelName.charAt(0).toUpperCase() + salesChannelName.slice(1);
+        const themeName = `${capitalizedName} Theme`;
+
+        interface ThemeRow {
+            id?: string;
+            name?: string;
+            parentThemeId?: string;
+            configValues?: Record<string, { value?: string }>;
+        }
+
+        const themeResponse = await search<ThemeRow>(client, "searchTheme post /search/theme", {
+            limit: 1,
+            filter: [{ type: "equals", field: "name", value: themeName }],
+        });
+
+        if (themeResponse.total > 0) {
+            result.theme.childThemeExists = true;
+            console.log(`  ✓ Child theme "${themeName}" exists`);
+
+            const theme = themeResponse.data[0];
+            if (theme?.parentThemeId) {
+                console.log(`  ✓ Theme has parent (inherits from Storefront)`);
+            }
+
+            const configValues = theme?.configValues ?? {};
+            if (
+                configValues["sw-color-brand-primary"]?.value ||
+                configValues["sw-color-brand-secondary"]?.value
+            ) {
+                result.theme.hasCustomColors = true;
+                console.log(
+                    `  ✓ Custom colors: primary=${configValues["sw-color-brand-primary"]?.value}, secondary=${configValues["sw-color-brand-secondary"]?.value}`
+                );
+            } else {
+                console.log(`  ⊘ No custom colors in configValues (may be in compiled config)`);
+            }
+        } else {
+            console.log(`  ⊘ No child theme found (theme processor may not have run)`);
+        }
+    } catch (error) {
+        console.log(
+            `  ✗ Theme check failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+
     // Overall pass/fail
     result.passed = result.errors.length === 0;
 
@@ -549,11 +776,19 @@ async function main(): Promise<void> {
             `  Property groups: ${result.propertyGroups.count} (${result.propertyGroups.productsWithProperties} products with properties)`
         );
         console.log(`  Manufacturers: ${result.manufacturers.count}`);
+        console.log(`  Promotions: ${result.promotions.count}`);
         console.log(
             `  Images: ${result.images.productsWithImages}/${result.images.totalProducts} products with images`
         );
+        const pf = result.productFields;
+        console.log(
+            `  Product fields: ${pf.withListPrice} sale, ${pf.withTopseller} topseller, ${pf.withShippingFree} free shipping, ${pf.withTieredPricing} tiered pricing, ${pf.withEan} EAN, ${pf.withMetaTitle} SEO`
+        );
         console.log(
             `  CMS: ${result.cms.landingPages} landing pages, Home: ${result.cms.homePage ? "✓" : "✗"}, Testing: ${result.cms.testingCategory ? "✓" : "✗"}, Cookie: ${result.cms.cookieSettingsLink ? "✓" : "✗"}`
+        );
+        console.log(
+            `  Theme: ${result.theme.childThemeExists ? "✓" : "✗"} child theme, ${result.theme.hasCustomColors ? "✓" : "⊘"} custom colors`
         );
         process.exit(0);
     } else {

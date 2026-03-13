@@ -93,6 +93,14 @@ await hydrator.createCategoryTree(categories, rootId, salesChannelId);
 await hydrator.hydrateEnvWithProducts(products, category, salesChannelName);
 ```
 
+**Product payload** includes: sale/list prices, `markAsTopseller`, `releaseDate` (for "New" badge), `shippingFree`, `weight`/`width`/`height`/`length`, `ean`, `manufacturerNumber`, `minPurchase`/`maxPurchase`/`purchaseSteps`, `metaTitle`/`metaDescription`, and `deliveryTimeId`.
+
+**Idempotency:** `deliveryTimeId` is read from the blueprint's `deliveryTimeIndex` (set deterministically in Phase 1) so delivery times are stable across re-runs. `releaseDate` for `isNew` products is intentionally set to `new Date().toISOString()` at upload time — this keeps the "New" badge permanently visible on the storefront regardless of when the blueprint was originally generated.
+
+**Tiered pricing null-fallback:** `getAlwaysValidRuleId()` logs a warning and returns `null` when no "Always valid" / "Always true" rule is found. Tiered prices are only attached when the rule ID is non-null (`if (hasTieredPricing && ruleId)`). This prevents accidentally binding prices to arbitrary business rules on stores with custom rule configurations.
+
+**Typed payloads:** The product sync payload is built using `ProductSyncPayload`, `PricePayload`, and `TieredPricePayload` types from `src/types/shopware.ts` instead of `Record<string, unknown>`. This provides compiler validation of required fields and prevents silent payload mismatches.
+
 **Category ordering**: Categories use `afterCategoryId` to preserve blueprint order. The Testing category is always created last so it appears at the end of the navigation.
 
 **Multi-domain SalesChannels**: `createSalesChannel()` automatically creates two domains per SalesChannel:

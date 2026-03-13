@@ -91,6 +91,9 @@ export interface ProviderConfig {
 
     /** Override the default image model */
     imageModel?: string;
+
+    /** Override image quality (low, medium, high, auto) — only affects OpenAI GPT image models */
+    imageQuality?: string;
 }
 
 /** Provider defaults for each AI provider type */
@@ -108,7 +111,7 @@ export const PROVIDER_DEFAULTS: Record<
 > = {
     openai: {
         textModel: "gpt-4.1-2025-04-14",
-        imageModel: "gpt-image-1.5",
+        imageModel: "gpt-image-1-mini",
         supportsImages: true,
         isSequential: false,
         requiresApiKey: true,

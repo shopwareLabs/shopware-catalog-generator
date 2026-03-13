@@ -19,7 +19,10 @@ import type {
 } from "../types/index.js";
 
 import { DEFAULT_BLUEPRINT_CONFIG } from "../types/index.js";
-import { generateUUID, randomPick } from "../utils/index.js";
+import { createShortHash, generateNumericHash, generateUUID, randomPick } from "../utils/index.js";
+
+/** Assumed number of delivery time slots in Shopware (round-robin index). */
+const DELIVERY_TIME_SLOTS = 5;
 
 /**
  * Generate a random number in a range
@@ -34,6 +37,29 @@ function randomInRange(min: number, max: number): number {
 function randomPrice(min: number = 9.99, max: number = 299.99): number {
     const price = min + Math.random() * (max - min);
     return Math.round(price * 100) / 100;
+}
+
+/**
+ * Generate a random decimal in a range with 2 decimal places
+ */
+function randomDecimal(min: number, max: number): number {
+    return Math.round((min + Math.random() * (max - min)) * 100) / 100;
+}
+
+/**
+ * Calculate EAN-13 check digit from 12-digit string
+ */
+function calculateEanCheckDigit(digits: string): string {
+    const sum = [...digits].reduce((acc, d, i) => acc + parseInt(d, 10) * (i % 2 === 0 ? 1 : 3), 0);
+    return String((10 - (sum % 10)) % 10);
+}
+
+/**
+ * Generate a fake EAN-13 barcode deterministically from a seed string
+ */
+function generateEan13(seed: string): string {
+    const digits = generateNumericHash(seed + "-ean", 12);
+    return digits + calculateEanCheckDigit(digits);
 }
 
 /**
@@ -161,7 +187,41 @@ export class BlueprintGenerator {
             remaining -= branchProducts.length;
         }
 
+        this.ensureMinimumFlags(products);
+
         return products;
+    }
+
+    /**
+     * Ensure at least one product has each storefront flag.
+     * Prevents E2E tests from failing due to random distribution with small product counts.
+     */
+    private ensureMinimumFlags(products: BlueprintProduct[]): void {
+        if (products.length < 3) return;
+
+        let idx = 0;
+        const pick = (): BlueprintProduct => products[idx++ % products.length]!;
+
+        if (!products.some((p) => p.metadata.hasSalesPrice)) {
+            const p = pick();
+            p.metadata.hasSalesPrice = true;
+            p.metadata.salePercentage = 0.2;
+        }
+        if (!products.some((p) => p.metadata.isTopseller)) {
+            pick().metadata.isTopseller = true;
+        }
+        if (!products.some((p) => p.metadata.isNew)) {
+            pick().metadata.isNew = true;
+        }
+        if (!products.some((p) => p.metadata.isShippingFree)) {
+            pick().metadata.isShippingFree = true;
+        }
+        if (!products.some((p) => p.metadata.hasTieredPricing)) {
+            const p = pick();
+            p.metadata.hasTieredPricing = true;
+            p.stock = randomInRange(500, 1000);
+            p.metadata.maxPurchase = undefined;
+        }
     }
 
     /**
@@ -187,17 +247,23 @@ export class BlueprintGenerator {
      * AI will assign appropriate subcategories during hydration based on product name.
      */
     private createProduct(index: number, topCategory: BlueprintCategory): BlueprintProduct {
-        const metadata = this.generateProductMetadata();
+        const id = generateUUID();
+        const metadata = this.generateProductMetadata(id);
+        const stock = metadata.hasTieredPricing ? randomInRange(500, 1000) : randomInRange(0, 100);
+
+        // Deterministic delivery time: round-robin across assumed slots
+        const deliveryTimeIndex = index % DELIVERY_TIME_SLOTS;
 
         return {
-            id: generateUUID(),
+            id,
             name: `Product ${index}`,
             description: `Placeholder description for Product ${index}`,
             price: randomPrice(),
-            stock: randomInRange(0, 100),
+            stock,
             primaryCategoryId: topCategory.id,
             categoryIds: [topCategory.id],
             metadata,
+            deliveryTimeIndex,
         };
     }
 
@@ -208,7 +274,7 @@ export class BlueprintGenerator {
      * The AI suggests appropriate property groups during hydration,
      * and the PropertyCache + variant processor handle the actual options.
      */
-    private generateProductMetadata(): ProductMetadata {
+    private generateProductMetadata(productId: string): ProductMetadata {
         const imageCount = randomPick([1, 2, 3]) as 1 | 2 | 3;
         const isVariant = Math.random() < this.config.variantPercentage;
         const hasSalesPrice = Math.random() < this.config.salePercentage;
@@ -233,17 +299,42 @@ export class BlueprintGenerator {
             prompt: "", // Filled during hydration
         }));
 
+        // Storefront flags
+        const isTopseller = Math.random() < 0.1;
+        const isNew = Math.random() < 0.15;
+        const isShippingFree = Math.random() < 0.08;
+
+        // Tiered pricing (~10% of products)
+        const hasTieredPricing = Math.random() < 0.1;
+
+        // Purchase constraints (~5% bulk min, ~10% max purchase)
+        const hasBulkMin = Math.random() < 0.05;
+        const minPurchase = hasBulkMin ? (randomPick([2, 3, 5, 10]) as number) : undefined;
+        const hasMaxPurchase = !hasTieredPricing && Math.random() < 0.1;
+        const maxPurchase = hasMaxPurchase ? (randomPick([3, 5, 10, 20, 50]) as number) : undefined;
+
         return {
             imageCount,
             imageDescriptions,
             isVariant,
-            // variantConfigs is filled during hydration based on AI-suggested property groups
             variantConfigs: undefined,
-            properties: [], // Filled during hydration
-            manufacturerName: undefined, // Filled during hydration
+            properties: [],
+            manufacturerName: undefined,
             reviewCount,
             hasSalesPrice,
             salePercentage: hasSalesPrice ? randomPick([0.1, 0.15, 0.2, 0.25, 0.3]) : undefined,
+            hasTieredPricing,
+            isTopseller,
+            isNew,
+            isShippingFree,
+            weight: randomDecimal(0.1, 25.0),
+            width: randomInRange(50, 1500),
+            height: randomInRange(20, 1200),
+            length: randomInRange(50, 2000),
+            ean: generateEan13(productId),
+            manufacturerNumber: `MPN-${createShortHash(productId + "-mpn", 8).toUpperCase()}`,
+            ...(minPurchase && { minPurchase, purchaseSteps: minPurchase }),
+            ...(maxPurchase && { maxPurchase }),
         };
     }
 }

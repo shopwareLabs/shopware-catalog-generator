@@ -62,7 +62,7 @@ function parseCliArgs(): CliArgs {
         name: flags.name as string | undefined,
         description: flags.description as string | undefined,
         products: flags.products ? parseInt(flags.products as string, 10) : undefined,
-        product: flags.product as string | undefined,
+        target: flags.target as string | undefined,
         interactive: flags.i === true || flags.interactive === true,
         only: flags.only ? (flags.only as string).split(",") : undefined,
         dryRun: flags["dry-run"] === true,
@@ -85,13 +85,14 @@ Commands:
   blueprint fix      Fix placeholder names in hydrated blueprint
   generate           Full flow: create + hydrate + upload to Shopware
   process            Run post-processors on existing SalesChannel
-  image fix          Regenerate images for a specific product
+  image fix          Regenerate images (product, category, cms, or theme)
 
 Options:
   --name=<name>         SalesChannel name (required for most commands)
   --description=<text>  Store description for AI generation
   --products=<n>        Number of products (default: 90)
-  --product=<name>      Product name or ID (for image fix)
+  --target=<name>       Target name or ID (for image fix)
+  --type=<type>         Image fix type: product, category, cms, or theme
   --only=<list>         Comma-separated list:
                         - For 'process': processor names (images, manufacturers, etc.)
                         - For 'blueprint hydrate': categories or properties
@@ -109,7 +110,8 @@ Examples:
   bun run src/main.ts blueprint fix --name=furniture
   bun run src/main.ts generate --name=furniture --description="Wood furniture store"
   bun run src/main.ts process --name=furniture --only=images,manufacturers
-  bun run src/main.ts image fix --name=beauty --product="Eyelash Curler - Silver"
+  bun run src/main.ts image fix --name=beauty --target="Eyelash Curler - Silver"
+  bun run src/main.ts image fix --name=beauty --type=theme --target=logo
 `);
 }
 

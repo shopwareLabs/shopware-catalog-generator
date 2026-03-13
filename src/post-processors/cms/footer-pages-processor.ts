@@ -3,6 +3,7 @@
  */
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { CategorySyncPayload, SalesChannelUpdatePayload } from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -264,7 +265,7 @@ class FooterPagesProcessorImpl extends BaseCmsProcessor implements PostProcessor
         serviceRootId: string,
         errors: string[]
     ): Promise<void> {
-        const payload: Record<string, unknown> = {
+        const payload: SalesChannelUpdatePayload = {
             id: salesChannel.id,
             footerCategoryId: footerRootId,
             serviceCategoryId: serviceRootId,
@@ -341,7 +342,7 @@ class FooterPagesProcessorImpl extends BaseCmsProcessor implements PostProcessor
         serviceRootId: string | null,
         errors: string[]
     ): Promise<void> {
-        const payload: Record<string, unknown> = { id: salesChannel.id };
+        const payload: SalesChannelUpdatePayload = { id: salesChannel.id };
 
         if (footerRootId && salesChannel.footerCategoryId === footerRootId) {
             payload.footerCategoryId = null;
@@ -615,7 +616,7 @@ class FooterPagesProcessorImpl extends BaseCmsProcessor implements PostProcessor
         const existing = await findCategoryIdByName(context, name, parentId);
         const categoryId = existing ?? generateUUID();
 
-        const payload: Record<string, unknown> = {
+        const payload: CategorySyncPayload = {
             id: categoryId,
             parentId,
             name,
@@ -624,8 +625,8 @@ class FooterPagesProcessorImpl extends BaseCmsProcessor implements PostProcessor
             visible: true,
             displayNestedProducts: false,
             cmsPageId,
+            afterCategoryId,
         };
-        if (afterCategoryId) payload.afterCategoryId = afterCategoryId;
 
         const response = await apiPost(context, "_action/sync", {
             upsertCategory: {
@@ -650,21 +651,21 @@ class FooterPagesProcessorImpl extends BaseCmsProcessor implements PostProcessor
         const existing = await findCategoryIdByName(context, name, parentId);
         const categoryId = existing ?? generateUUID();
 
+        const payload: CategorySyncPayload = {
+            id: categoryId,
+            parentId,
+            name,
+            active: true,
+            type: "folder",
+            visible: true,
+            displayNestedProducts: false,
+        };
+
         const response = await apiPost(context, "_action/sync", {
             upsertStructuringCategory: {
                 entity: "category",
                 action: "upsert",
-                payload: [
-                    {
-                        id: categoryId,
-                        parentId,
-                        name,
-                        active: true,
-                        type: "folder",
-                        visible: true,
-                        displayNestedProducts: false,
-                    },
-                ],
+                payload: [payload],
             },
         });
         if (!response.ok) {

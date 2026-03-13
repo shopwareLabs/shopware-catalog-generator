@@ -55,20 +55,29 @@ Providers may ignore `width`/`height` if they use fixed sizes or prefer their ow
 
 ### Image Providers
 
-| Provider              | Name           | Model         | maxConcurrency | Notes                          |
-| --------------------- | -------------- | ------------- | -------------- | ------------------------------ |
-| OpenAI                | `openai`       | gpt-image-1.5 | 10             | Returns URL, fetched to base64 |
-| Pollinations (sk\_\*) | `pollinations` | flux/turbo    | 5              | Direct base64 response         |
-| Pollinations (pk\_\*) | `pollinations` | flux/turbo    | 2              | Limited parallelism            |
-| Noop                  | `none`         | -             | 1              | Disabled (no images)           |
+| Provider              | Name           | Model            | maxConcurrency | Notes                     |
+| --------------------- | -------------- | ---------------- | -------------- | ------------------------- |
+| OpenAI                | `openai`       | gpt-image-1-mini | 10             | Fastest, cheapest default |
+| Pollinations (sk\_\*) | `pollinations` | flux/turbo       | 5              | Direct base64 response    |
+| Pollinations (pk\_\*) | `pollinations` | flux/turbo       | 2              | Limited parallelism       |
+| Noop                  | `none`         | -                | 1              | Disabled (no images)      |
 
 **OpenAI Image Notes:**
 
-- Uses `gpt-image-1.5` model (latest, Dec 2025)
-- Supported sizes: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait), `auto`
-- Returns URL by default - provider fetches and converts to base64
-- Does NOT support `response_format: "b64_json"` parameter
+- Default model: `gpt-image-1-mini` (cost-efficient, fast)
+- Available models: `gpt-image-1-mini`, `gpt-image-1`, `gpt-image-1.5` (override via `IMAGE_MODEL`)
+- Quality levels: `low` (default, cheapest), `medium`, `high`, `auto` (override via `IMAGE_QUALITY`)
+- Supported sizes: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait)
+- Requests `output_format: "webp"` for smaller payloads (matches cache format)
+- GPT image models always return base64 directly (no URL fetching needed)
 - Image generation has retry logic (3 retries, 5s backoff)
+
+**OpenAI Image Pricing (per image, 1536x1024):**
+
+| Model            | Low    | Medium | High   |
+| ---------------- | ------ | ------ | ------ |
+| gpt-image-1-mini | $0.006 | $0.015 | $0.052 |
+| gpt-image-1.5    | $0.011 | $0.019 | $0.065 |
 
 ## Factory
 
@@ -91,7 +100,8 @@ AI_MODEL=gpt-4o  # Optional override
 
 IMAGE_PROVIDER=pollinations|openai|none
 IMAGE_API_KEY=xxx
-IMAGE_MODEL=flux|turbo|klein  # For Pollinations
+IMAGE_MODEL=gpt-image-1-mini|gpt-image-1|gpt-image-1.5  # For OpenAI; flux|turbo|klein for Pollinations
+IMAGE_QUALITY=low|medium|high|auto  # OpenAI only, default: low
 ```
 
 ## Adding a New Provider

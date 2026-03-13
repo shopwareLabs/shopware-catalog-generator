@@ -3,11 +3,24 @@ import { describe, expect, mock, test } from "bun:test";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 import { TextImagesProcessor } from "../../../../src/post-processors/cms/text-images-processor.js";
+import { createTestBlueprint } from "../../../helpers/blueprint-factory.js";
+import { createTestContext } from "../../../helpers/post-processor-context.js";
 
-const BASE64_IMG =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const TEXT_IMAGES_KEYS = [
+    "ti-left",
+    "ti-right",
+    "ct-left",
+    "ct-right",
+    "bubble-left",
+    "bubble-center",
+    "bubble-right",
+    "toi-bg",
+];
 
-function createContext(): PostProcessorContext {
+function createContext(): {
+    context: PostProcessorContext;
+    mockCache: ReturnType<typeof createTestContext>["mockCache"];
+} {
     const fetchResponses = new Map<string, { ok: boolean; data: unknown }>();
     fetchResponses.set("search/media-default-folder", {
         ok: true,
@@ -40,45 +53,27 @@ function createContext(): PostProcessorContext {
         } as Response;
     }) as unknown as typeof fetch;
 
-    return {
+    const { context, mockCache } = createTestContext({
         salesChannelId: "sc-1",
         salesChannelName: "music",
-        blueprint: {
-            version: "1.0",
+        blueprint: createTestBlueprint({
             salesChannel: { name: "music", description: "Music store" },
-            categories: [],
-            products: [],
-            propertyGroups: [],
-            createdAt: new Date().toISOString(),
-            hydratedAt: new Date().toISOString(),
-        },
-        cache: {
-            getSalesChannelDir: mock(() => "/tmp/cache"),
-            loadCmsBlueprint: mock(() => null),
-            loadProductMetadata: mock(() => null),
-            images: {
-                loadImageForSalesChannel: mock(() => BASE64_IMG),
-                hasImageForSalesChannel: mock(() => true),
-                saveImageForSalesChannel: mock(() => {}),
-            },
-        } as unknown as PostProcessorContext["cache"],
-        shopwareUrl: "https://shopware.test",
-        getAccessToken: async () => "token",
-        options: { batchSize: 5, dryRun: false },
-    };
+        }),
+        cachedImages: new Set(TEXT_IMAGES_KEYS),
+    });
+
+    return { context, mockCache };
 }
 
 describe("TextImagesProcessor", () => {
     test("process uploads cms images and creates page/landing page", async () => {
-        const context = createContext();
+        const { context, mockCache } = createContext();
 
         const result = await TextImagesProcessor.process(context);
         expect(result.errors).toEqual([]);
         expect(result.processed).toBe(1);
 
-        const loadCalls = (context.cache.images.loadImageForSalesChannel as ReturnType<typeof mock>)
-            .mock.calls;
-        expect(loadCalls.length).toBe(8);
+        expect(mockCache.images.loadImageForSalesChannelMock.mock.calls.length).toBe(8);
     });
 
     test("populateMediaIds maps media ids into expected slots", () => {

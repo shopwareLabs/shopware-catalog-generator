@@ -119,6 +119,14 @@ class MockTextProvider implements TextProvider {
             });
         }
 
+        // Brand colors hydration response
+        if (userMessage.includes("Generate brand colors")) {
+            return JSON.stringify({
+                primary: "#4A90D9",
+                secondary: "#7AB8F5",
+            });
+        }
+
         // Properties-only hydration response
         if (userMessage.includes("Generate properties for existing products")) {
             return JSON.stringify({
@@ -222,6 +230,16 @@ function createTestBlueprint(): Blueprint {
                     properties: [],
                     reviewCount: 3,
                     hasSalesPrice: false,
+                    hasTieredPricing: false,
+                    isTopseller: false,
+                    isNew: false,
+                    isShippingFree: false,
+                    weight: 1.0,
+                    width: 100,
+                    height: 100,
+                    length: 100,
+                    ean: "1234567890128",
+                    manufacturerNumber: "MPN-TEST0001",
                 },
             },
             {
@@ -242,6 +260,16 @@ function createTestBlueprint(): Blueprint {
                     properties: [],
                     reviewCount: 5,
                     hasSalesPrice: false,
+                    hasTieredPricing: false,
+                    isTopseller: false,
+                    isNew: false,
+                    isShippingFree: false,
+                    weight: 1.0,
+                    width: 100,
+                    height: 100,
+                    length: 100,
+                    ean: "1234567890128",
+                    manufacturerNumber: "MPN-TEST0001",
                 },
             },
         ],
@@ -316,7 +344,17 @@ function createTestHydratedBlueprint(): HydratedBlueprint {
                     manufacturerName: "Nordic Furniture Co",
                     reviewCount: 3,
                     hasSalesPrice: false,
+                    hasTieredPricing: false,
                     baseImagePrompt: "Oak Coffee Table - Natural, Oak construction",
+                    isTopseller: false,
+                    isNew: false,
+                    isShippingFree: false,
+                    weight: 1.0,
+                    width: 100,
+                    height: 100,
+                    length: 100,
+                    ean: "1234567890128",
+                    manufacturerNumber: "MPN-TEST0001",
                 },
             },
             {
@@ -341,7 +379,17 @@ function createTestHydratedBlueprint(): HydratedBlueprint {
                     manufacturerName: "Nordic Furniture Co",
                     reviewCount: 5,
                     hasSalesPrice: false,
+                    hasTieredPricing: false,
                     baseImagePrompt: "Velvet Sofa - Gray, Velvet construction",
+                    isTopseller: false,
+                    isNew: false,
+                    isShippingFree: false,
+                    weight: 1.0,
+                    width: 100,
+                    height: 100,
+                    length: 100,
+                    ean: "1234567890128",
+                    manufacturerNumber: "MPN-TEST0001",
                 },
             },
         ],
@@ -412,16 +460,21 @@ describe("BlueprintHydrator", () => {
 
             // Should have hydratedAt timestamp
             expect(result.hydratedAt).toBeDefined();
+
+            // Should have brand colors
+            expect(result.brandColors).toBeDefined();
+            expect(result.brandColors?.primary).toBe("#4A90D9");
+            expect(result.brandColors?.secondary).toBe("#7AB8F5");
         });
 
-        test("makes AI calls for categories and products", async () => {
+        test("makes AI calls for categories, products, and brand colors", async () => {
             const blueprint = createTestBlueprint();
             mockProvider.resetCallCount();
 
             await hydrator.hydrate(blueprint);
 
-            // Should have made at least 2 calls: categories + products
-            expect(mockProvider.getCallCount()).toBeGreaterThanOrEqual(2);
+            // Should have made at least 3 calls: categories + products + brand colors
+            expect(mockProvider.getCallCount()).toBeGreaterThanOrEqual(3);
         });
     });
 
@@ -598,6 +651,16 @@ describe("BlueprintHydrator", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
                 {
@@ -615,6 +678,16 @@ describe("BlueprintHydrator", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ];
@@ -642,6 +715,16 @@ describe("BlueprintHydrator", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ];

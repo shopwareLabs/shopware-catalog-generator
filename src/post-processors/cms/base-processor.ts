@@ -18,6 +18,7 @@ import type {
 
 import {
     apiPost,
+    cloneDeep,
     generateUUID,
     logger,
     toFixtureUrlSlug,
@@ -89,7 +90,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
     ): CmsPageFixture {
         if (!hydratedPage) return fixture;
 
-        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const cloned = cloneDeep(fixture);
 
         for (let si = 0; si < cloned.sections.length && si < hydratedPage.sections.length; si++) {
             const fixtureSection = cloned.sections[si];
@@ -826,17 +827,7 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         entityId: string
     ): Promise<boolean> {
         try {
-            if (context.api) {
-                return await context.api.deleteEntity(entityType, entityId);
-            }
-
-            const accessToken = await context.getAccessToken();
-            const url = `${context.shopwareUrl}/api/${entityType}/${entityId}`;
-            const response = await fetch(url, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${accessToken}` },
-            });
-            return response.ok || response.status === 204;
+            return await context.api.deleteEntity(entityType, entityId);
         } catch (error) {
             logger.warn(`Failed to delete ${entityType}/${entityId}`, { data: error });
             return false;

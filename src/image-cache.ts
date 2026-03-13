@@ -6,15 +6,46 @@ import type { CacheOptions, ImageCacheMetadata } from "./types/index.js";
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
 
 /** Media type subdirectories matching Shopware's admin media folder structure */
-export type MediaType = "product_media" | "category_media" | "cms_media" | "property_images";
+export type MediaType =
+    | "product_media"
+    | "category_media"
+    | "cms_media"
+    | "property_images"
+    | "theme_media";
 
 /** Default media type for backward compatibility (product images) */
 const DEFAULT_MEDIA_TYPE: MediaType = "product_media";
 
 /**
+ * Public contract for image cache access used by post-processors.
+ *
+ * Typed against by DataCacheApi so that both ImageCache (production) and
+ * MockImageCache (tests) satisfy it without casts.
+ */
+export interface ImageCacheApi {
+    hasImageWithView(
+        salesChannel: string,
+        entityId: string,
+        view: string,
+        mediaType?: MediaType
+    ): boolean;
+    loadImageWithView(
+        salesChannel: string,
+        entityId: string,
+        view: string,
+        mediaType?: MediaType
+    ): string | null;
+    loadImageForSalesChannel(
+        salesChannel: string,
+        entityId: string,
+        mediaType?: MediaType
+    ): string | null;
+}
+
+/**
  * Image cache for storing generated product and category images
  */
-export class ImageCache {
+export class ImageCache implements ImageCacheApi {
     private readonly cacheDir: string;
     private readonly options: Pick<CacheOptions, "enabled" | "useCache" | "saveToCache">;
 
@@ -235,6 +266,26 @@ export class ImageCache {
         const imagesDir = this.getMediaTypeDir(salesChannel, mediaType);
         const imagePath = path.join(imagesDir, `${entityId}-${view}.webp`);
         const metadataPath = path.join(imagesDir, `${entityId}-${view}.json`);
+
+        try {
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            if (fs.existsSync(metadataPath)) fs.unlinkSync(metadataPath);
+        } catch {
+            // Silently fail
+        }
+    }
+
+    /**
+     * Delete cached image and metadata for a single-image entity (e.g. theme media)
+     */
+    deleteImageForSalesChannel(
+        salesChannel: string,
+        entityId: string,
+        mediaType: MediaType = DEFAULT_MEDIA_TYPE
+    ): void {
+        const imagesDir = this.getMediaTypeDir(salesChannel, mediaType);
+        const imagePath = path.join(imagesDir, `${entityId}.webp`);
+        const metadataPath = path.join(imagesDir, `${entityId}.json`);
 
         try {
             if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);

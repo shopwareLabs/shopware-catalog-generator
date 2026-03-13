@@ -23,6 +23,7 @@ export function createProvidersFromEnv(): { text: TextProvider; image: ImageProv
     const imageProvider = process.env.IMAGE_PROVIDER as ImageProviderType | undefined;
     const imageApiKey = process.env.IMAGE_API_KEY;
     const imageModel = process.env.IMAGE_MODEL;
+    const imageQuality = process.env.IMAGE_QUALITY;
 
     const config: ProviderConfig = {
         aiProvider,
@@ -31,6 +32,7 @@ export function createProvidersFromEnv(): { text: TextProvider; image: ImageProv
         imageProvider,
         imageApiKey,
         imageModel,
+        imageQuality,
     };
 
     return createProviders(config);
@@ -119,8 +121,9 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
                 logger.warn("No API key for OpenAI image generation. Disabling images.");
                 return new NoOpImageProvider();
             }
-            const model = config.imageModel || "gpt-image-1.5";
-            return new OpenAIImageProvider(apiKey, model);
+            const model = config.imageModel || "gpt-image-1-mini";
+            const quality = config.imageQuality || "low";
+            return new OpenAIImageProvider(apiKey, model, quality);
         }
 
         case "pollinations": {

@@ -5,6 +5,7 @@ import {
     COLOR_PALETTE,
     findClosestColor,
     getColorHex,
+    getContrastTextColor,
     getViewSuffix,
     VIEW_SUFFIXES,
 } from "../../../src/utils/color-palette.js";
@@ -124,6 +125,41 @@ describe("Color Palette", () => {
             expect(getColorHex("red")).toBe(COLOR_PALETTE.Red ?? "#FF0000");
             expect(getColorHex("RED")).toBe(COLOR_PALETTE.Red ?? "#FF0000");
         });
+    });
+});
+
+describe("getContrastTextColor", () => {
+    test("returns white for dark colors", () => {
+        expect(getContrastTextColor("#000000")).toBe("#ffffff");
+        expect(getContrastTextColor("#1a1a1a")).toBe("#ffffff");
+        expect(getContrastTextColor("#0042a0")).toBe("#ffffff");
+        expect(getContrastTextColor("#1a237e")).toBe("#ffffff");
+    });
+
+    test("returns black for light colors", () => {
+        expect(getContrastTextColor("#ffffff")).toBe("#000000");
+        expect(getContrastTextColor("#F8BBD0")).toBe("#000000");
+        expect(getContrastTextColor("#FFEB3B")).toBe("#000000");
+        expect(getContrastTextColor("#81C784")).toBe("#000000");
+    });
+
+    test("handles mid-bright colors correctly per WCAG luminance", () => {
+        // #E91E63 (pink 500) has luminance ~0.197 — just above 0.179 → black text
+        expect(getContrastTextColor("#E91E63")).toBe("#000000");
+        // #FF6F3C (orange) has luminance ~0.34 → black text
+        expect(getContrastTextColor("#FF6F3C")).toBe("#000000");
+    });
+
+    test("handles mid-range grays at the WCAG threshold", () => {
+        // Pure mid-gray (#808080) has luminance ~0.216 — above 0.179 → black text
+        expect(getContrastTextColor("#808080")).toBe("#000000");
+        // Slightly darker gray should flip to white
+        expect(getContrastTextColor("#5a5a5a")).toBe("#ffffff");
+    });
+
+    test("handles case-insensitive hex input", () => {
+        expect(getContrastTextColor("#e91e63")).toBe(getContrastTextColor("#E91E63"));
+        expect(getContrastTextColor("#FFFFFF")).toBe("#000000");
     });
 });
 

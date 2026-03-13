@@ -27,15 +27,29 @@ types/
 - `HydratedBlueprint` — Phase 2 output (filled with AI content)
 - `BlueprintCategory`, `BlueprintProduct` — Category/product nodes
 - `BlueprintConfig` — Generator configuration (topLevelCategories, maxDepth, etc.)
-- `ProductMetadata` — Per-product metadata (variant flags, image descriptions, review counts)
+- `ProductMetadata` — Per-product metadata (variant flags, image descriptions, review counts, storefront flags, physical attributes, EAN, purchase constraints)
 - `VariantConfig` — Variant property group + selected options
 - `CmsBlueprint`, `CmsBlueprintPage` — CMS text content structure
+- `BrandColors` — AI-generated brand colors for theme customization (primary, secondary only; buy button, text, and price colors are derived deterministically via Material Design principles)
 
 ### Shopware Types (`shopware.ts`)
 
 - `SalesChannel`, `SalesChannelFull`, `SalesChannelInput` — SalesChannel entities
 - `CategoryNode`, `ProductInput`, `PropertyGroup`, `PropertyOption` — Core entities
 - Zod schemas: `ProductDefinition`, `PropertyGroupDefinition`, etc. — Used for AI response validation
+- **Sync payload types** (used in `hydrator.ts` to replace `Record<string, unknown>`):
+    - `PricePayload` — `{ currencyId, gross, net, linked, listPrice? }`
+    - `ProductVisibilityPayload` — `{ id, productId, salesChannelId, visibility }`
+    - `TieredPricePayload` — `{ ruleId, quantityStart, quantityEnd?, price[] }`
+    - `ProductSyncPayload` — Full product upsert payload (includes index signature for Shopware-specific extensions)
+    - `ProductMediaPayload` — Product–media association
+    - `MediaEntityPayload` — Media entity creation record (`{ id, private, mediaFolderId? }`)
+
+### Blueprint Types (`blueprint.ts`)
+
+- `BlueprintProduct` includes:
+    - `deliveryTimeIndex?: number` — Round-robin index set in Phase 1; resolved to a real delivery-time ID in Phase 3 (idempotent)
+    - Note: `releaseDate` is **not** stored in the blueprint. For `isNew` products, Phase 3 sets `releaseDate = new Date().toISOString()` at upload time so the storefront "New" badge never ages out
 
 ### Provider Types (`providers.ts`)
 

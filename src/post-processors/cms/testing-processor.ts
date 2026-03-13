@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { CategorySyncPayload } from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -28,6 +29,7 @@ import {
 import {
     apiPost,
     generateUUID,
+    cloneDeep,
     logger,
     toFixtureUrlSlug,
     toStoreScopedName,
@@ -567,7 +569,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<string | null> {
         const categoryId = generateUUID();
 
-        const payload: Record<string, unknown> = {
+        const payload: CategorySyncPayload = {
             id: categoryId,
             parentId,
             name,
@@ -578,10 +580,8 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             linkNewTab: false,
             displayNestedProducts: false,
             visible: true,
+            afterCategoryId,
         };
-        if (afterCategoryId != null) {
-            payload.afterCategoryId = afterCategoryId;
-        }
 
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
@@ -613,7 +613,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<string | null> {
         const categoryId = generateUUID();
 
-        const payload: Record<string, unknown> = {
+        const payload: CategorySyncPayload = {
             id: categoryId,
             parentId,
             name,
@@ -621,10 +621,8 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             type: "page",
             displayNestedProducts: false,
             visible: true,
+            afterCategoryId,
         };
-        if (afterCategoryId != null) {
-            payload.afterCategoryId = afterCategoryId;
-        }
 
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
@@ -700,7 +698,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     ): Promise<string | null> {
         const categoryId = generateUUID();
 
-        const payload: Record<string, unknown> = {
+        const payload: CategorySyncPayload = {
             id: categoryId,
             parentId,
             name,
@@ -711,10 +709,8 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             linkNewTab: false,
             displayNestedProducts: false,
             visible: true,
+            afterCategoryId,
         };
-        if (afterCategoryId != null) {
-            payload.afterCategoryId = afterCategoryId;
-        }
 
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
@@ -1074,7 +1070,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
      * Populate product IDs in the fixture
      */
     private populateProductIds(fixture: CmsPageFixture, productIds: string[]): CmsPageFixture {
-        const cloned = JSON.parse(JSON.stringify(fixture)) as CmsPageFixture;
+        const cloned = cloneDeep(fixture);
 
         for (const section of cloned.sections) {
             for (const block of section.blocks) {

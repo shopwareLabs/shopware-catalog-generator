@@ -82,6 +82,16 @@ function createMockBlueprint(
                 })),
                 reviewCount: 0,
                 hasSalesPrice: false,
+                hasTieredPricing: false,
+                isTopseller: false,
+                isNew: false,
+                isShippingFree: false,
+                weight: 1.0,
+                width: 100,
+                height: 100,
+                length: 100,
+                ean: "1234567890128",
+                manufacturerNumber: "MPN-TEST0001",
             },
         })),
         propertyGroups,
@@ -372,6 +382,16 @@ describe("syncCategories", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ],
@@ -546,6 +566,16 @@ describe("syncProducts", () => {
                         properties: [{ group: "Color", value: "Red" }],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ],
@@ -614,6 +644,16 @@ describe("syncProducts", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ],
@@ -634,6 +674,145 @@ describe("syncProducts", () => {
                     id: "prod-1",
                     name: "iPhone",
                     categoryIds: ["sw-phones"],
+                }),
+            ]),
+            salesChannel.id,
+            salesChannel.navigationCategoryId
+        );
+
+        logger.setMcpMode(false);
+    });
+
+    test("passes sale price data to hydrator", async () => {
+        logger.setMcpMode(true);
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [
+                {
+                    id: "prod-sale",
+                    name: "Sale Product",
+                    description: "On sale",
+                    price: 79.99,
+                    stock: 10,
+                    primaryCategoryId: "cat-1",
+                    categoryIds: ["cat-1"],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [],
+                        reviewCount: 0,
+                        hasSalesPrice: true,
+                        salePercentage: 0.2,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.5,
+                        width: 200,
+                        height: 150,
+                        length: 300,
+                        ean: "4006381333931",
+                        manufacturerNumber: "MPN-SALE001",
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+
+        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+
+        expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "prod-sale",
+                    hasSalesPrice: true,
+                    salePercentage: 0.2,
+                    hasTieredPricing: false,
+                }),
+            ]),
+            salesChannel.id,
+            salesChannel.navigationCategoryId
+        );
+
+        logger.setMcpMode(false);
+    });
+
+    test("passes storefront flags and physical attributes to hydrator", async () => {
+        logger.setMcpMode(true);
+
+        const dataHydrator = createMockDataHydrator();
+        const salesChannel = createMockSalesChannel();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [
+                {
+                    id: "prod-flags",
+                    name: "Featured Product",
+                    description: "A featured item",
+                    price: 149.99,
+                    stock: 5,
+                    primaryCategoryId: "cat-1",
+                    categoryIds: ["cat-1"],
+                    metaTitle: "Featured Product",
+                    metaDescription: "A featured item",
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: false,
+                        properties: [],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: true,
+                        isNew: true,
+                        isShippingFree: true,
+                        weight: 3.5,
+                        width: 400,
+                        height: 250,
+                        length: 600,
+                        ean: "5901234123457",
+                        manufacturerNumber: "MPN-FEAT001",
+                        minPurchase: 2,
+                        purchaseSteps: 2,
+                        maxPurchase: 10,
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+
+        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+
+        expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "prod-flags",
+                    isTopseller: true,
+                    isNew: true,
+                    isShippingFree: true,
+                    weight: 3.5,
+                    width: 400,
+                    height: 250,
+                    length: 600,
+                    ean: "5901234123457",
+                    manufacturerNumber: "MPN-FEAT001",
+                    minPurchase: 2,
+                    purchaseSteps: 2,
+                    maxPurchase: 10,
+                    metaTitle: "Featured Product",
+                    metaDescription: "A featured item",
                 }),
             ]),
             salesChannel.id,
@@ -670,6 +849,16 @@ describe("syncProducts", () => {
                         properties: [],
                         reviewCount: 0,
                         hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1.0,
+                        width: 100,
+                        height: 100,
+                        length: 100,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-TEST0001",
                     },
                 },
             ],

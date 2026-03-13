@@ -16,6 +16,7 @@
 # Post-processors run:
 # - CMS homepage: cms-home (root category layout with welcome text + product listing)
 # - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form
+# - Images: images (upload pre-generated product + category images)
 # - Digital product: digital-product (creates Gift Card €50)
 # - CMS orchestrator: cms-testing (creates Testing category hierarchy)
 
@@ -88,10 +89,15 @@ if [ -n "$CLEANUP_ONLY" ]; then
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-testing || true
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form || true
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cms-home || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=images || true
 
-    # Cleanup digital product
-    echo "  Cleaning up digital product..."
+    # Cleanup digital product, cross-selling, customers, promotions, theme
+    echo "  Cleaning up digital product, cross-selling, customers, promotions, theme..."
     bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=digital-product || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=cross-selling || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=customers || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=promotions || true
+    bun run cleanup -- --salesChannel="$CLEANUP_ONLY" --processors=theme || true
 
     # Cleanup SalesChannel and data
     echo "  Cleaning up SalesChannel..."
@@ -181,6 +187,10 @@ else
     echo "  Running CMS processors..."
     bun run process --name="$TEST_SALESCHANNEL" --only=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form
 
+    # Upload pre-generated product + category images
+    echo "  Running image processor..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=images
+
     # Run digital product processor (create gift card)
     echo "  Running digital product processor..."
     bun run process --name="$TEST_SALESCHANNEL" --only=digital-product
@@ -188,6 +198,10 @@ else
     # Run CMS testing processor (create Testing category hierarchy)
     echo "  Running CMS testing orchestrator..."
     bun run process --name="$TEST_SALESCHANNEL" --only=cms-testing
+
+    # Run theme processor (child theme with brand colors + media)
+    echo "  Running theme processor..."
+    bun run process --name="$TEST_SALESCHANNEL" --only=theme
 
     echo "✓ Post-processors complete"
 fi

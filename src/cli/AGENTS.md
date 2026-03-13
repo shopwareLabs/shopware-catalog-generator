@@ -11,6 +11,14 @@ The CLI is a thin router in `main.ts` that parses args and delegates to focused 
 - `image-fix.ts` — `image fix`
 - `shared.ts` — `CLIError`, validation helpers, `executePostProcessors`
 
+**Important:** All application logic lives in `src/services/`, not in the CLI modules. CLI handlers are thin wrappers that call service functions and print their `string[]` output. This keeps the CLI and MCP tools in sync — both call the same service functions.
+
+| Service File                        | CLI Module         | What It Does                                    |
+| ----------------------------------- | ------------------ | ----------------------------------------------- |
+| `src/services/blueprint-service.ts` | `cli/blueprint.ts` | Blueprint create / hydrate / fix logic          |
+| `src/services/generate-service.ts`  | `cli/generate.ts`  | Full generation pipeline + post-processors      |
+| `src/services/image-fix-service.ts` | `cli/image-fix.ts` | Image regeneration (product/category/cms/theme) |
+
 Separate CLI entry points (not routed through `main.ts`):
 
 - `cache-cli.ts` — `cache:list`, `cache:clear`, `cache:trash`, `cache:restore`, `cache:empty-trash`
@@ -27,28 +35,28 @@ Full pipeline: create blueprint, hydrate with AI, upload to Shopware.
 bun run generate --name=music --description="Musical instruments and accessories"
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name (becomes subdomain) |
-| `--description` | string | `"{name} webshop"` | Context for AI generation |
-| `--products` | number | `90` | Number of products to generate |
-| `--only` | string | *(all)* | Post-processors to run (comma-separated) |
-| `--dry-run` | flag | `false` | Preview actions without making changes |
-| `--no-template` | flag | `false` | Skip checking for pre-generated templates |
+| Flag            | Type   | Default            | Description                               |
+| --------------- | ------ | ------------------ | ----------------------------------------- |
+| `--name`        | string | _(required)_       | SalesChannel name (becomes subdomain)     |
+| `--description` | string | `"{name} webshop"` | Context for AI generation                 |
+| `--products`    | number | `90`               | Number of products to generate            |
+| `--only`        | string | _(all)_            | Post-processors to run (comma-separated)  |
+| `--dry-run`     | flag   | `false`            | Preview actions without making changes    |
+| `--no-template` | flag   | `false`            | Skip checking for pre-generated templates |
 
 ### Process
 
 Run post-processors on an existing SalesChannel (already uploaded to Shopware).
 
 ```bash
-bun run process --name=music --only=images,manufacturers
+bun run process --name=music --only=images,manufacturers,customers
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name |
-| `--only` | string | *(all)* | Processors to run (comma-separated) |
-| `--dry-run` | flag | `false` | Preview actions without making changes |
+| Flag        | Type   | Default      | Description                            |
+| ----------- | ------ | ------------ | -------------------------------------- |
+| `--name`    | string | _(required)_ | SalesChannel name                      |
+| `--only`    | string | _(all)_      | Processors to run (comma-separated)    |
+| `--dry-run` | flag   | `false`      | Preview actions without making changes |
 
 ### Blueprint Create
 
@@ -58,11 +66,11 @@ Phase 1: Generate blueprint structure without AI calls (instant).
 bun run blueprint create --name=music --description="Musical instruments and accessories"
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name |
-| `--description` | string | `"{name} webshop"` | Context for AI generation |
-| `--products` | number | `90` | Number of products to generate |
+| Flag            | Type   | Default            | Description                    |
+| --------------- | ------ | ------------------ | ------------------------------ |
+| `--name`        | string | _(required)_       | SalesChannel name              |
+| `--description` | string | `"{name} webshop"` | Context for AI generation      |
+| `--products`    | number | `90`               | Number of products to generate |
 
 **Output:** `generated/sales-channels/{name}/blueprint.json`
 
@@ -74,21 +82,21 @@ Phase 2: Fill blueprint with AI-generated content (names, descriptions, properti
 bun run blueprint hydrate --name=music
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name |
-| `--only` | string | *(full hydration)* | Selective mode: `categories`, `properties`, or `cms` |
-| `--force` | flag | `false` | Force full re-hydration (overwrites existing, changes product names) |
+| Flag      | Type   | Default            | Description                                                          |
+| --------- | ------ | ------------------ | -------------------------------------------------------------------- |
+| `--name`  | string | _(required)_       | SalesChannel name                                                    |
+| `--only`  | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`                 |
+| `--force` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names) |
 
 #### Hydration Modes
 
-| Mode | What It Does |
-| --- | --- |
-| *(default, new blueprint)* | Full hydration: categories, products, properties, images |
-| `--only=categories` | Only update category names/descriptions, preserve product data |
-| `--only=properties` | Only update product properties, preserve names (image-stable) |
-| `--only=cms` | Only hydrate CMS blueprint text (`cms-blueprint.json`) |
-| `--force` | Force full re-hydration even if hydrated blueprint exists |
+| Mode                       | What It Does                                                   |
+| -------------------------- | -------------------------------------------------------------- |
+| _(default, new blueprint)_ | Full hydration: categories, products, properties, images       |
+| `--only=categories`        | Only update category names/descriptions, preserve product data |
+| `--only=properties`        | Only update product properties, preserve names (image-stable)  |
+| `--only=cms`               | Only hydrate CMS blueprint text (`cms-blueprint.json`)         |
+| `--force`                  | Force full re-hydration even if hydrated blueprint exists      |
 
 If a hydrated blueprint already exists, `--only` or `--force` is required to prevent accidental name changes.
 
@@ -102,24 +110,28 @@ Fix incomplete hydration by replacing placeholder names in a hydrated blueprint.
 bun run blueprint fix --name=music
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name |
+| Flag     | Type   | Default      | Description       |
+| -------- | ------ | ------------ | ----------------- |
+| `--name` | string | _(required)_ | SalesChannel name |
 
 ### Image Fix
 
 Regenerate images for a specific product, category, or CMS page.
 
 ```bash
-bun run image fix --name=music --product="Acoustic Guitar" --type=product
+bun run image fix --name=music --target="Acoustic Guitar" --type=product
+bun run image fix --name=music --type=theme --target=logo
+bun run image fix --name=music --type=theme              # regenerates all theme media
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--name` | string | *(required)* | SalesChannel name |
-| `--product` | string | *(required)* | Product/category name or ID, or CMS page name |
-| `--type` | string | `product` | Target type: `product`, `category`, or `cms` |
-| `--dry-run` | flag | `false` | Preview without regenerating |
+| Flag        | Type   | Default      | Description                                                    |
+| ----------- | ------ | ------------ | -------------------------------------------------------------- |
+| `--name`    | string | _(required)_ | SalesChannel name                                              |
+| `--target`  | string | _(required)_ | Product/category name or ID, CMS page name, or theme media key |
+| `--type`    | string | `product`    | Target type: `product`, `category`, `cms`, or `theme`          |
+| `--dry-run` | flag   | `false`      | Preview without regenerating                                   |
+
+For `--type=theme`, `--target` is optional (defaults to "all"). Valid targets: `logo`, `favicon`, `share`, or `all`.
 
 ### Cleanup
 
@@ -130,15 +142,15 @@ bun run cleanup -- --salesChannel="music"
 bun run cleanup -- --salesChannel="music" --full --delete
 ```
 
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--salesChannel` | string | *(required)* | SalesChannel to clean up |
-| `--delete` | flag | `false` | Also delete the SalesChannel itself |
-| `--props` | flag | `false` | Also delete property groups |
-| `--manufacturers` | flag | `false` | Also delete manufacturers |
-| `--processors` | string | *(none)* | Cleanup specific processor entities (comma-separated, or `all`) |
-| `--full` | flag | `false` | Full cleanup: all processor cleanups, then core cleanup |
-| `--dry-run` | flag | `false` | Preview what would be deleted |
+| Flag              | Type   | Default      | Description                                                     |
+| ----------------- | ------ | ------------ | --------------------------------------------------------------- |
+| `--salesChannel`  | string | _(required)_ | SalesChannel to clean up                                        |
+| `--delete`        | flag   | `false`      | Also delete the SalesChannel itself                             |
+| `--props`         | flag   | `false`      | Also delete property groups                                     |
+| `--manufacturers` | flag   | `false`      | Also delete manufacturers                                       |
+| `--processors`    | string | _(none)_     | Cleanup specific processor entities (comma-separated, or `all`) |
+| `--full`          | flag   | `false`      | Full cleanup: all processor cleanups, then core cleanup         |
+| `--dry-run`       | flag   | `false`      | Preview what would be deleted                                   |
 
 #### Global Cleanup (no SalesChannel required)
 
@@ -148,11 +160,11 @@ bun run cleanup -- --unused-options      # Delete individual unused property opt
 bun run cleanup -- --orphaned-media      # Delete media not linked to any product
 ```
 
-| Flag | Type | Description |
-| --- | --- | --- |
-| `--unused-props` | flag | Delete property groups where no options are used by products |
-| `--unused-options` | flag | Delete individual property options not used by any product |
-| `--orphaned-media` | flag | Delete media where the linked product no longer exists |
+| Flag               | Type | Description                                                  |
+| ------------------ | ---- | ------------------------------------------------------------ |
+| `--unused-props`   | flag | Delete property groups where no options are used by products |
+| `--unused-options` | flag | Delete individual property options not used by any product   |
+| `--orphaned-media` | flag | Delete media where the linked product no longer exists       |
 
 #### Shortcut Scripts
 
@@ -175,15 +187,15 @@ bun run cache:restore -- --all        # Restore all items from trash
 bun run cache:empty-trash             # Permanently delete trash (irreversible)
 ```
 
-| Command | Description |
-| --- | --- |
-| `cache:list` | List all cached SalesChannels with product/image counts |
-| `cache:clear` | Move cache to `.trash/` (recoverable) |
-| `cache:clear -- <name>` | Move specific SalesChannel cache to trash |
-| `cache:trash` | Show trash contents |
-| `cache:restore -- <item>` | Restore a specific item from trash |
-| `cache:restore -- --all` | Restore everything from trash |
-| `cache:empty-trash` | Permanently delete all trash |
+| Command                   | Description                                             |
+| ------------------------- | ------------------------------------------------------- |
+| `cache:list`              | List all cached SalesChannels with product/image counts |
+| `cache:clear`             | Move cache to `.trash/` (recoverable)                   |
+| `cache:clear -- <name>`   | Move specific SalesChannel cache to trash               |
+| `cache:trash`             | Show trash contents                                     |
+| `cache:restore -- <item>` | Restore a specific item from trash                      |
+| `cache:restore -- --all`  | Restore everything from trash                           |
+| `cache:empty-trash`       | Permanently delete all trash                            |
 
 ### Server Mode
 
@@ -193,11 +205,11 @@ Run as an HTTP service with background processing.
 bun run server
 ```
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| POST | `/generate` | Start background generation (returns process ID) |
-| GET | `/status/:id` | Poll process status, progress, and logs |
-| GET | `/health` | Health check and active process count |
+| Method | Endpoint      | Description                                      |
+| ------ | ------------- | ------------------------------------------------ |
+| POST   | `/generate`   | Start background generation (returns process ID) |
+| GET    | `/status/:id` | Poll process status, progress, and logs          |
+| GET    | `/health`     | Health check and active process count            |
 
 #### Generate Request
 
@@ -213,16 +225,16 @@ curl -X POST http://localhost:3000/generate \
   }'
 ```
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `envPath` | string | *(required)* | Shopware URL |
-| `salesChannel` | string | *(required)* | SalesChannel name |
-| `description` | string | `"{name} webshop"` | Context for AI generation |
-| `productCount` | number | `90` | Number of products |
-| `shopwareUser` | string | - | Shopware admin username |
-| `shopwarePassword` | string | - | Shopware admin password |
-| `skipProcessors` | boolean | `false` | Skip post-processors after sync |
-| `skipTemplate` | boolean | `false` | Skip checking for pre-generated templates |
+| Field              | Type    | Default            | Description                               |
+| ------------------ | ------- | ------------------ | ----------------------------------------- |
+| `envPath`          | string  | _(required)_       | Shopware URL                              |
+| `salesChannel`     | string  | _(required)_       | SalesChannel name                         |
+| `description`      | string  | `"{name} webshop"` | Context for AI generation                 |
+| `productCount`     | number  | `90`               | Number of products                        |
+| `shopwareUser`     | string  | -                  | Shopware admin username                   |
+| `shopwarePassword` | string  | -                  | Shopware admin password                   |
+| `skipProcessors`   | boolean | `false`            | Skip post-processors after sync           |
+| `skipTemplate`     | boolean | `false`            | Skip checking for pre-generated templates |
 
 #### Poll Status
 
@@ -233,9 +245,10 @@ curl http://localhost:3000/status/proc_xxx
 
 ## Adding a New CLI Command
 
-1. Create handler function in the appropriate CLI module (or new file in `src/cli/`)
-2. Add routing in `main.ts` switch statement
-3. Add to `showHelp()` output
-4. Add corresponding MCP tool in `src/mcp/tools/`
-5. Add `package.json` script alias if appropriate
-6. Update this reference
+1. Implement the logic in `src/services/<category>-service.ts` (returns `string[]` for output)
+2. Create a thin CLI handler in `src/cli/<category>.ts` that calls the service and prints lines
+3. Add routing in `main.ts` switch statement
+4. Add to `showHelp()` output
+5. Add a thin MCP tool wrapper in `src/mcp/tools/<category>.ts` that calls the same service and joins lines
+6. Add `package.json` script alias if appropriate
+7. Update this reference and `src/mcp/AGENTS.md`

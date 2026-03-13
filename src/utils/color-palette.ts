@@ -113,6 +113,29 @@ export const VIEW_SUFFIXES: Record<string, string> = {
     dimensions: "product with scale reference showing actual size, product photography",
 };
 
+/**
+ * Determine the best text color (white or black) for legibility on a given background.
+ *
+ * Uses the WCAG 2.0 relative luminance formula. The 0.179 threshold is the
+ * standard midpoint where contrast ratio 4.5:1 flips between white and black text.
+ * Follows Material Design's "On" color concept.
+ *
+ * @param hex - Background color as #RRGGBB
+ * @returns "#ffffff" for dark backgrounds, "#000000" for light backgrounds
+ */
+export function getContrastTextColor(hex: string): string {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+
+    const toLinear = (c: number): number =>
+        c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+
+    const luminance = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+
+    return luminance > 0.179 ? "#000000" : "#ffffff";
+}
+
 export interface ColorMatch {
     /** Original palette color name */
     name: string;

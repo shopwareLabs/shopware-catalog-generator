@@ -474,22 +474,22 @@ Processors can declare dependencies to control execution order:
 
 ### Available Processors
 
-| Processor         | Description                        | Dependencies            |
-| ----------------- | ---------------------------------- | ----------------------- |
-| `cms-home`        | Homepage layout with product listing | None                  |
-| `cms-text`        | Text elements demo page            | None                    |
-| `cms-images`      | Image elements demo page           | None                    |
-| `cms-video`       | Video elements demo page           | None                    |
-| `cms-text-images` | Text & Images demo page            | None                    |
-| `cms-commerce`    | Commerce elements demo page        | images                  |
-| `cms-form`        | Form elements demo page            | None                    |
-| `cms-footer-pages`| Shared footer and legal pages      | None                    |
-| `images`          | Product and category images        | None                    |
-| `manufacturers`   | Fictional manufacturer creation    | None                    |
-| `reviews`         | Product reviews (0-10 per product) | None                    |
-| `variants`        | Variant product creation           | manufacturers           |
-| `digital-product` | Digital product (Gift Card)        | none                    |
-| `cms-testing`     | Testing category hierarchy         | cms-\*, digital-product |
+| Processor          | Description                          | Dependencies            |
+| ------------------ | ------------------------------------ | ----------------------- |
+| `cms-home`         | Homepage layout with product listing | None                    |
+| `cms-text`         | Text elements demo page              | None                    |
+| `cms-images`       | Image elements demo page             | None                    |
+| `cms-video`        | Video elements demo page             | None                    |
+| `cms-text-images`  | Text & Images demo page              | None                    |
+| `cms-commerce`     | Commerce elements demo page          | images                  |
+| `cms-form`         | Form elements demo page              | None                    |
+| `cms-footer-pages` | Shared footer and legal pages        | None                    |
+| `images`           | Product and category images          | None                    |
+| `manufacturers`    | Fictional manufacturer creation      | None                    |
+| `reviews`          | Product reviews (0-10 per product)   | None                    |
+| `variants`         | Variant product creation             | manufacturers           |
+| `digital-product`  | Digital product (Gift Card)          | none                    |
+| `cms-testing`      | Testing category hierarchy           | cms-\*, digital-product |
 
 ### Testing Page Hierarchy
 

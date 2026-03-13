@@ -3,7 +3,8 @@
  *
  * A product_list page assigned to the root category with:
  * - Section 1 (default): text-teaser-section with hero image (left) + welcome text (right)
- * - Section 2 (sidebar): product-listing + sidebar-filter for browsing all products
+ * - Section 2 (default): full-width text block with credentials + promotion codes
+ * - Section 3 (sidebar): product-listing + sidebar-filter for browsing all products
  *
  * The image and text slots are populated dynamically by the cms-home processor
  * with store-specific content (name, description, product/category counts).
@@ -32,7 +33,7 @@ export const HOME_LISTING_PAGE: CmsPageFixture = {
                             slot: "left",
                             config: {
                                 media: { source: "static", value: null },
-                                displayMode: { source: "static", value: "standard" },
+                                displayMode: { source: "static", value: "cover" },
                                 minHeight: { source: "static", value: "340px" },
                                 verticalAlign: { source: "static", value: "center" },
                                 horizontalAlign: { source: "static", value: "center" },
@@ -47,6 +48,33 @@ export const HOME_LISTING_PAGE: CmsPageFixture = {
                                 content: {
                                     source: "static",
                                     value: "<h2>Welcome to the Demo-Store!</h2>",
+                                },
+                                verticalAlign: { source: "static", value: null },
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+        {
+            type: "default",
+            sizingMode: "boxed",
+            mobileBehavior: "wrap",
+            blocks: [
+                {
+                    type: "text",
+                    position: 0,
+                    sectionPosition: "main",
+                    marginTop: "0px",
+                    marginBottom: "20px",
+                    slots: [
+                        {
+                            type: "text",
+                            slot: "content",
+                            config: {
+                                content: {
+                                    source: "static",
+                                    value: "",
                                 },
                                 verticalAlign: { source: "static", value: null },
                             },
