@@ -220,7 +220,7 @@ class PromotionProcessorImpl implements PostProcessor {
                 action: "upsert",
                 payload: [
                     {
-                        id: generateUUID(),
+                        id: this.deriveAssociationId(promotionId, salesChannelId),
                         promotionId,
                         salesChannelId,
                         priority: 1,
@@ -228,6 +228,22 @@ class PromotionProcessorImpl implements PostProcessor {
                 ],
             },
         });
+    }
+
+    /**
+     * Derives a stable 32-char hex ID for a promotion_sales_channel row from the two
+     * parent IDs. Using XOR ensures the result is always a valid hex UUID and is
+     * unique to each (promotionId, salesChannelId) pair, making the upsert truly
+     * idempotent — repeated calls hit the same primary key instead of inserting
+     * duplicate rows.
+     */
+    private deriveAssociationId(promotionId: string, salesChannelId: string): string {
+        const a = promotionId.replace(/-/g, "").padEnd(32, "0");
+        const b = salesChannelId.replace(/-/g, "").padEnd(32, "0");
+        return a
+            .split("")
+            .map((c, i) => (parseInt(c, 16) ^ parseInt(b[i]!, 16)).toString(16))
+            .join("");
     }
 }
 

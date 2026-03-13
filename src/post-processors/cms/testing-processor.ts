@@ -962,7 +962,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         // For variant products, find a parent product with children
         if (type === "variant") {
-            return this.getVariantProductId(context);
+            return Promise.resolve(this.getVariantProductId(context));
         }
 
         // For simple products, find a product without children and not a child
@@ -990,39 +990,15 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     }
 
     /**
-     * Get a variant product (parent with children)
+     * Get a variant product (parent with children) from the blueprint.
+     *
+     * Uses the blueprint instead of querying Shopware's Elasticsearch index to avoid
+     * timing issues: childCount may not be indexed yet when this runs right after the
+     * variant processor creates the child products.
      */
-    private async getVariantProductId(context: PostProcessorContext): Promise<string | null> {
-        try {
-            interface ProductResponse {
-                data?: Array<{ id: string; childCount?: number }>;
-            }
-
-            const response = await apiPost(context, "search/product", {
-                filter: [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                    {
-                        type: "range",
-                        field: "childCount",
-                        parameters: { gt: 0 },
-                    },
-                ],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as ProductResponse;
-                return data.data?.[0]?.id || null;
-            }
-        } catch (error) {
-            logger.warn("Failed to find variant product", { data: error });
-        }
-
-        return null;
+    private getVariantProductId(context: PostProcessorContext): string | null {
+        const variantProduct = context.blueprint.products.find((p) => p.metadata.isVariant);
+        return variantProduct?.id ?? null;
     }
 
     /**

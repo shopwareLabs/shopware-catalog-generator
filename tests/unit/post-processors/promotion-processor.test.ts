@@ -167,6 +167,38 @@ describe("PromotionProcessor", () => {
             expect(syncCalls.length).toBe(PROMOTIONS.length);
         });
 
+        test("uses a deterministic association ID for existing promotions (no random UUIDs)", async () => {
+            // Run the processor twice with the same existing promotions and verify the
+            // association ID in the upsert payload is identical both times. A random ID
+            // would create duplicate rows on every run; a deterministic one enables true upsert.
+            const runAndCollectIds = async (): Promise<string[]> => {
+                const { context, mockApi } = createTestContext();
+                mockApi.mockSearchResponse("promotion", [{ id: "promo-abc", code: "WELCOME10" }]);
+                await PromotionProcessor.process(context);
+
+                const syncCalls = mockApi.getCallsByEndpoint("_action/sync");
+                const ids: string[] = [];
+                for (const call of syncCalls) {
+                    const body = call.body as Record<
+                        string,
+                        { entity: string; payload: Array<{ id?: string }> }
+                    >;
+                    for (const op of Object.values(body)) {
+                        if (op.entity === "promotion_sales_channel") {
+                            for (const row of op.payload) {
+                                if (row.id) ids.push(row.id);
+                            }
+                        }
+                    }
+                }
+                return ids;
+            };
+
+            const [firstRun, secondRun] = await Promise.all([runAndCollectIds(), runAndCollectIds()]);
+            expect(firstRun.length).toBeGreaterThan(0);
+            expect(firstRun).toEqual(secondRun);
+        });
+
         test("handles API error gracefully", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSearchResponse("promotion", []);
