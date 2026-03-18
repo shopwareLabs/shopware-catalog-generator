@@ -580,12 +580,16 @@ The generator supports multiple AI providers with a unified interface.
 
 ### Provider Selection
 
-| Use Case      | Recommended     | Why                    |
-| ------------- | --------------- | ---------------------- |
-| Testing/Demos | Pollinations    | Free, no API key       |
-| GitHub users  | GitHub Models   | Uses existing token    |
-| Production    | OpenAI          | Best quality, parallel |
-| High volume   | OpenAI + sk\_\* | Maximum throughput     |
+| Use Case            | Recommended     | Why                                          |
+| ------------------- | --------------- | -------------------------------------------- |
+| Free (Copilot)      | GitHub Models   | Free text + free Pollinations images         |
+| Free (no Copilot)   | Pollinations    | `pk_*` key, images use free tier             |
+| Fast & free         | Pollinations    | `sk_*` key, parallel text + images           |
+| Production          | OpenAI          | Best quality, full parallel                  |
+
+> **Recommended for most users:** `AI_PROVIDER=github-models` with a GitHub PAT — completely free if you have a Copilot subscription. Images are automatically generated via Pollinations free tier (no image API key needed).
+>
+> **Pollinations `pk_*` keys** have limited pollen balance. The generator automatically uses the free tier for images to preserve pollen for text generation.
 
 ### Interface
 

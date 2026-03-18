@@ -14,9 +14,11 @@ bun run build
 Create a `.env` file:
 
 ```env
-# AI Provider (generates product names, descriptions, images)
-AI_PROVIDER=pollinations
-AI_API_KEY=sk_your_pollinations_key   # Get key at https://enter.pollinations.ai
+# AI Provider — pick one:
+AI_PROVIDER=github-models                # Free with GitHub Copilot
+AI_API_KEY=ghp_your_github_token         # github.com/settings/tokens
+# AI_PROVIDER=pollinations              # Alternative: enter.pollinations.ai
+# AI_API_KEY=sk_your_pollinations_key
 
 # Shopware connection (required to sync data)
 SW_ENV_URL=http://localhost:8000
@@ -62,29 +64,43 @@ This creates a fresh single commit, cleans up all stale refs, and repackages the
 
 ## AI Providers & Performance
 
-| Provider        | API Key  | Images | Parallel        | Best For                 |
-| --------------- | -------- | ------ | --------------- | ------------------------ |
-| `pollinations`  | Required | Yes    | With `sk_*` key | Testing, demos (default) |
-| `github-models` | Required | N/A    | Limited (2x)    | GitHub/Copilot users     |
-| `openai`        | Required | Paid   | Yes (5x)        | Production, high volume  |
+| Provider        | API Key  | Text       | Images                   | Best For                          |
+| --------------- | -------- | ---------- | ------------------------ | --------------------------------- |
+| `github-models` | PAT      | Free       | Free (Pollinations)      | **Free with GitHub Copilot**      |
+| `pollinations`  | `sk_*`   | Parallel   | Parallel (with key)      | Fast, no rate limits              |
+| `pollinations`  | `pk_*`   | Sequential | Free (pollen preserved)  | Free tier                         |
+| `openai`        | `sk-...` | Parallel   | Paid (gpt-image-1)       | Production, high volume           |
 
-> Get a Pollinations API key at **[enter.pollinations.ai](https://enter.pollinations.ai)**
+### Free Setup (GitHub Copilot)
 
-### Configuration
+If you have a GitHub Copilot subscription, you can generate catalogs entirely for free — text via GitHub Models, images via Pollinations free tier:
+
+```env
+AI_PROVIDER=github-models
+AI_API_KEY=ghp_your_github_token
+```
+
+No `IMAGE_PROVIDER` or `IMAGE_API_KEY` needed. Images are automatically generated via Pollinations free tier.
+
+> Create a personal access token at **[github.com/settings/tokens](https://github.com/settings/tokens)** (no extra scopes needed beyond Copilot access).
+
+### Other Providers
 
 ```env
 # Pollinations with secret key - parallel processing, no rate limits
 AI_PROVIDER=pollinations
 AI_API_KEY=sk_your_pollinations_secret_key
 
-# GitHub Models (limited parallelism, images via Pollinations)
-AI_PROVIDER=github-models
-AI_API_KEY=ghp_your_github_token
+# Pollinations with publishable key - pollen preserved for text, images are free
+AI_PROVIDER=pollinations
+AI_API_KEY=pk_your_pollinations_key
 
-# OpenAI (full parallel processing)
+# OpenAI (full parallel processing, paid images)
 AI_PROVIDER=openai
 AI_API_KEY=sk-your-openai-key
 ```
+
+> Get a Pollinations API key at **[enter.pollinations.ai](https://enter.pollinations.ai)**
 
 **Optional settings:**
 
