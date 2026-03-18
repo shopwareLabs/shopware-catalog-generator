@@ -27,7 +27,6 @@ import {
     sleep,
     toKebabCase,
 } from "../utils/index.js";
-import { resolvePrimaryCurrencyId } from "./currency-utils.js";
 
 interface PropertyOption {
     id: string;
@@ -241,11 +240,10 @@ class VariantProcessorImpl implements PostProcessor {
 
     /**
      * Get the primary currency ID, caching the result for subsequent calls.
-     * Delegates to the shared resolvePrimaryCurrencyId() utility.
      */
     private async getCurrencyId(context: PostProcessorContext): Promise<string> {
         if (this.resolvedCurrencyId) return this.resolvedCurrencyId;
-        this.resolvedCurrencyId = await resolvePrimaryCurrencyId(context.api);
+        this.resolvedCurrencyId = await context.api.getDefaultCurrencyId();
         return this.resolvedCurrencyId;
     }
 

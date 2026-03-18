@@ -356,6 +356,15 @@ export class MockApiHelpers implements ShopwareApi {
         return match?.id ?? `currency-${isoCode.toLowerCase()}-mock`;
     }
 
+    async getDefaultCurrencyId(): Promise<string> {
+        this.calls.push({ method: "post", endpoint: "search/currency", body: { factor: 1 } });
+        const currencies = this.searchResponses.get("currency") as
+            | Array<{ id: string }>
+            | undefined;
+        if (currencies?.[0]?.id) return currencies[0].id;
+        return this.getCurrencyId("EUR");
+    }
+
     async getStandardTaxId(): Promise<string> {
         this.calls.push({ method: "post", endpoint: "search/tax" });
         return "tax-id-mock";

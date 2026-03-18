@@ -60,7 +60,8 @@ await api.deleteEntities("product_review", ids);
 // Utilities
 import { generateUUID } from "../utils/index.js";
 const id = generateUUID();
-const currencyId = await api.getCurrencyId("EUR");
+const currencyId = await api.getCurrencyId("EUR");    // By ISO code
+const defaultId = await api.getDefaultCurrencyId();    // System base currency (factor=1), fallback EUR
 ```
 
 ## Key Classes

@@ -92,7 +92,6 @@ src/
 │   │   ├── footer-pages-processor.ts # Shared footer and legal pages
 │   │   └── testing-processor.ts # Orchestrator (Testing hierarchy)
 │   ├── cross-selling-processor.ts # Category-based cross-selling
-│   ├── currency-utils.ts     # resolvePrimaryCurrencyId (base currency factor=1 → SalesChannel)
 │   ├── customer-processor.ts     # Demo customer accounts with B2B group
 │   ├── digital-product-processor.ts # Digital product with download
 │   ├── image-processor.ts    # Multi-view product image generation
@@ -354,7 +353,7 @@ Every SalesChannel is created with two domains automatically:
 
 **Graceful fallback**: If German (`de-DE`) language or its snippet set is not installed in Shopware, a warning is logged and only the English/USD domain is created.
 
-**Currency**: USD is used as the primary currency for the SalesChannel. If USD is not found in Shopware, the Storefront's default currency is used as fallback.
+**Currency**: USD is used as the primary display currency for the SalesChannel. If USD is not found in Shopware, the Storefront's default currency is used as fallback. Product prices always use the **system base currency** (`factor = 1`, typically EUR) via `getDefaultCurrencyId()`, which Shopware's `PriceFieldSerializer` validates against.
 
 Both domains are created in a single `sync` call along with both languages and both currencies:
 

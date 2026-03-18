@@ -406,7 +406,7 @@ export class ShopwareHydrator extends ShopwareClient {
 
         const [taxId, currencyId, deliveryTimeIds, ruleId] = await Promise.all([
             this.getStandardTaxId(),
-            this.getCurrencyId(),
+            this.getDefaultCurrencyId(),
             this.getDeliveryTimeIds(),
             hasTieredProducts ? this.getAlwaysValidRuleId() : Promise.resolve(null),
         ]);
@@ -597,7 +597,7 @@ export class ShopwareHydrator extends ShopwareClient {
 
         let currencyId = salesChannel.currencyId;
         if (!currencyId) {
-            currencyId = await this.getCurrencyId();
+            currencyId = await this.getDefaultCurrencyId();
         }
 
         const productCategory = await this.createProductCategory(category, salesChannel);
