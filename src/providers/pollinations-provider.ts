@@ -74,6 +74,19 @@ export class PollinationsTextProvider implements TextProvider {
         logger.error(`   Error: ${errorMessage}`);
 
         if (
+            status === 402 ||
+            errorMessage.includes("402") ||
+            errorMessage.includes("Insufficient balance")
+        ) {
+            logger.info(`\n💡 TIP: Your Pollinations account has insufficient pollen balance.`, {
+                cli: true,
+            });
+            logger.info(`   Top up your balance at https://enter.pollinations.ai`, { cli: true });
+            logger.info(
+                `   Or switch to a secret key (sk_*) which has no balance constraints.`,
+                { cli: true }
+            );
+        } else if (
             status === 401 ||
             errorMessage.includes("401") ||
             errorMessage.includes("Invalid API key")
@@ -120,7 +133,7 @@ export class PollinationsTextProvider implements TextProvider {
 /** Available Pollinations image models */
 const POLLINATIONS_IMAGE_MODELS = ["flux", "klein", "turbo"] as const;
 
-/** Pollinations.ai image generation provider (requires API key from enter.pollinations.ai) */
+/** Pollinations.ai image generation provider. Works without API key (free, rate-limited). */
 export class PollinationsImageProvider implements ImageProvider {
     readonly isSequential: boolean;
     readonly maxConcurrency: number;
@@ -129,16 +142,15 @@ export class PollinationsImageProvider implements ImageProvider {
     private readonly apiKey: string;
     private readonly model: string;
 
-    constructor(apiKey: string, model: string = "klein") {
+    constructor(apiKey: string = "", model: string = "klein") {
         this.apiKey = apiKey;
         this.model = model;
 
-        // Secret keys (sk_*) have no rate limits - enable parallel processing
-        // Publishable keys (pk_*) - limited parallelism
         if (apiKey.startsWith("sk_")) {
             this.isSequential = false;
             this.maxConcurrency = 5;
         } else {
+            // No key or pk_ key — sequential with limited parallelism
             this.isSequential = true;
             this.maxConcurrency = 2;
         }
@@ -152,7 +164,8 @@ export class PollinationsImageProvider implements ImageProvider {
             const encodedPrompt = encodeURIComponent(truncatedPrompt);
             const width = options?.width ?? 1792;
             const height = options?.height ?? 1024;
-            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${this.model}&key=${this.apiKey}`;
+            const keyParam = this.apiKey ? `&key=${this.apiKey}` : "";
+            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${this.model}${keyParam}`;
 
             // Add timeout (2 minutes for image generation)
             const controller = new AbortController();
@@ -218,7 +231,25 @@ export class PollinationsImageProvider implements ImageProvider {
             }
 
             // Provide helpful tips based on error
-            if (errorMessage.includes("No active") && errorMessage.includes("servers available")) {
+            if (
+                response.status === 402 ||
+                errorMessage.includes("Insufficient balance")
+            ) {
+                logger.info(
+                    `\n💡 TIP: Your Pollinations account has insufficient pollen balance.`,
+                    { cli: true }
+                );
+                logger.info(`   Top up your balance at https://enter.pollinations.ai`, {
+                    cli: true,
+                });
+                logger.info(
+                    `   Or switch to a secret key (sk_*) which has no balance constraints.`,
+                    { cli: true }
+                );
+            } else if (
+                errorMessage.includes("No active") &&
+                errorMessage.includes("servers available")
+            ) {
                 const otherModels = POLLINATIONS_IMAGE_MODELS.filter((m) => m !== this.model);
                 logger.info(`\n💡 TIP: The "${this.model}" model is currently unavailable.`, {
                     cli: true,

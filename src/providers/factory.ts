@@ -127,16 +127,29 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
         }
 
         case "pollinations": {
-            const pollinationsApiKey = config.imageApiKey || config.apiKey;
-            if (!pollinationsApiKey) {
-                logger.warn(
-                    "No API key for Pollinations image generation. Disabling images. Get a key at https://enter.pollinations.ai",
+            const pollinationsModel = config.imageModel || "flux";
+
+            // Use explicit IMAGE_API_KEY if set, otherwise:
+            // - sk_ keys: pass through (no balance constraints)
+            // - pk_ keys: omit key to use free tier (preserves pollen for text)
+            // - no key: use free tier
+            if (config.imageApiKey) {
+                return new PollinationsImageProvider(config.imageApiKey, pollinationsModel);
+            }
+
+            const mainKey = config.apiKey ?? "";
+            if (mainKey.startsWith("sk_")) {
+                return new PollinationsImageProvider(mainKey, pollinationsModel);
+            }
+
+            if (mainKey.startsWith("pk_")) {
+                logger.info(
+                    "Using Pollinations free image generation (pk_ key preserved for text)",
                     { cli: true }
                 );
-                return new NoOpImageProvider();
             }
-            const pollinationsModel = config.imageModel || "flux";
-            return new PollinationsImageProvider(pollinationsApiKey, pollinationsModel);
+
+            return new PollinationsImageProvider("", pollinationsModel);
         }
 
         case "none":
