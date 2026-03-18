@@ -165,6 +165,62 @@ class MockTextProvider implements TextProvider {
     }
 }
 
+/**
+ * TextProvider that succeeds for categories/brand colors but throws for products.
+ * Used to test the total product hydration failure path.
+ */
+class FailingProductProvider implements TextProvider {
+    readonly name = "failing-products";
+    readonly isSequential = false;
+    readonly maxConcurrency = 10;
+    readonly tokenLimit = 100000;
+
+    async generateCompletion(messages: ChatMessage[]): Promise<string> {
+        const userMessage = messages.find((m) => m.role === "user")?.content || "";
+
+        if (
+            userMessage.includes("categories") &&
+            (userMessage.includes("SEO-friendly") || userMessage.includes("Generate names"))
+        ) {
+            return JSON.stringify({
+                salesChannelDescription: "Your one-stop shop for quality furniture",
+                categories: [
+                    {
+                        id: "cat1",
+                        name: "Living Room Furniture",
+                        description: "Comfortable furniture for your living space",
+                        imageDescription: "Modern living room with elegant furniture",
+                    },
+                    {
+                        id: "cat2",
+                        name: "Bedroom Furniture",
+                        description: "Cozy furniture for restful nights",
+                        imageDescription: "Peaceful bedroom setting",
+                    },
+                    {
+                        id: "cat1-1",
+                        name: "Sofas",
+                        description: "Comfortable sofas for lounging",
+                        imageDescription: null,
+                    },
+                    {
+                        id: "cat2-1",
+                        name: "Beds",
+                        description: "Quality beds for better sleep",
+                        imageDescription: null,
+                    },
+                ],
+            });
+        }
+
+        if (userMessage.includes("Generate brand colors")) {
+            return JSON.stringify({ primary: "#4A90D9", secondary: "#7AB8F5" });
+        }
+
+        throw new Error("Simulated API credit exhaustion");
+    }
+}
+
 // =============================================================================
 // Test Fixtures
 // =============================================================================
@@ -465,6 +521,16 @@ describe("BlueprintHydrator", () => {
             expect(result.brandColors).toBeDefined();
             expect(result.brandColors?.primary).toBe("#4A90D9");
             expect(result.brandColors?.secondary).toBe("#7AB8F5");
+        });
+
+        test("throws when all product hydration branches fail", async () => {
+            const failingProvider = new FailingProductProvider();
+            const failingHydrator = new BlueprintHydrator(failingProvider, TEST_CACHE_DIR);
+            const blueprint = createTestBlueprint();
+
+            await expect(failingHydrator.hydrate(blueprint)).rejects.toThrow(
+                /all.*branches failed/i
+            );
         });
 
         test("makes AI calls for categories, products, and brand colors", async () => {

@@ -252,6 +252,15 @@ export class ProductHydrator {
 
         if (failedBranches.length > 0) {
             const successCount = settledResults.length - failedBranches.length;
+
+            if (fulfilledProducts.length === 0) {
+                const reason = failedBranches[0]?.error.message ?? "Unknown error";
+                throw new Error(
+                    `All ${failedBranches.length} hydration branches failed — no products were generated. ` +
+                        `Reason: ${reason}`
+                );
+            }
+
             logger.warn(
                 `\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
                     `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`,

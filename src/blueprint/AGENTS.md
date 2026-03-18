@@ -63,6 +63,8 @@ Orchestrates AI hydration of the blueprint:
 
 **Brand color resilience:** `hydrateBrandColors()` catches all parse/schema errors and returns safe fallback colors (`#0070f3` / `#7928ca`) instead of throwing. One bad AI response cannot abort full hydration.
 
+**Product hydration resilience:** `ProductHydrator.hydrateProducts()` uses `Promise.allSettled` so individual branch failures don't abort the entire hydration. However, if **all** branches fail (e.g., API credits exhausted), it throws an error instead of silently returning an empty product array. This prevents saving a broken 0-product blueprint to disk and keeps the pre-hydration state intact for retry.
+
 Supports selective re-hydration modes:
 
 - `categories` — Only update category names/descriptions

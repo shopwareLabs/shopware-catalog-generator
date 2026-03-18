@@ -302,6 +302,8 @@ The architecture uses a 3-phase pipeline for faster generation:
 
 > All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
 
+**Resilient hydration:** If Phase 2 fails mid-way (e.g., API credits exhausted), the pipeline is self-healing. `ProductHydrator` throws on total branch failure to prevent saving a broken blueprint. If a broken hydrated blueprint is found on disk from a previous failed attempt, `generate` automatically deletes it and re-runs hydration. The `isIncompleteHydration()` utility detects these recoverable failures (no products, no categories).
+
 ```
 Phase 1: Blueprint          Phase 2: AI Hydration           Phase 3: Upload (no AI)
 (instant, no AI)             (text + images)                 (cached data only)

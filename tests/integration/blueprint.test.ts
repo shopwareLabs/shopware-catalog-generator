@@ -5,6 +5,7 @@ import type { HydratedBlueprint } from "../../src/types/index.js";
 
 import { BlueprintGenerator } from "../../src/blueprint/generator.js";
 import { DataCache } from "../../src/cache.js";
+import { isIncompleteHydration, validateBlueprint } from "../../src/utils/blueprint-validation.js";
 import { PropertyCollector } from "../../src/utils/property-collector.js";
 
 // Test cache directory
@@ -287,6 +288,126 @@ describe("Blueprint Integration", () => {
             const manufacturers = collector.collectManufacturers(hydratedBlueprint);
             expect(manufacturers.length).toBe(1);
             expect(manufacturers[0]).toBe("Acme Corp");
+        });
+    });
+
+    describe("Incomplete Hydration Detection", () => {
+        test("detects blueprint with no products as incomplete", () => {
+            const incomplete: HydratedBlueprint = {
+                version: "1.0",
+                salesChannel: { name: "broken-store", description: "A broken store" },
+                categories: [
+                    {
+                        id: "a".repeat(32),
+                        name: "Furniture",
+                        description: "All furniture items",
+                        level: 1,
+                        hasImage: false,
+                        children: [],
+                    },
+                ],
+                products: [],
+                propertyGroups: [],
+                createdAt: new Date().toISOString(),
+                hydratedAt: new Date().toISOString(),
+            };
+
+            cache.saveHydratedBlueprint("broken-store", incomplete);
+            expect(cache.hasHydratedBlueprint("broken-store")).toBe(true);
+
+            const loaded = cache.loadHydratedBlueprint("broken-store");
+            expect(loaded).not.toBeNull();
+            if (!loaded) return;
+
+            const result = validateBlueprint(loaded, { autoFix: true, logFixes: false });
+            expect(result.valid).toBe(false);
+            expect(isIncompleteHydration(result)).toBe(true);
+        });
+
+        test("incomplete blueprint can be deleted for re-hydration", () => {
+            const incomplete: HydratedBlueprint = {
+                version: "1.0",
+                salesChannel: { name: "retry-store", description: "" },
+                categories: [],
+                products: [],
+                propertyGroups: [],
+                createdAt: new Date().toISOString(),
+                hydratedAt: new Date().toISOString(),
+            };
+
+            cache.saveHydratedBlueprint("retry-store", incomplete);
+            expect(cache.hasHydratedBlueprint("retry-store")).toBe(true);
+
+            cache.deleteHydratedBlueprint("retry-store");
+            expect(cache.hasHydratedBlueprint("retry-store")).toBe(false);
+        });
+
+        test("valid blueprint is not detected as incomplete", () => {
+            const valid: HydratedBlueprint = {
+                version: "1.0",
+                salesChannel: { name: "good-store", description: "A good store" },
+                categories: [
+                    {
+                        id: "a".repeat(32),
+                        name: "Furniture",
+                        description: "All furniture",
+                        level: 1,
+                        hasImage: false,
+                        children: [
+                            {
+                                id: "b".repeat(32),
+                                name: "Chairs",
+                                description: "All chairs",
+                                level: 2,
+                                hasImage: false,
+                                parentId: "a".repeat(32),
+                                children: [],
+                            },
+                        ],
+                    },
+                ],
+                products: [
+                    {
+                        id: "c".repeat(32),
+                        name: "Oak Chair - Modern Style",
+                        description: "<p>A beautiful oak chair</p>",
+                        price: 99.99,
+                        stock: 50,
+                        primaryCategoryId: "b".repeat(32),
+                        categoryIds: ["b".repeat(32)],
+                        metadata: {
+                            imageCount: 1,
+                            imageDescriptions: [{ view: "front", prompt: "Oak chair front view" }],
+                            isVariant: false,
+                            properties: [{ group: "Material", value: "Oak" }],
+                            manufacturerName: "Nordic Furniture Co",
+                            reviewCount: 3,
+                            hasSalesPrice: false,
+                            hasTieredPricing: false,
+                            isTopseller: false,
+                            isNew: false,
+                            isShippingFree: false,
+                            weight: 1.0,
+                            width: 100,
+                            height: 100,
+                            length: 100,
+                            ean: "1234567890128",
+                            manufacturerNumber: "MPN-TEST0001",
+                        },
+                    },
+                ],
+                propertyGroups: [],
+                createdAt: new Date().toISOString(),
+                hydratedAt: new Date().toISOString(),
+            };
+
+            cache.saveHydratedBlueprint("good-store", valid);
+            const loaded = cache.loadHydratedBlueprint("good-store");
+            expect(loaded).not.toBeNull();
+            if (!loaded) return;
+
+            const result = validateBlueprint(loaded, { autoFix: true, logFixes: false });
+            expect(isIncompleteHydration(result)).toBe(false);
         });
     });
 });

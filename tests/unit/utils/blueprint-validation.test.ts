@@ -6,7 +6,11 @@ import { describe, expect, test } from "bun:test";
 
 import type { HydratedBlueprint } from "../../../src/types/index.js";
 
-import { hasValidationIssues, validateBlueprint } from "../../../src/utils/blueprint-validation.js";
+import {
+    hasValidationIssues,
+    isIncompleteHydration,
+    validateBlueprint,
+} from "../../../src/utils/blueprint-validation.js";
 
 // =============================================================================
 // Test Fixtures
@@ -269,6 +273,44 @@ describe("validateBlueprint", () => {
             const issue = result.issues.find((i) => i.code === "DUPLICATE_CATEGORY_NAME");
             expect(issue?.type).toBe("warning");
         });
+    });
+});
+
+describe("isIncompleteHydration", () => {
+    test("returns true when blueprint has no products", () => {
+        const blueprint = createMockBlueprint({ products: [] });
+        const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
+        expect(isIncompleteHydration(result)).toBe(true);
+    });
+
+    test("returns true when blueprint has no categories", () => {
+        const blueprint = createMockBlueprint({ categories: [] });
+        const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
+        expect(isIncompleteHydration(result)).toBe(true);
+    });
+
+    test("returns true when blueprint has neither products nor categories", () => {
+        const blueprint = createMockBlueprint({ products: [], categories: [] });
+        const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
+        expect(isIncompleteHydration(result)).toBe(true);
+    });
+
+    test("returns false for duplicate product name errors", () => {
+        const blueprint = createMockBlueprint({
+            products: [
+                createMockProduct({ id: "p1", name: "Same Name" }),
+                createMockProduct({ id: "p2", name: "Same Name" }),
+            ],
+        });
+        const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
+        expect(result.valid).toBe(false);
+        expect(isIncompleteHydration(result)).toBe(false);
+    });
+
+    test("returns false for valid blueprint", () => {
+        const blueprint = createMockBlueprint();
+        const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
+        expect(isIncompleteHydration(result)).toBe(false);
     });
 });
 

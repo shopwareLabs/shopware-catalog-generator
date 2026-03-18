@@ -366,6 +366,20 @@ export class DataCache implements DataCacheApi {
         return this.hasCachedFile(hydratedFile);
     }
 
+    /**
+     * Delete a hydrated blueprint for a SalesChannel (e.g., to allow re-hydration
+     * after a failed attempt left an incomplete file).
+     */
+    deleteHydratedBlueprint(salesChannel: string): void {
+        const hydratedFile = path.join(
+            this.getSalesChannelDir(salesChannel),
+            "hydrated-blueprint.json"
+        );
+        if (fs.existsSync(hydratedFile)) {
+            fs.unlinkSync(hydratedFile);
+        }
+    }
+
     // =========================================================================
     // CMS Blueprint Cache
     // =========================================================================

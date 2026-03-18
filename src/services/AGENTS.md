@@ -92,8 +92,12 @@ The `generate` function:
 2. Creates a blueprint if none exists
 3. Hydrates the blueprint if not yet hydrated
 4. Validates the blueprint (auto-fixes duplicates)
-5. Syncs categories, property groups, and products to Shopware
-6. Runs all registered post-processors
+5. **Auto-recovery:** if validation detects an incomplete hydration (no products or no categories), deletes the broken hydrated blueprint and re-runs hydration automatically
+6. Checks hydration return lines for `Error:` prefixes and surfaces them immediately
+7. Syncs categories, property groups, and products to Shopware
+8. Runs all registered post-processors
+
+**Resilient hydration:** If a previous hydration attempt failed mid-way (e.g., API credits exhausted), leaving a 0-product `hydrated-blueprint.json` on disk, `generate` detects this via `isIncompleteHydration()` and automatically retries instead of failing with a validation error. If validation still fails after retry, actionable recovery instructions are included in the error output.
 
 ## image-fix-service.ts
 

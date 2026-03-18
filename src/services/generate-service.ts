@@ -16,7 +16,7 @@ import {
     syncPropertyIdsToBlueprint,
 } from "../shopware/index.js";
 import { createTemplateFetcherFromEnv } from "../templates/index.js";
-import { logger, validateBlueprint } from "../utils/index.js";
+import { isIncompleteHydration, logger, validateBlueprint } from "../utils/index.js";
 import { createBlueprint, hydrateBlueprint } from "./blueprint-service.js";
 import { createProcessorDeps } from "./shopware-context.js";
 
@@ -74,9 +74,8 @@ export async function generate(
     }
 
     if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-        results.push(`Step 2: Hydrating blueprint...`);
-        const lines = await hydrateBlueprint(salesChannelName, {});
-        results.push(...lines.filter((l) => !l.startsWith("===") && l !== ``));
+        const hydrateError = await runHydration(salesChannelName, results);
+        if (hydrateError) return [...results, hydrateError];
     } else {
         results.push(
             usedTemplate
@@ -85,19 +84,57 @@ export async function generate(
         );
     }
 
-    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
+    let blueprint = cache.loadHydratedBlueprint(salesChannelName);
     if (!blueprint) {
         return [...results, `Error: Failed to load hydrated blueprint`];
     }
 
-    const validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+    let validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+
+    if (!validationResult.valid && isIncompleteHydration(validationResult)) {
+        results.push(
+            `  Detected incomplete hydrated blueprint (likely from a previous failed attempt). Re-hydrating...`
+        );
+        cache.deleteHydratedBlueprint(salesChannelName);
+
+        const hydrateError = await runHydration(salesChannelName, results);
+        if (hydrateError) return [...results, hydrateError];
+
+        blueprint = cache.loadHydratedBlueprint(salesChannelName);
+        if (!blueprint) {
+            return [...results, `Error: Failed to load hydrated blueprint after re-hydration`];
+        }
+        validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+    }
+
     if (!validationResult.valid) {
         const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
-        return [...results, `Error: Blueprint validation failed:\n${issues}`];
+        return [
+            ...results,
+            `Error: Blueprint validation failed:\n${issues}`,
+            ``,
+            `This may be caused by an interrupted hydration (e.g., API credits exhausted).`,
+            `To retry: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+        ];
     }
     if (validationResult.fixesApplied > 0) {
         cache.saveHydratedBlueprint(salesChannelName, blueprint);
         results.push(`  Auto-fixed ${validationResult.fixesApplied} blueprint issue(s)`);
+    }
+
+    const originalBlueprint = cache.loadBlueprint(salesChannelName);
+    if (originalBlueprint) {
+        const expectedProducts = originalBlueprint.products.length;
+        const actualProducts = blueprint.products.length;
+        if (actualProducts < expectedProducts) {
+            results.push(
+                ``,
+                `  ⚠ Partial hydration: ${actualProducts}/${expectedProducts} products were generated.`,
+                `  Some branches may have failed (e.g., API rate limit or credits exhausted).`,
+                `  To regenerate all products: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+                ``
+            );
+        }
     }
 
     results.push(`Step 3: Syncing to Shopware...`);
@@ -187,6 +224,20 @@ export async function generate(
         `Post-processors: ${totalProcessed} processed, ${totalErrors} errors`
     );
     return results;
+}
+
+async function runHydration(
+    salesChannelName: string,
+    results: string[]
+): Promise<string | undefined> {
+    results.push(`Step 2: Hydrating blueprint...`);
+    const lines = await hydrateBlueprint(salesChannelName, {});
+    const errorLine = lines.find((l) => l.startsWith("Error:"));
+    if (errorLine) {
+        return errorLine;
+    }
+    results.push(...lines.filter((l) => !l.startsWith("===") && l !== ``));
+    return undefined;
 }
 
 export async function runProcessorsForSalesChannel(

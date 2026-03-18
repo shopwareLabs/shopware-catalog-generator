@@ -667,3 +667,19 @@ export function hasValidationIssues(blueprint: HydratedBlueprint): boolean {
     const result = validateBlueprint(blueprint, { autoFix: false, logFixes: false });
     return !result.valid;
 }
+
+/** Issue codes that indicate a fundamentally broken blueprint recoverable by re-hydrating */
+const INCOMPLETE_HYDRATION_CODES = new Set(["NO_PRODUCTS", "NO_CATEGORIES"]);
+
+/**
+ * Check if a validation result indicates an incomplete hydration
+ * (e.g., API credits exhausted mid-process).
+ *
+ * Returns true when the blueprint is missing products or categories entirely,
+ * which means re-running hydration could fix it.
+ */
+export function isIncompleteHydration(result: BlueprintValidationResult): boolean {
+    return result.issues.some(
+        (issue) => issue.type === "error" && INCOMPLETE_HYDRATION_CODES.has(issue.code)
+    );
+}
