@@ -147,6 +147,10 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
                     "Using Pollinations free image generation (pk_ key preserved for text)",
                     { cli: true }
                 );
+            } else if (mainKey && !mainKey.startsWith("sk_")) {
+                logger.info("Using Pollinations free image generation (no image API key needed)", {
+                    cli: true,
+                });
             }
 
             return new PollinationsImageProvider("", pollinationsModel);
