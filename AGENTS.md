@@ -478,8 +478,14 @@ Providers may ignore `width`/`height` if they use a fixed size or prefer their o
 Factory in `providers/factory.ts` creates providers from env vars:
 
 - `AI_PROVIDER`: openai | github-models | pollinations
-- `IMAGE_PROVIDER`: openai | pollinations | none
+- `IMAGE_PROVIDER`: openai | pollinations | none (auto-detected if not set)
 - `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
+
+**Image provider auto-detection:** When `IMAGE_PROVIDER` is not set:
+- `github-models` → Pollinations free tier (no key, no cost)
+- `pollinations` with `sk_*` key → Pollinations with key (parallel)
+- `pollinations` with `pk_*` key → Pollinations free tier (pollen preserved for text)
+- `openai` → OpenAI images (paid)
 
 ### Shopware Module
 
@@ -1029,14 +1035,16 @@ server.addTool({
 ## Environment Variables
 
 ```env
-# Required for all providers
-AI_PROVIDER=pollinations|github-models|openai
-AI_API_KEY=xxx  # Get Pollinations key at https://enter.pollinations.ai
+# AI Provider — pick one:
+AI_PROVIDER=github-models              # Free with GitHub Copilot (recommended)
+AI_API_KEY=ghp_your_github_token       # github.com/settings/tokens
+# AI_PROVIDER=pollinations             # Alternative: enter.pollinations.ai
+# AI_API_KEY=sk_your_pollinations_key  # sk_ = parallel, pk_ = sequential
 
 # Optional overrides
 AI_MODEL=gpt-4o
-IMAGE_PROVIDER=pollinations|openai|none
-IMAGE_API_KEY=xxx
+IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: github-models/pk_ → free Pollinations
+IMAGE_API_KEY=xxx                        # Not needed for github-models or pk_ keys
 IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-1, gpt-image-1.5, flux, turbo, klein
 IMAGE_QUALITY=low  # OpenAI only: low (fastest/cheapest), medium, high, auto
 
