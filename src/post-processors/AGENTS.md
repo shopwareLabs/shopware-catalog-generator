@@ -182,22 +182,15 @@ export { MyProcessor } from "./my-processor.js";
 
 ## Shared Utilities
 
-### currency-utils.ts
+### Currency resolution
 
-Currency resolution for processors that need a primary currency ID:
+Processors that need a currency ID for product prices should use `context.api.getDefaultCurrencyId()` directly. This resolves the system base currency (`factor = 1`), falling back to EUR by ISO code -- the same currency used by `ShopwareHydrator` for parent product prices.
 
 ```typescript
-import { resolvePrimaryCurrencyId } from "./currency-utils.js";
-
-const currencyId = await resolvePrimaryCurrencyId(context.api, context.salesChannelId);
+const currencyId = await context.api.getDefaultCurrencyId();
 ```
 
-Fallback order:
-
-1. **System base currency** (`factor = 1`) — what `ShopwareHydrator.getCurrencyId()` defaults to and what Shopware's `PriceFieldSerializer` validates product prices against (EUR in a standard install)
-2. **SalesChannel's own currency** — last resort
-
-> USD is intentionally NOT prioritised. Product prices must be in the system base currency or Shopware rejects the sync with "No price for default currency defined". Throws if both lookups fail.
+> Product prices must be in the system base currency or Shopware rejects the sync with "No price for default currency defined".
 
 Used by `variant-processor` and `digital-product-processor`.
 

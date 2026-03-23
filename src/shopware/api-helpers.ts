@@ -91,6 +91,7 @@ export interface ShopwareApi {
     deleteEntities(entity: string, ids: string[]): Promise<void>;
     uploadMedia(mediaId: string, file: Buffer, fileName: string, extension: string): Promise<void>;
     getCurrencyId(isoCode?: string): Promise<string>;
+    getDefaultCurrencyId(): Promise<string>;
     getStandardTaxId(): Promise<string>;
     getSalesChannelByName(name: string): Promise<{
         id: string;
@@ -298,6 +299,27 @@ export class ShopwareApiHelpers implements ShopwareApi {
             throw new Error(`Currency "${isoCode}" not found`);
         }
         return results[0].id;
+    }
+
+    /**
+     * Get the system default currency ID (factor = 1), falling back to EUR.
+     */
+    async getDefaultCurrencyId(): Promise<string> {
+        try {
+            const results = await this.searchEntities<{ id: string }>(
+                "currency",
+                [{ type: "equals", field: "factor", value: 1 }],
+                { limit: 1 }
+            );
+            if (results[0]) {
+                return results[0].id;
+            }
+        } catch {
+            // factor filter failed — fall through to EUR lookup
+        }
+
+        logger.warn("Base currency (factor=1) not found — falling back to EUR", { cli: true });
+        return this.getCurrencyId("EUR");
     }
 
     /**

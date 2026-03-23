@@ -24,7 +24,6 @@ import type {
 
 import { GIFT_CARD_50 } from "../fixtures/digital-products.js";
 import { apiPost, generateUUID, logger } from "../utils/index.js";
-import { resolvePrimaryCurrencyId } from "./currency-utils.js";
 
 /** Cache file for storing digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
@@ -367,7 +366,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
     ): Promise<string | null> {
         const productId = generateUUID();
         const deliveryTimeId = await this.getInstantDeliveryTimeId(context);
-        const currencyId = await resolvePrimaryCurrencyId(context.api);
+        const currencyId = await context.api.getDefaultCurrencyId();
 
         try {
             const payload: ProductSyncPayload = {

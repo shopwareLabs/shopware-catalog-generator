@@ -154,6 +154,37 @@ export class ShopwareClient {
         return currencyData.id;
     }
 
+    /**
+     * Get the system default currency ID (the currency Shopware validates product prices against).
+     *
+     * Resolution order:
+     *   1. System base currency (factor = 1)
+     *   2. EUR by ISO code (fallback for non-standard setups)
+     */
+    async getDefaultCurrencyId(): Promise<string> {
+        try {
+            const { data } = await this.getClient().invoke(
+                "searchCurrency post /search/currency",
+                {
+                    body: {
+                        limit: 1,
+                        filter: [{ type: "equals", field: "factor", value: 1 }],
+                    },
+                }
+            );
+            const response = data as SearchResult<Schemas["Currency"]>;
+            const baseCurrency = response.data?.[0];
+            if (baseCurrency) {
+                return baseCurrency.id;
+            }
+        } catch {
+            // factor filter failed — fall through to EUR lookup
+        }
+
+        logger.warn("Base currency (factor=1) not found — falling back to EUR", { cli: true });
+        return this.getCurrencyId("EUR");
+    }
+
     /** Get language ID by locale code (e.g. "de-DE"), returns null if not installed */
     async getLanguageId(localeCode: string): Promise<string | null> {
         const { data } = await this.getClient().invoke("searchLanguage post /search/language", {
