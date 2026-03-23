@@ -126,7 +126,7 @@ const result = validateSubdomainName("My Store");
 Blueprint validation before syncing to Shopware:
 
 ```typescript
-import { validateBlueprint, hasValidationIssues } from "./utils/index.js";
+import { validateBlueprint, hasValidationIssues, isIncompleteHydration } from "./utils/index.js";
 
 // Validate with auto-fix
 const result = validateBlueprint(blueprint, { autoFix: true, logFixes: true });
@@ -135,6 +135,12 @@ const result = validateBlueprint(blueprint, { autoFix: true, logFixes: true });
 // Quick check without auto-fix
 if (hasValidationIssues(blueprint)) {
     logger.error("Blueprint has issues", { cli: true });
+}
+
+// Check if failure is due to incomplete hydration (recoverable by re-running hydration)
+if (!result.valid && isIncompleteHydration(result)) {
+    // Blueprint has no products or no categories — likely a failed hydration attempt
+    // Safe to delete and re-hydrate
 }
 ```
 

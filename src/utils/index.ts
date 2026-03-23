@@ -16,6 +16,7 @@ export type {
 } from "./blueprint-validation.js";
 export {
     hasValidationIssues,
+    isIncompleteHydration,
     isPlaceholder,
     PLACEHOLDER_PATTERNS,
     validateBlueprint,
