@@ -21,6 +21,7 @@
 
         "module": "NodeNext",
         "sourceMap": true,
+        "types": ["bun-types"],
 
         "declaration": true,
         "declarationMap": true
