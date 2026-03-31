@@ -139,7 +139,7 @@ export class ShopwareHydrator extends ShopwareClient {
                     {
                         body: {
                             limit: groupIds.length,
-                            filter: [{ type: "equalsAny", field: "id", value: groupIds }],
+                            filter: [{ type: "equalsAny", field: "id", value: groupIds.join("|") }],
                         },
                     }
                 );
@@ -164,7 +164,7 @@ export class ShopwareHydrator extends ShopwareClient {
                     {
                         body: {
                             limit: optionIds.length,
-                            filter: [{ type: "equalsAny", field: "id", value: optionIds }],
+                            filter: [{ type: "equalsAny", field: "id", value: optionIds.join("|") }],
                         },
                     }
                 );

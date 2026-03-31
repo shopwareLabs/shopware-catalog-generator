@@ -51,7 +51,7 @@ export function createShopwareAdminClient(config: AdminClientConfig): AdminApiCl
                   client_id: "administration" as const,
                   username: config.username || "admin",
                   password: config.password || "shopware",
-                  scopes: "write" as const,
+                  scope: "write" as const,
               };
 
     const client = createAdminAPIClient<operations>({
