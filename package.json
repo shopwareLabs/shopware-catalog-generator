@@ -3,6 +3,7 @@
     "version": "2.0.0",
     "private": true,
     "description": "A tool to create AI-generated demo data for Shopware",
+    "license": "AGPL-3.0-or-later",
     "author": "Philipp Schuch",
     "files": [
         "dist"
