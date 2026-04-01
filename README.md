@@ -64,12 +64,12 @@ This creates a fresh single commit, cleans up all stale refs, and repackages the
 
 ## AI Providers & Performance
 
-| Provider        | API Key  | Text       | Images                   | Best For                          |
-| --------------- | -------- | ---------- | ------------------------ | --------------------------------- |
-| `github-models` | PAT      | Free       | Free (Pollinations)      | **Free with GitHub Copilot**      |
-| `pollinations`  | `sk_*`   | Parallel   | Parallel (with key)      | Fast, no rate limits              |
-| `pollinations`  | `pk_*`   | Sequential | Free (pollen preserved)  | Free tier                         |
-| `openai`        | `sk-...` | Parallel   | Paid (gpt-image-1)       | Production, high volume           |
+| Provider        | API Key  | Text       | Images                  | Best For                     |
+| --------------- | -------- | ---------- | ----------------------- | ---------------------------- |
+| `github-models` | PAT      | Free       | Free (Pollinations)     | **Free with GitHub Copilot** |
+| `pollinations`  | `sk_*`   | Parallel   | Parallel (with key)     | Fast, no rate limits         |
+| `pollinations`  | `pk_*`   | Sequential | Free (pollen preserved) | Free tier                    |
+| `openai`        | `sk-...` | Parallel   | Paid (gpt-image-1)      | Production, high volume      |
 
 ### Free Setup (GitHub Copilot)
 

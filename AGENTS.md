@@ -482,6 +482,7 @@ Factory in `providers/factory.ts` creates providers from env vars:
 - `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
 
 **Image provider auto-detection:** When `IMAGE_PROVIDER` is not set:
+
 - `github-models` → Pollinations free tier (no key, no cost)
 - `pollinations` with `sk_*` key → Pollinations with key (parallel)
 - `pollinations` with `pk_*` key → Pollinations free tier (pollen preserved for text)

@@ -163,15 +163,12 @@ export class ShopwareClient {
      */
     async getDefaultCurrencyId(): Promise<string> {
         try {
-            const { data } = await this.getClient().invoke(
-                "searchCurrency post /search/currency",
-                {
-                    body: {
-                        limit: 1,
-                        filter: [{ type: "equals", field: "factor", value: 1 }],
-                    },
-                }
-            );
+            const { data } = await this.getClient().invoke("searchCurrency post /search/currency", {
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field: "factor", value: 1 }],
+                },
+            });
             const response = data as SearchResult<Schemas["Currency"]>;
             const baseCurrency = response.data?.[0];
             if (baseCurrency) {

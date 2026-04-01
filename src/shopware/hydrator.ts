@@ -164,7 +164,9 @@ export class ShopwareHydrator extends ShopwareClient {
                     {
                         body: {
                             limit: optionIds.length,
-                            filter: [{ type: "equalsAny", field: "id", value: optionIds.join("|") }],
+                            filter: [
+                                { type: "equalsAny", field: "id", value: optionIds.join("|") },
+                            ],
                         },
                     }
                 );

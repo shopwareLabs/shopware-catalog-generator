@@ -194,7 +194,7 @@ The generator can run as an HTTP service with background processing for long-run
 │   │  Background  │          │   Process    │           │   + Uptime   │     │
 │   │    Task      │          │    State     │           │              │     │
 │   └──────┬───────┘          └──────────────┘           └──────────────┘     │
-│          │                         ↑                                        │
+│          │                         ▲                                        │
 │          ▼                         │                                        │
 │   ┌─────────────────────────────────────────────────────────────────┐       │
 │   │                      PROCESS MANAGER                            │       │
@@ -479,26 +479,26 @@ Processors can declare dependencies to control execution order:
 
 ### Available Processors
 
-| Processor          | Description                              | Dependencies                         |
-| ------------------ | ---------------------------------------- | ------------------------------------ |
-| `cms-home`         | Homepage layout with product listing     | customers, promotions, cross-selling |
-| `cms-text`         | Text elements demo page                  | None                                 |
-| `cms-images`       | Image elements demo page                 | None                                 |
-| `cms-video`        | Video elements demo page                 | None                                 |
-| `cms-text-images`  | Text & Images demo page                  | None                                 |
-| `cms-commerce`     | Commerce elements demo page              | images                               |
-| `cms-form`         | Form elements demo page                  | None                                 |
-| `cms-footer-pages` | Shared footer and legal pages            | None                                 |
-| `cross-selling`    | Category-based cross-selling streams     | None                                 |
-| `customers`        | Demo customer accounts with B2B group    | None                                 |
-| `images`           | Product and category images              | None                                 |
-| `manufacturers`    | Fictional manufacturer creation          | None                                 |
-| `promotions`       | Demo promotion codes                     | None                                 |
-| `reviews`          | Product reviews (0-10 per product)       | None                                 |
-| `theme`            | Child theme with brand colors and media  | None                                 |
-| `variants`         | Variant product creation                 | manufacturers                        |
-| `digital-product`  | Digital product (Gift Card)              | None                                 |
-| `cms-testing`      | Testing category hierarchy               | cms-\*, digital-product              |
+| Processor          | Description                             | Dependencies                         |
+| ------------------ | --------------------------------------- | ------------------------------------ |
+| `cms-home`         | Homepage layout with product listing    | customers, promotions, cross-selling |
+| `cms-text`         | Text elements demo page                 | None                                 |
+| `cms-images`       | Image elements demo page                | None                                 |
+| `cms-video`        | Video elements demo page                | None                                 |
+| `cms-text-images`  | Text & Images demo page                 | None                                 |
+| `cms-commerce`     | Commerce elements demo page             | images                               |
+| `cms-form`         | Form elements demo page                 | None                                 |
+| `cms-footer-pages` | Shared footer and legal pages           | None                                 |
+| `cross-selling`    | Category-based cross-selling streams    | None                                 |
+| `customers`        | Demo customer accounts with B2B group   | None                                 |
+| `images`           | Product and category images             | None                                 |
+| `manufacturers`    | Fictional manufacturer creation         | None                                 |
+| `promotions`       | Demo promotion codes                    | None                                 |
+| `reviews`          | Product reviews (0-10 per product)      | None                                 |
+| `theme`            | Child theme with brand colors and media | None                                 |
+| `variants`         | Variant product creation                | manufacturers                        |
+| `digital-product`  | Digital product (Gift Card)             | None                                 |
+| `cms-testing`      | Testing category hierarchy              | cms-\*, digital-product              |
 
 ### Testing Page Hierarchy
 
@@ -580,12 +580,12 @@ The generator supports multiple AI providers with a unified interface.
 
 ### Provider Selection
 
-| Use Case            | Recommended     | Why                                          |
-| ------------------- | --------------- | -------------------------------------------- |
-| Free (Copilot)      | GitHub Models   | Free text + free Pollinations images         |
-| Free (no Copilot)   | Pollinations    | `pk_*` key, images use free tier             |
-| Fast & free         | Pollinations    | `sk_*` key, parallel text + images           |
-| Production          | OpenAI          | Best quality, full parallel                  |
+| Use Case          | Recommended   | Why                                  |
+| ----------------- | ------------- | ------------------------------------ |
+| Free (Copilot)    | GitHub Models | Free text + free Pollinations images |
+| Free (no Copilot) | Pollinations  | `pk_*` key, images use free tier     |
+| Fast & free       | Pollinations  | `sk_*` key, parallel text + images   |
+| Production        | OpenAI        | Best quality, full parallel          |
 
 > **Recommended for most users:** `AI_PROVIDER=github-models` with a GitHub PAT — completely free if you have a Copilot subscription. Images are automatically generated via Pollinations free tier (no image API key needed).
 >
