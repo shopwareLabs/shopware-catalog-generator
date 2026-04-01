@@ -40,7 +40,6 @@ mcp/
 | `cache_empty_trash`    | `bun run cache:empty-trash`     |
 | `list_saleschannels`   | (lookup only)                   |
 | `list_processors`      | (lookup only)                   |
-| `restart`              | Restarts the MCP server process |
 
 ## Architecture: Shared Services Layer
 
@@ -86,6 +85,16 @@ export function registerMyTools(server: FastMCP): void {
     });
 }
 ```
+
+## Restarting the MCP Server
+
+Cursor does **not** auto-restart MCP servers. After code changes to any `src/mcp/` file (or modules they import like singletons), you must manually restart:
+
+1. Open Cursor Settings (`Cmd+,`)
+2. Go to the MCP section
+3. Click the restart button on `catalog-generator`
+
+⚠ Without a restart, the server continues running **old code in memory**.
 
 ## Important: MCP Mode
 

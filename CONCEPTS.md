@@ -461,14 +461,14 @@ Processors can declare dependencies to control execution order:
   │  │cross-sell│  │        │  │          │  │         │  │          │  │
   │  │ digital  │  │        │  │          │  │         │  │          │  │
   │  └──────────┘  └───┬────┘  └────┬─────┘  └─────────┘  └──────────┘  │
-  └───────────────────┼─────────────┼────────────────────────────────────┘
-                      │             │ depends on
-                      │             ▼
-                      │     ┌─────────────┐
-                      │     │  Variants   │
-                      │     └─────────────┘
-                      │
-                      ▼ (cms-commerce depends on images)
+  └───────────────────-┼────────────┼───────────────────────────────────┘
+                       │            │ depends on
+                       │            ▼
+                       │     ┌─────────────┐
+                       │     │  Variants   │
+                       │     └─────────────┘
+                       │
+                       ▼ (cms-commerce depends on images)
               ┌───────────────┐
               │  cms-commerce │
               └───────────────┘
@@ -700,7 +700,7 @@ Running generate multiple times is safe:
      │          │               │
      │          ▼               ▼
      │     Sync from        Use cache
-     │     Shopware              │
+     │     Shopware             │
      │          │               │
      └──────────┴───────┬───────┘
                         │

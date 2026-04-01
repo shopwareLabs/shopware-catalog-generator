@@ -15,8 +15,8 @@ Create a `.env` file:
 
 ```env
 # AI Provider — pick one:
-AI_PROVIDER=github-models                # Free with GitHub Copilot
-AI_API_KEY=ghp_your_github_token         # github.com/settings/tokens
+AI_PROVIDER=github-models               # Free with GitHub Copilot
+AI_API_KEY=ghp_your_github_token        # github.com/settings/tokens
 # AI_PROVIDER=pollinations              # Alternative: enter.pollinations.ai
 # AI_API_KEY=sk_your_pollinations_key
 

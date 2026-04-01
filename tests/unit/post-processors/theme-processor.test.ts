@@ -56,6 +56,46 @@ describe("ThemeProcessor", () => {
             expect(result.errors).toEqual([]);
         });
     });
+
+    describe("stale cache across invocations", () => {
+        test("process does not reuse media IDs cached by a prior cleanup", async () => {
+            const blueprint = createTestBlueprint({
+                brandColors: { primary: "#FF0000", secondary: "#0000FF" },
+            });
+
+            const storefrontThemeId = "storefront-theme-id";
+            const childThemeId = "child-theme-id";
+            const staleMediaId = "stale-media-id";
+
+            const { context: cleanupCtx, mockApi: cleanupApi } = createTestContext({ blueprint });
+            cleanupApi.mockPostResponse("search/theme", {
+                data: [{ id: storefrontThemeId, technicalName: "Storefront", name: "Storefront" }],
+                total: 1,
+            });
+            cleanupApi.mockPostResponse("search/theme", { data: [], total: 0 });
+            cleanupApi.mockPostResponse("search/media", {
+                data: [{ id: staleMediaId }],
+                total: 1,
+            });
+
+            await ThemeProcessor.cleanup!(cleanupCtx);
+
+            const { context: processCtx, mockApi: processApi } = createTestContext({ blueprint });
+            processApi.mockPostResponse("search/theme", {
+                data: [{ id: storefrontThemeId, technicalName: "Storefront", name: "Storefront" }],
+                total: 1,
+            });
+            processApi.mockPostResponse("search/theme", {
+                data: [{ id: childThemeId, name: "Test-store Theme" }],
+                total: 1,
+            });
+            processApi.mockPostResponse("search/media", { data: [], total: 0 });
+
+            const result = await ThemeProcessor.process(processCtx);
+
+            expect(result.errors).not.toContain("Failed to update theme config");
+        });
+    });
 });
 
 describe("buildThemeConfig", () => {

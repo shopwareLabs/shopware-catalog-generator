@@ -45,6 +45,7 @@ class ThemeProcessorImpl implements PostProcessor {
     private mediaFileNameCache = new Map<string, string>();
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
+        this.resetCaches();
         const startTime = Date.now();
         const errors: string[] = [];
 
@@ -119,6 +120,7 @@ class ThemeProcessorImpl implements PostProcessor {
     }
 
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
+        this.resetCaches();
         const startTime = Date.now();
         const errors: string[] = [];
         let deleted = 0;
@@ -162,6 +164,11 @@ class ThemeProcessorImpl implements PostProcessor {
         deleted += mediaDeleted;
 
         return { name: this.name, deleted, errors, durationMs: Date.now() - startTime };
+    }
+
+    private resetCaches(): void {
+        this.themeMediaFolderId = undefined;
+        this.mediaFileNameCache.clear();
     }
 
     private async getStorefrontThemeId(context: PostProcessorContext): Promise<string | null> {
