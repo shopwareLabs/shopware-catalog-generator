@@ -10,7 +10,6 @@
  */
 
 import { FastMCP } from "fastmcp";
-import { z } from "zod";
 
 import { logger } from "../utils/index.js";
 import {
@@ -40,18 +39,6 @@ export function createMcpServer(): FastMCP {
     registerImageFixTools(server);
     registerCacheTools(server);
     registerCleanupTools(server);
-
-    // Utility: restart MCP server to pick up code changes
-    server.addTool({
-        name: "restart",
-        description:
-            "Restart the MCP server to pick up code changes. Cursor auto-restarts the process.",
-        parameters: z.object({}),
-        execute: async () => {
-            setTimeout(() => process.exit(0), 100);
-            return "Restarting MCP server...";
-        },
-    });
 
     return server;
 }
