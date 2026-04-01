@@ -82,10 +82,9 @@ export class PollinationsTextProvider implements TextProvider {
                 cli: true,
             });
             logger.info(`   Top up your balance at https://enter.pollinations.ai`, { cli: true });
-            logger.info(
-                `   Or switch to a secret key (sk_*) which has no balance constraints.`,
-                { cli: true }
-            );
+            logger.info(`   Or switch to a secret key (sk_*) which has no balance constraints.`, {
+                cli: true,
+            });
         } else if (
             status === 401 ||
             errorMessage.includes("401") ||
@@ -231,10 +230,7 @@ export class PollinationsImageProvider implements ImageProvider {
             }
 
             // Provide helpful tips based on error
-            if (
-                response.status === 402 ||
-                errorMessage.includes("Insufficient balance")
-            ) {
+            if (response.status === 402 || errorMessage.includes("Insufficient balance")) {
                 logger.info(
                     `\n💡 TIP: Your Pollinations account has insufficient pollen balance.`,
                     { cli: true }
