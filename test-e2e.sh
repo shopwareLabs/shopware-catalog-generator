@@ -7,11 +7,12 @@
 # - AI_PROVIDER configured (github-models recommended)
 #
 # Usage:
-#   ./test-e2e.sh                    # Full test: create → hydrate → upload → verify
-#   ./test-e2e.sh --reuse=<name>     # Reuse existing blueprint, run hydrate → upload → verify
+#   ./test-e2e.sh                              # Full test: create → hydrate → upload → verify
+#   ./test-e2e.sh --url=https://shop.example.com  # Crawl real store before hydrating
+#   ./test-e2e.sh --reuse=<name>               # Reuse existing blueprint, run hydrate → upload → verify
 #   ./test-e2e.sh --reuse=<name> --skip-hydrate   # Skip AI, just upload → verify
 #   ./test-e2e.sh --reuse=<name> --skip-upload    # Just verify existing data
-#   ./test-e2e.sh --cleanup=<name>   # Only cleanup specific SalesChannel
+#   ./test-e2e.sh --cleanup=<name>             # Only cleanup specific SalesChannel
 #
 # Post-processors run:
 # - CMS homepage: cms-home (root category layout with welcome text + product listing)
@@ -28,6 +29,7 @@ SKIP_UPLOAD=false
 SKIP_VERIFY=false
 CLEANUP_ONLY=""
 REUSE_NAME=""
+INSPIRE_URL=""
 
 for arg in "$@"; do
     case $arg in
@@ -45,6 +47,9 @@ for arg in "$@"; do
             ;;
         --reuse=*)
             REUSE_NAME="${arg#*=}"
+            ;;
+        --url=*)
+            INSPIRE_URL="${arg#*=}"
             ;;
     esac
 done
@@ -65,7 +70,7 @@ SW_URL="${SW_ENV_URL:-http://localhost:8000}"
 
 echo "=== E2E Test: $TEST_SALESCHANNEL ==="
 echo "Target: $SW_URL"
-echo "Phases: create=$([[ $SKIP_CREATE == true ]] && echo skip || echo run) | hydrate=$([[ $SKIP_HYDRATE == true ]] && echo skip || echo run) | upload=$([[ $SKIP_UPLOAD == true ]] && echo skip || echo run) | verify=$([[ $SKIP_VERIFY == true ]] && echo skip || echo run)"
+echo "Phases: create=$([[ $SKIP_CREATE == true ]] && echo skip || echo run) | inspire=$([[ -z $INSPIRE_URL ]] && echo skip || echo run) | hydrate=$([[ $SKIP_HYDRATE == true ]] && echo skip || echo run) | upload=$([[ $SKIP_UPLOAD == true ]] && echo skip || echo run) | verify=$([[ $SKIP_VERIFY == true ]] && echo skip || echo run)"
 echo ""
 
 # Function to cleanup on exit
@@ -129,6 +134,18 @@ else
     echo "✓ Blueprint created"
 fi
 echo ""
+
+# Phase 1.5: Crawl real store for inspiration (optional, only when --url is provided)
+if [ -n "$INSPIRE_URL" ]; then
+    if [ -f "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
+        echo "[1.5/5] Skipping inspire (inspiration.json already exists)"
+    else
+        echo "[1.5/5] Crawling $INSPIRE_URL for inspiration..."
+        bun run blueprint inspire --name="$TEST_SALESCHANNEL" --url="$INSPIRE_URL"
+        echo "✓ Inspiration saved"
+    fi
+    echo ""
+fi
 
 # Phase 2: Hydrate with AI (products + categories + CMS text)
 if [ "$SKIP_HYDRATE" = true ]; then

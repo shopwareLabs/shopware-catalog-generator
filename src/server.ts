@@ -9,6 +9,7 @@ import type { ProcessContext } from "./server/index.js";
 
 import { BlueprintGenerator, BlueprintHydrator } from "./blueprint/index.js";
 import { DataCache } from "./cache.js";
+import { inspireBlueprint } from "./services/blueprint-service.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
 import { processManager } from "./server/index.js";
@@ -63,6 +64,7 @@ interface GenerateParams {
     clearFirst: boolean;
     skipProcessors: boolean;
     skipTemplate: boolean;
+    inspirationUrl?: string;
 }
 
 /**
@@ -135,6 +137,17 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         ctx.log("Using existing blueprint");
     }
     ctx.setProgress("blueprint", 1, 2);
+
+    // Phase 1.5: Crawl real store for inspiration (optional)
+    if (params.inspirationUrl && !cache.hasInspiration(salesChannel)) {
+        ctx.log(`Crawling ${params.inspirationUrl} for inspiration...`);
+        try {
+            await inspireBlueprint(params.inspirationUrl, salesChannel);
+            ctx.log("Inspiration saved");
+        } catch (err) {
+            ctx.log(`Warning: Inspiration crawl failed — ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
 
     // Phase 2: Hydration
     if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannel)) {
@@ -296,6 +309,7 @@ async function handleGenerate(request: Request): Promise<Response> {
         rawCache.clearFirst === true;
     const skipProcessors = body.skipProcessors === true;
     const skipTemplate = body.skipTemplate === true;
+    const inspirationUrl = typeof body.inspirationUrl === "string" ? body.inspirationUrl : undefined;
 
     // Validate required fields
     if (!envPath) {
@@ -326,6 +340,7 @@ async function handleGenerate(request: Request): Promise<Response> {
                 clearFirst,
                 skipProcessors,
                 skipTemplate,
+                inspirationUrl,
             },
             ctx
         );

@@ -261,6 +261,7 @@ curl -X POST http://localhost:3000/generate \
 | `shopwarePassword` | string  | -                  | Shopware admin password                   |
 | `skipProcessors`   | boolean | `false`            | Skip post-processors after sync           |
 | `skipTemplate`     | boolean | `false`            | Skip checking for pre-generated templates |
+| `inspirationUrl`   | string  | _(none)_           | Crawl this URL before hydrating (runs `blueprint inspire` in the background) |
 
 #### Poll Status
 
