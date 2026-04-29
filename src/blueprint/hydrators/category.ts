@@ -4,8 +4,8 @@
 
 import { z } from "zod";
 
-import type { BlueprintCategory, TextProvider } from "../../types/index.js";
 import type { InspirationData } from "../../crawlers/types.js";
+import type { BlueprintCategory, TextProvider } from "../../types/index.js";
 
 import { executeWithRetry, logger } from "../../utils/index.js";
 
@@ -44,7 +44,12 @@ export async function hydrateCategories(
         data: { salesChannelName },
     });
 
-    const prompt = buildCategoryPrompt(salesChannelName, salesChannelDescription, flatCategories, inspiration);
+    const prompt = buildCategoryPrompt(
+        salesChannelName,
+        salesChannelDescription,
+        flatCategories,
+        inspiration
+    );
     logger.debug("Category prompt built", { data: { promptLength: prompt.length } });
 
     const startTime = Date.now();

@@ -1121,12 +1121,14 @@ bun run blueprint inspire \
 ```
 
 What gets extracted and saved to `generated/sales-channels/{name}/inspiration.json`:
+
 - **categories** — from JSON-LD BreadcrumbList or nav links
 - **exampleProducts** — from JSON-LD Product / ItemList blocks (up to 2 category pages followed)
 - **brandColors** — from brand images first (apple-touch-icon → SVG icon → PNG favicon → og:image), falling back to `theme-color` meta / CSS custom properties if no image yields usable colors
 - **brandDescription** — from `og:description` or JSON-LD Organization/WebSite block
 
 When `inspiration.json` exists, `blueprint hydrate` automatically:
+
 - Injects real category names into the category AI prompt as style examples
 - Injects matching example products into each branch's product prompt
 - Skips the `hydrateBrandColors()` AI call and uses the extracted colors directly

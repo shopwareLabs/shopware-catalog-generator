@@ -167,12 +167,7 @@ export function extractProductHeadings($: CheerioAPI): string[] {
 
     $("h2, h3").each((_, el) => {
         const text = $(el).text().trim();
-        if (
-            !text ||
-            text.length < 3 ||
-            text.length > 80 ||
-            seen.has(text.toLowerCase())
-        ) {
+        if (!text || text.length < 3 || text.length > 80 || seen.has(text.toLowerCase())) {
             return;
         }
 

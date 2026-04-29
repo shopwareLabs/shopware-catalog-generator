@@ -1,5 +1,6 @@
-import sharp from "sharp";
 import type { CheerioAPI } from "cheerio";
+
+import sharp from "sharp";
 
 const IMAGE_FETCH_TIMEOUT_MS = 8_000;
 
@@ -161,12 +162,25 @@ function findBrandImageUrls($: CheerioAPI, baseUrl: string): string[] {
     });
 
     // 2. SVG icons (can parse fill colors directly) + large PNG favicons
-    const LARGE_SIZES = new Set(["192x192", "180x180", "128x128", "96x96", "64x64", "48x48", "32x32"]);
+    const LARGE_SIZES = new Set([
+        "192x192",
+        "180x180",
+        "128x128",
+        "96x96",
+        "64x64",
+        "48x48",
+        "32x32",
+    ]);
     $('link[rel="icon"], link[rel="shortcut icon"]').each((_, el) => {
         const sizes = $(el).attr("sizes") ?? "";
         const type = $(el).attr("type") ?? "";
         const href = $(el).attr("href") ?? "";
-        if (type.includes("svg") || href.includes(".svg") || LARGE_SIZES.has(sizes) || type.includes("png")) {
+        if (
+            type.includes("svg") ||
+            href.includes(".svg") ||
+            LARGE_SIZES.has(sizes) ||
+            type.includes("png")
+        ) {
             push(href);
         }
     });

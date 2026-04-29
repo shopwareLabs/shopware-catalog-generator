@@ -65,7 +65,7 @@ function extractCategoryLinks($: cheerio.CheerioAPI, baseUrl: string): string[] 
     const seen = new Set<string>();
 
     $("nav a, header a").each((_, el) => {
-        const href = $( el).attr("href");
+        const href = $(el).attr("href");
         if (!href) return;
 
         const absolute = resolveAbsoluteUrl(baseUrl, href);
@@ -92,10 +92,7 @@ function extractCategoryLinks($: cheerio.CheerioAPI, baseUrl: string): string[] 
 }
 
 /** Collect products from a single page */
-function collectProductsFromPage(
-    $: cheerio.CheerioAPI,
-    categoryName?: string
-): ExampleProduct[] {
+function collectProductsFromPage($: cheerio.CheerioAPI, categoryName?: string): ExampleProduct[] {
     const fromJsonLd = extractProductsFromJsonLd($);
     if (fromJsonLd.length > 0) {
         return fromJsonLd.slice(0, MAX_PRODUCTS_PER_PAGE).map((p) => ({
@@ -130,8 +127,7 @@ export async function crawlForInspiration(
     const $ = cheerio.load(html);
 
     // Brand description
-    const brandDescription =
-        extractBrandDescriptionFromJsonLd($) ?? extractBrandDescription($);
+    const brandDescription = extractBrandDescriptionFromJsonLd($) ?? extractBrandDescription($);
 
     // Brand colors: image analysis first (most reliable), then CSS/meta fallback
     let brandColors: InspirationData["brandColors"];

@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-
 import * as cheerio from "cheerio";
 import sharp from "sharp";
 
@@ -49,14 +48,21 @@ function setupFetch(routes: Record<string, FetchPayload>): void {
     globalThis.fetch = async (url: string) => {
         const route = routes[url];
         if (!route) {
-            return { ok: false, headers: { get: () => "" }, arrayBuffer: async () => new ArrayBuffer(0) };
+            return {
+                ok: false,
+                headers: { get: () => "" },
+                arrayBuffer: async () => new ArrayBuffer(0),
+            };
         }
         const buffer =
             typeof route.body === "string" ? Buffer.from(route.body, "utf8") : route.body;
         return {
             ok: route.ok ?? true,
-            headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? route.contentType : "") },
-            arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+            headers: {
+                get: (k: string) => (k.toLowerCase() === "content-type" ? route.contentType : ""),
+            },
+            arrayBuffer: async () =>
+                buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
         };
     };
 }

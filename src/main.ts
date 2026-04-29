@@ -14,7 +14,12 @@
 
 import type { CliArgs } from "./cli/shared.js";
 
-import { blueprintCreate, blueprintFix, blueprintHydrate, blueprintInspire } from "./cli/blueprint.js";
+import {
+    blueprintCreate,
+    blueprintFix,
+    blueprintHydrate,
+    blueprintInspire,
+} from "./cli/blueprint.js";
 import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
 import { CLIError } from "./cli/shared.js";

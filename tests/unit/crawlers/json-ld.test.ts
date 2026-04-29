@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-
 import * as cheerio from "cheerio";
 
 import {
@@ -136,9 +135,7 @@ describe("extractBrandDescriptionFromJsonLd", () => {
             { "@type": "Organization", "description": "Premium furniture for modern homes" }
             </script>
         `);
-        expect(extractBrandDescriptionFromJsonLd($)).toBe(
-            "Premium furniture for modern homes"
-        );
+        expect(extractBrandDescriptionFromJsonLd($)).toBe("Premium furniture for modern homes");
     });
 
     test("extracts description from WebSite block", () => {
@@ -147,9 +144,7 @@ describe("extractBrandDescriptionFromJsonLd", () => {
             { "@type": "WebSite", "description": "Your one-stop shop for outdoor living" }
             </script>
         `);
-        expect(extractBrandDescriptionFromJsonLd($)).toBe(
-            "Your one-stop shop for outdoor living"
-        );
+        expect(extractBrandDescriptionFromJsonLd($)).toBe("Your one-stop shop for outdoor living");
     });
 
     test("returns undefined when no matching block", () => {

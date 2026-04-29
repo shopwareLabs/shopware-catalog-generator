@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 
+import type { InspirationData } from "../../crawlers/types.js";
 import type {
     BlueprintCategory,
     BlueprintProduct,
@@ -17,7 +18,6 @@ import type {
 } from "../../types/index.js";
 import type { ExistingProperty } from "../../utils/index.js";
 import type { VariantResolver } from "../variant-resolver.js";
-import type { InspirationData } from "../../crawlers/types.js";
 
 import { PropertyCache } from "../../property-cache.js";
 import { ConcurrencyLimiter, executeWithRetry, logger } from "../../utils/index.js";
@@ -635,17 +635,23 @@ export class ProductHydrator {
         const branchLower = branchName.toLowerCase();
         const relevant = this.inspiration.exampleProducts.filter((p) => {
             if (!p.category) return true;
-            return p.category.toLowerCase().includes(branchLower) || branchLower.includes(p.category.toLowerCase());
+            return (
+                p.category.toLowerCase().includes(branchLower) ||
+                branchLower.includes(p.category.toLowerCase())
+            );
         });
 
-        const examples = (relevant.length > 0 ? relevant : this.inspiration.exampleProducts).slice(0, 5);
+        const examples = (relevant.length > 0 ? relevant : this.inspiration.exampleProducts).slice(
+            0,
+            5
+        );
 
         const lines = [
             ``,
             `INSPIRATION FROM REAL STORE (${this.inspiration.sourceUrl}):`,
             `Example products from the actual store that belong in this product area:`,
-            ...examples.map((p) =>
-                `  - "${p.name}"${p.description ? `: ${p.description.slice(0, 120)}` : ""}`
+            ...examples.map(
+                (p) => `  - "${p.name}"${p.description ? `: ${p.description.slice(0, 120)}` : ""}`
             ),
             `→ Generate products that feel like they belong in the same store.`,
             `  Match the naming style, product range, and tone — but don't copy names.`,

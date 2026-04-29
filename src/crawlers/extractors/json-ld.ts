@@ -89,7 +89,11 @@ export function extractProductsFromJsonLd($: CheerioAPI): ExampleProduct[] {
 
         if (hasType(block, "ItemList")) {
             for (const el of block.itemListElement ?? []) {
-                const candidate = el.item ?? (hasType(el as JsonLdBlock, "Product") ? (el as { name?: string; description?: string }) : null);
+                const candidate =
+                    el.item ??
+                    (hasType(el as JsonLdBlock, "Product")
+                        ? (el as { name?: string; description?: string })
+                        : null);
                 if (!candidate) continue;
                 const name = candidate.name?.trim();
                 if (name) {

@@ -51,12 +51,14 @@ const lines = await fixBlueprint("music");
 ```
 
 `inspireBlueprint(url, salesChannelName)`:
+
 - Uses `crawlForInspiration()` from `src/crawlers/` (dynamically imported to avoid loading `cheerio` at startup)
 - Saves `InspirationData` to `generated/sales-channels/{name}/inspiration.json` via `cache.saveInspiration()`
 - No AI calls, no Shopware connection required
 - Returns output lines for CLI/MCP display
 
 `hydrateBlueprint` automatically loads `inspiration.json` if it exists and passes it to the hydrator:
+
 - Category AI prompt gets real category names as style examples
 - Product AI prompts get matching example products for each branch
 - `hydrateBrandColors()` AI call is skipped if `inspiration.brandColors` is present

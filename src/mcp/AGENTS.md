@@ -22,15 +22,15 @@ mcp/
 
 ## Available Tools
 
-| Tool                   | CLI Equivalent                   |
-| ---------------------- | -------------------------------- |
-| `generate`             | `bun run generate --name=...`    |
-| `process`              | `bun run process --name=...`     |
-| `blueprint_inspire`    | `bun run blueprint inspire ...`  |
-| `blueprint_create`     | `bun run blueprint create ...`   |
-| `blueprint_hydrate`    | `bun run blueprint hydrate ...`  |
-| `blueprint_fix`        | `bun run blueprint fix ...`      |
-| `image_fix`            | `bun run image fix ...`          |
+| Tool                   | CLI Equivalent                  |
+| ---------------------- | ------------------------------- |
+| `generate`             | `bun run generate --name=...`   |
+| `process`              | `bun run process --name=...`    |
+| `blueprint_inspire`    | `bun run blueprint inspire ...` |
+| `blueprint_create`     | `bun run blueprint create ...`  |
+| `blueprint_hydrate`    | `bun run blueprint hydrate ...` |
+| `blueprint_fix`        | `bun run blueprint fix ...`     |
+| `image_fix`            | `bun run image fix ...`         |
 | `cleanup`              | `bun run cleanup -- ...`        |
 | `cleanup_media`        | `bun run cleanup:media`         |
 | `cleanup_unused_props` | `bun run cleanup:props`         |

@@ -5,6 +5,7 @@
  * Delegates actual AI calls to specialized hydrators.
  */
 
+import type { InspirationData } from "../crawlers/types.js";
 import type {
     Blueprint,
     BlueprintCategory,
@@ -14,7 +15,6 @@ import type {
     TextProvider,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
-import type { InspirationData } from "../crawlers/types.js";
 
 import { PropertyCache } from "../property-cache.js";
 import { findClosestColor, logger, toKebabCase } from "../utils/index.js";

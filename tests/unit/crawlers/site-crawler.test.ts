@@ -74,7 +74,11 @@ describe("crawlForInspiration", () => {
     test("throws when URL is not fetchable", async () => {
         const originalFetch = globalThis.fetch;
         // @ts-expect-error — mocking fetch
-        globalThis.fetch = mock(async () => ({ ok: false, headers: { get: () => "text/html" }, text: async () => "" }));
+        globalThis.fetch = mock(async () => ({
+            ok: false,
+            headers: { get: () => "text/html" },
+            text: async () => "",
+        }));
 
         try {
             await expect(

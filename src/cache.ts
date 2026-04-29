@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { InspirationData } from "./crawlers/types.js";
 import type {
     Blueprint,
     CacheOptions,
@@ -16,7 +17,6 @@ import type {
     PropertyOption,
     SalesChannelCacheMetadata,
 } from "./types/index.js";
-import type { InspirationData } from "./crawlers/types.js";
 
 import { ImageCache } from "./image-cache.js";
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";

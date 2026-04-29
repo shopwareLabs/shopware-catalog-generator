@@ -264,10 +264,7 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
     ];
 }
 
-export async function inspireBlueprint(
-    url: string,
-    salesChannelName: string
-): Promise<string[]> {
+export async function inspireBlueprint(url: string, salesChannelName: string): Promise<string[]> {
     const { crawlForInspiration } = await import("../crawlers/index.js");
 
     const cache = createCacheFromEnv();
@@ -276,9 +273,7 @@ export async function inspireBlueprint(
     try {
         inspiration = await crawlForInspiration(url);
     } catch (error) {
-        return [
-            `Error: ${error instanceof Error ? error.message : String(error)}`,
-        ];
+        return [`Error: ${error instanceof Error ? error.message : String(error)}`];
     }
 
     cache.saveInspiration(salesChannelName, inspiration);
@@ -294,15 +289,21 @@ export async function inspireBlueprint(
     ];
 
     if (inspiration.categories.length > 0) {
-        results.push(`  Category hints: ${inspiration.categories.slice(0, 5).join(", ")}${inspiration.categories.length > 5 ? ", ..." : ""}`);
+        results.push(
+            `  Category hints: ${inspiration.categories.slice(0, 5).join(", ")}${inspiration.categories.length > 5 ? ", ..." : ""}`
+        );
     }
 
     if (inspiration.brandDescription) {
-        results.push(`  Brand description: "${inspiration.brandDescription.slice(0, 80)}${inspiration.brandDescription.length > 80 ? "..." : ""}"`);
+        results.push(
+            `  Brand description: "${inspiration.brandDescription.slice(0, 80)}${inspiration.brandDescription.length > 80 ? "..." : ""}"`
+        );
     }
 
     if (inspiration.brandColors) {
-        results.push(`  Brand colors: ${inspiration.brandColors.primary} / ${inspiration.brandColors.secondary}`);
+        results.push(
+            `  Brand colors: ${inspiration.brandColors.primary} / ${inspiration.brandColors.secondary}`
+        );
     }
 
     results.push(

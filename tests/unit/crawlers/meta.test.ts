@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-
 import * as cheerio from "cheerio";
 
 import {
@@ -131,7 +130,10 @@ describe("extractNavCategories", () => {
     });
 
     test("limits to 15 entries", () => {
-        const links = Array.from({ length: 20 }, (_, i) => `<a href="/cat-${i}">Category ${i}</a>`).join("");
+        const links = Array.from(
+            { length: 20 },
+            (_, i) => `<a href="/cat-${i}">Category ${i}</a>`
+        ).join("");
         const $ = load(`<nav>${links}</nav>`);
         expect(extractNavCategories($).length).toBeLessThanOrEqual(15);
     });
