@@ -16,6 +16,7 @@ import type {
     PropertyOption,
     SalesChannelCacheMetadata,
 } from "./types/index.js";
+import type { InspirationData } from "./crawlers/types.js";
 
 import { ImageCache } from "./image-cache.js";
 import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
@@ -475,6 +476,25 @@ export class DataCache implements DataCacheApi {
             "manufacturers.json"
         );
         return this.loadJsonFile<Manufacturer[]>(manufacturersFile);
+    }
+
+    // =========================================================================
+    // Inspiration Cache
+    // =========================================================================
+
+    saveInspiration(salesChannel: string, inspiration: InspirationData): void {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        this.saveJsonFile(file, inspiration);
+    }
+
+    loadInspiration(salesChannel: string): InspirationData | null {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        return this.loadJsonFile<InspirationData>(file);
+    }
+
+    hasInspiration(salesChannel: string): boolean {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        return this.hasCachedFile(file);
     }
 
     /**

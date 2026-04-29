@@ -14,6 +14,7 @@ import type {
     TextProvider,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import type { InspirationData } from "../crawlers/types.js";
 
 import { PropertyCache } from "../property-cache.js";
 import { findClosestColor, logger, toKebabCase } from "../utils/index.js";
@@ -53,7 +54,8 @@ export class BlueprintHydrator {
      */
     async hydrate(
         blueprint: Blueprint,
-        existingProperties: ExistingProperty[] = []
+        existingProperties: ExistingProperty[] = [],
+        inspiration?: InspirationData
     ): Promise<HydratedBlueprint> {
         logger.info("Hydrating blueprint with AI...", { cli: true });
         logger.info("Starting blueprint hydration", {
@@ -75,22 +77,29 @@ export class BlueprintHydrator {
         };
 
         // Step 1: Hydrate categories + brand colors in parallel
+        // If inspiration provides real brand colors, skip the AI brand color call
         logger.info("  [1/3] Generating category names, descriptions, and brand colors...", {
             cli: true,
         });
+        if (inspiration?.brandColors) {
+            logger.info("  Using brand colors from inspiration (skipping AI call)", { cli: true });
+        }
         logger.info("Hydrating categories + brand colors...");
         const [hydratedCategories, brandColors] = await Promise.all([
             hydrateCategories(
                 this.textProvider,
                 blueprint.salesChannel.name,
                 blueprint.salesChannel.description,
-                blueprint.categories
+                blueprint.categories,
+                inspiration
             ),
-            hydrateBrandColors(
-                this.textProvider,
-                blueprint.salesChannel.name,
-                blueprint.salesChannel.description
-            ),
+            inspiration?.brandColors
+                ? Promise.resolve(inspiration.brandColors)
+                : hydrateBrandColors(
+                      this.textProvider,
+                      blueprint.salesChannel.name,
+                      blueprint.salesChannel.description
+                  ),
         ]);
         logger.info("Categories hydrated", {
             data: { count: hydratedCategories.categories.length },
@@ -99,7 +108,7 @@ export class BlueprintHydrator {
         // Step 2: Hydrate products
         logger.info("  [2/3] Generating product content...", { cli: true });
         logger.info("Hydrating products...");
-        const productHydrator = this.createProductHydrator();
+        const productHydrator = this.createProductHydrator(inspiration);
         productHydrator.clearBatchCounter();
         const hydratedProducts = await productHydrator.hydrateProducts(
             blueprint.products,
@@ -295,13 +304,14 @@ export class BlueprintHydrator {
         return fixHydratedPlaceholders(this.textProvider, blueprint);
     }
 
-    private createProductHydrator(): ProductHydrator {
+    private createProductHydrator(inspiration?: InspirationData): ProductHydrator {
         const variantResolver = new VariantResolver(this.textProvider, this.propertyCache);
         return new ProductHydrator(
             this.textProvider,
             this.propertyCache,
             variantResolver,
-            (name, props) => this.generateBaseImagePrompt(name, props)
+            (name, props) => this.generateBaseImagePrompt(name, props),
+            inspiration
         );
     }
 

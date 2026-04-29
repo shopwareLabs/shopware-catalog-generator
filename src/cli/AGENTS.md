@@ -6,18 +6,18 @@ Internal documentation for AI agents working on the CLI module, and complete ref
 
 The CLI is a thin router in `main.ts` that parses args and delegates to focused modules:
 
-- `blueprint.ts` — `blueprint create`, `blueprint hydrate`, `blueprint fix`
+- `blueprint.ts` — `blueprint create`, `blueprint hydrate`, `blueprint fix`, `blueprint inspire`
 - `generate.ts` — `generate`, `process`
 - `image-fix.ts` — `image fix`
 - `shared.ts` — `CLIError`, validation helpers, `executePostProcessors`
 
 **Important:** All application logic lives in `src/services/`, not in the CLI modules. CLI handlers are thin wrappers that call service functions and print their `string[]` output. This keeps the CLI and MCP tools in sync — both call the same service functions.
 
-| Service File                        | CLI Module         | What It Does                                    |
-| ----------------------------------- | ------------------ | ----------------------------------------------- |
-| `src/services/blueprint-service.ts` | `cli/blueprint.ts` | Blueprint create / hydrate / fix logic          |
-| `src/services/generate-service.ts`  | `cli/generate.ts`  | Full generation pipeline + post-processors      |
-| `src/services/image-fix-service.ts` | `cli/image-fix.ts` | Image regeneration (product/category/cms/theme) |
+| Service File                        | CLI Module         | What It Does                                         |
+| ----------------------------------- | ------------------ | ---------------------------------------------------- |
+| `src/services/blueprint-service.ts` | `cli/blueprint.ts` | Blueprint create / hydrate / fix / inspire logic     |
+| `src/services/generate-service.ts`  | `cli/generate.ts`  | Full generation pipeline + post-processors           |
+| `src/services/image-fix-service.ts` | `cli/image-fix.ts` | Image regeneration (product/category/cms/theme)      |
 
 Separate CLI entry points (not routed through `main.ts`):
 
@@ -113,6 +113,31 @@ bun run blueprint fix --name=music
 | Flag     | Type   | Default      | Description       |
 | -------- | ------ | ------------ | ----------------- |
 | `--name` | string | _(required)_ | SalesChannel name |
+
+### Blueprint Inspire
+
+Crawl a real store URL to extract categories, example products, brand colors, and description.
+Saves `inspiration.json` so `blueprint hydrate` can use it to orient AI generation.
+
+```bash
+bun run blueprint inspire --name=music --url=https://some-music-shop.com
+```
+
+| Flag     | Type   | Default      | Description                    |
+| -------- | ------ | ------------ | ------------------------------ |
+| `--name` | string | _(required)_ | SalesChannel name              |
+| `--url`  | string | _(required)_ | URL of the real store to crawl |
+
+**Output:** `generated/sales-channels/{name}/inspiration.json`
+
+No AI calls are made. Uses `cheerio` (MIT) + `sharp` to parse static HTML and images:
+1. JSON-LD `BreadcrumbList` → category names; fallback: `<nav>` link text
+2. JSON-LD `Product` / `ItemList` → example products (follows up to 2 category pages)
+3. Brand images → dominant color extraction:
+   - SVG icons: `fill`/`stroke` attributes parsed directly (e.g. IKEA blue + yellow)
+   - Raster icons (apple-touch-icon, PNG favicons): pixel analysis via `sharp`
+   - Fallback: `theme-color` meta / CSS `--primary-color` vars (near-white filtered out)
+4. `og:description` or JSON-LD `Organization.description` → brand description
 
 ### Image Fix
 

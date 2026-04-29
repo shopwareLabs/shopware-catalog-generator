@@ -14,7 +14,7 @@
 
 import type { CliArgs } from "./cli/shared.js";
 
-import { blueprintCreate, blueprintFix, blueprintHydrate } from "./cli/blueprint.js";
+import { blueprintCreate, blueprintFix, blueprintHydrate, blueprintInspire } from "./cli/blueprint.js";
 import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
 import { CLIError } from "./cli/shared.js";
@@ -61,6 +61,7 @@ function parseCliArgs(): CliArgs {
         subcommand: flags.subcommand as CliArgs["subcommand"],
         name: flags.name as string | undefined,
         description: flags.description as string | undefined,
+        url: flags.url as string | undefined,
         products: flags.products ? parseInt(flags.products as string, 10) : undefined,
         target: flags.target as string | undefined,
         interactive: flags.i === true || flags.interactive === true,
@@ -83,6 +84,7 @@ Commands:
   blueprint create   Generate blueprint.json (no AI calls)
   blueprint hydrate  Hydrate blueprint with AI -> hydrated-blueprint.json
   blueprint fix      Fix placeholder names in hydrated blueprint
+  blueprint inspire  Crawl a website and save inspiration.json to guide AI generation
   generate           Full flow: create + hydrate + upload to Shopware
   process            Run post-processors on existing SalesChannel
   image fix          Regenerate images (product, category, cms, or theme)
@@ -90,6 +92,7 @@ Commands:
 Options:
   --name=<name>         SalesChannel name (required for most commands)
   --description=<text>  Store description for AI generation
+  --url=<url>           Website URL to crawl (for blueprint inspire)
   --products=<n>        Number of products (default: 90)
   --target=<name>       Target name or ID (for image fix)
   --type=<type>         Image fix type: product, category, cms, or theme
@@ -102,6 +105,7 @@ Options:
   -i, --interactive     Run interactive wizard
 
 Examples:
+  bun run src/main.ts blueprint inspire --name=furniture --url=https://example-furniture.com
   bun run src/main.ts blueprint create --name=furniture --description="Wood furniture store"
   bun run src/main.ts blueprint hydrate --name=furniture
   bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
@@ -131,10 +135,12 @@ async function main(): Promise<void> {
                     await blueprintHydrate(args);
                 } else if (args.subcommand === "fix") {
                     await blueprintFix(args);
+                } else if (args.subcommand === "inspire") {
+                    await blueprintInspire(args);
                 } else {
                     showHelp();
                     throw new CLIError(
-                        "blueprint requires subcommand: create, hydrate, or fix",
+                        "blueprint requires subcommand: create, hydrate, fix, or inspire",
                         "MISSING_SUBCOMMAND"
                     );
                 }

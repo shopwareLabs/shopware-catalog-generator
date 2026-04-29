@@ -17,6 +17,7 @@ import type {
 } from "../../types/index.js";
 import type { ExistingProperty } from "../../utils/index.js";
 import type { VariantResolver } from "../variant-resolver.js";
+import type { InspirationData } from "../../crawlers/types.js";
 
 import { PropertyCache } from "../../property-cache.js";
 import { ConcurrencyLimiter, executeWithRetry, logger } from "../../utils/index.js";
@@ -128,7 +129,8 @@ export class ProductHydrator {
         private readonly textProvider: TextProvider,
         private readonly propertyCache: PropertyCache,
         private readonly variantResolver: VariantResolver,
-        private readonly generateBaseImagePrompt: GenerateBaseImagePromptFn
+        private readonly generateBaseImagePrompt: GenerateBaseImagePromptFn,
+        private readonly inspiration?: InspirationData
     ) {}
 
     /**
@@ -626,6 +628,32 @@ export class ProductHydrator {
         );
     }
 
+    private buildInspirationSection(branchName: string): string {
+        if (!this.inspiration || this.inspiration.exampleProducts.length === 0) return "";
+
+        // Match example products that belong to a category similar to this branch
+        const branchLower = branchName.toLowerCase();
+        const relevant = this.inspiration.exampleProducts.filter((p) => {
+            if (!p.category) return true;
+            return p.category.toLowerCase().includes(branchLower) || branchLower.includes(p.category.toLowerCase());
+        });
+
+        const examples = (relevant.length > 0 ? relevant : this.inspiration.exampleProducts).slice(0, 5);
+
+        const lines = [
+            ``,
+            `INSPIRATION FROM REAL STORE (${this.inspiration.sourceUrl}):`,
+            `Example products from the actual store that belong in this product area:`,
+            ...examples.map((p) =>
+                `  - "${p.name}"${p.description ? `: ${p.description.slice(0, 120)}` : ""}`
+            ),
+            `→ Generate products that feel like they belong in the same store.`,
+            `  Match the naming style, product range, and tone — but don't copy names.`,
+        ];
+
+        return lines.join("\n");
+    }
+
     private buildProductPrompt(
         products: BlueprintProduct[],
         branchName: string,
@@ -667,7 +695,7 @@ ${availableSubcategories.map((c) => `- "${c}"`).join("\n")}`
 STORE CONTEXT:
 - Store name: "${storeContext.name}"
 - Store description: "${storeContext.description}"
-
+${this.buildInspirationSection(branchName)}
 ${existingPropsText}
 ${cachedGroupsText}
 ${availableCategoriesText}
