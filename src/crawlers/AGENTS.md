@@ -122,6 +122,7 @@ when no usable image is found, and near-white values are filtered out.
 
 ```
 tests/unit/crawlers/
+├── image-color.test.ts   # SVG fill parsing, PNG pixel analysis, priority chain, fallbacks
 ├── json-ld.test.ts       # BreadcrumbList, Product, ItemList, @graph, Organization/WebSite
 ├── meta.test.ts          # theme-color, CSS vars, og:description, nav link filtering
 └── site-crawler.test.ts  # Full crawl with mocked fetch, error handling, nav fallback

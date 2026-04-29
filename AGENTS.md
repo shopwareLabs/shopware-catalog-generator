@@ -165,6 +165,7 @@ src/
 │   ├── site-crawler.ts       # crawlForInspiration(url, options): fetches URL, assembles InspirationData
 │   └── extractors/           # Cheerio-based HTML extractors
 │       ├── index.ts          # Re-exports all extractors
+│       ├── image-color.ts    # Brand color extraction from brand images (apple-touch-icon, SVG, PNG)
 │       ├── json-ld.ts        # Extract schema.org JSON-LD (BreadcrumbList, Product, Organization)
 │       └── meta.ts           # Extract theme-color, og:description, CSS vars, nav categories
 │
@@ -242,6 +243,7 @@ tests/
 │   │   ├── uuid.test.ts
 │   │   └── validation.test.ts
 │   ├── crawlers/             # Crawler tests
+│   │   ├── image-color.test.ts  # Brand image color extraction (SVG, PNG, priority, fallbacks)
 │   │   ├── json-ld.test.ts   # JSON-LD extractor (BreadcrumbList, Product, ItemList, Organization)
 │   │   ├── meta.test.ts      # Meta extractor (theme-color, CSS vars, og:description, nav)
 │   │   └── site-crawler.test.ts # crawlForInspiration with mocked fetch
