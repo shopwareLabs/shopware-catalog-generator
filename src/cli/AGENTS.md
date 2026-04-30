@@ -251,16 +251,16 @@ curl -X POST http://localhost:3000/generate \
   }'
 ```
 
-| Field              | Type    | Default            | Description                               |
-| ------------------ | ------- | ------------------ | ----------------------------------------- |
-| `envPath`          | string  | _(required)_       | Shopware URL                              |
-| `salesChannel`     | string  | _(required)_       | SalesChannel name                         |
-| `description`      | string  | `"{name} webshop"` | Context for AI generation                 |
-| `productCount`     | number  | `90`               | Number of products                        |
-| `shopwareUser`     | string  | -                  | Shopware admin username                   |
-| `shopwarePassword` | string  | -                  | Shopware admin password                   |
-| `skipProcessors`   | boolean | `false`            | Skip post-processors after sync           |
-| `skipTemplate`     | boolean | `false`            | Skip checking for pre-generated templates |
+| Field              | Type    | Default            | Description                                                                  |
+| ------------------ | ------- | ------------------ | ---------------------------------------------------------------------------- |
+| `envPath`          | string  | _(required)_       | Shopware URL                                                                 |
+| `salesChannel`     | string  | _(required)_       | SalesChannel name                                                            |
+| `description`      | string  | `"{name} webshop"` | Context for AI generation                                                    |
+| `productCount`     | number  | `90`               | Number of products                                                           |
+| `shopwareUser`     | string  | -                  | Shopware admin username                                                      |
+| `shopwarePassword` | string  | -                  | Shopware admin password                                                      |
+| `skipProcessors`   | boolean | `false`            | Skip post-processors after sync                                              |
+| `skipTemplate`     | boolean | `false`            | Skip checking for pre-generated templates                                    |
 | `inspirationUrl`   | string  | _(none)_           | Crawl this URL before hydrating (runs `blueprint inspire` in the background) |
 
 #### Poll Status
