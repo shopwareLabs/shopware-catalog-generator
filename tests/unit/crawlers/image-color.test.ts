@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import sharp from "sharp";
 
 import { extractColorsFromBrandImage } from "../../../src/crawlers/extractors/image-color.js";
+import { mockFetch } from "../../helpers/fetch-mock.js";
 
 const SVG_LOGO = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -44,8 +45,8 @@ interface FetchPayload {
 }
 
 function setupFetch(routes: Record<string, FetchPayload>): void {
-    // @ts-expect-error — mocking fetch
-    globalThis.fetch = async (url: string) => {
+    mockFetch(async (input) => {
+        const url = input.toString();
         const route = routes[url];
         if (!route) {
             return {
@@ -64,7 +65,7 @@ function setupFetch(routes: Record<string, FetchPayload>): void {
             arrayBuffer: async () =>
                 buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
         };
-    };
+    });
 }
 
 describe("extractColorsFromBrandImage", () => {
@@ -219,6 +220,20 @@ describe("extractColorsFromBrandImage", () => {
 
         const result = await extractColorsFromBrandImage($, "https://example.com");
         expect(result).toBeNull();
+    });
+
+    test("reads apple-touch-icon from non-standard <meta rel=…> (e.g. YT Industries / Nuxt)", async () => {
+        const $ = cheerio.load(`
+            <meta rel="apple-touch-icon" type="image/png" href="/imgs/logo.png">
+        `);
+
+        const png = await makePng(0, 0, 0); // monochrome black logo
+        setupFetch({
+            "https://example.com/imgs/logo.png": { body: png, contentType: "image/png" },
+        });
+
+        const result = await extractColorsFromBrandImage($, "https://example.com");
+        expect(result?.primary).toBe("#000000");
     });
 
     test("resolves relative icon paths against base URL", async () => {

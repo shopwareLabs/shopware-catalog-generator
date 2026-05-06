@@ -650,9 +650,18 @@ export class ProductHydrator {
             ``,
             `INSPIRATION FROM REAL STORE (${this.inspiration.sourceUrl}):`,
             `Example products from the actual store that belong in this product area:`,
-            ...examples.map(
-                (p) => `  - "${p.name}"${p.description ? `: ${p.description.slice(0, 120)}` : ""}`
-            ),
+            ...examples.map((p) => {
+                let line = `  - "${p.name}"`;
+                if (p.description) line += `: ${p.description.slice(0, 120)}`;
+                if (p.properties && Object.keys(p.properties).length > 0) {
+                    const propStr = Object.entries(p.properties)
+                        .slice(0, 4)
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(", ");
+                    line += ` [${propStr}]`;
+                }
+                return line;
+            }),
             `→ Generate products that feel like they belong in the same store.`,
             `  Match the naming style, product range, and tone — but don't copy names.`,
         ];

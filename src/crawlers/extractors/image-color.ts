@@ -160,6 +160,10 @@ function findBrandImageUrls($: CheerioAPI, baseUrl: string): string[] {
     $('link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]').each((_, el) => {
         push($(el).attr("href"));
     });
+    // Some sites (e.g. YT Industries / Nuxt) put apple-touch-icon on a <meta rel="..."> instead of <link>
+    $('meta[rel*="apple-touch-icon"]').each((_, el) => {
+        push($(el).attr("href"));
+    });
 
     // 2. SVG icons (can parse fill colors directly) + large PNG favicons
     const LARGE_SIZES = new Set([
@@ -185,8 +189,12 @@ function findBrandImageUrls($: CheerioAPI, baseUrl: string): string[] {
         }
     });
 
-    // 3. Microsoft tile image
+    // 3. Microsoft tile image (standard: name="msapplication-TileImage" content="…")
+    // Some sites use non-standard rel="msapplication-TileImage" href="…" on a <meta> tag
     push($('meta[name="msapplication-TileImage"]').attr("content"));
+    $('meta[rel*="msapplication-TileImage"]').each((_, el) => {
+        push($(el).attr("href"));
+    });
 
     // 4. Well-known fallback paths (for sites with no icon links in HTML, e.g. Edeka)
     push(`${origin}/apple-touch-icon.png`);

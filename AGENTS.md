@@ -1133,6 +1133,11 @@ When `inspiration.json` exists, `blueprint hydrate` automatically:
 - Injects matching example products into each branch's product prompt
 - Skips the `hydrateBrandColors()` AI call and uses the extracted colors directly
 
+> **Best-effort only.** Crawling real sites is inherently fragile — bot protection, SPA rendering,
+> and HTML changes can silently degrade results. A failed or partial crawl never breaks generation;
+> hydration simply runs without inspiration context. See `src/crawlers/AGENTS.md` for tested stores
+> and known limitations.
+
 ### Blueprint Options
 
 ```bash

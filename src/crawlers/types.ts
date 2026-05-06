@@ -4,6 +4,7 @@ export const ExampleProductSchema = z.object({
     name: z.string(),
     description: z.string().optional(),
     category: z.string().optional(),
+    properties: z.record(z.string(), z.string()).optional(),
 });
 
 export const InspirationDataSchema = z.object({

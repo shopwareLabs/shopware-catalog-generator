@@ -57,7 +57,7 @@ function errorResponse(error: string, status = 500): Response {
 interface GenerateParams {
     envPath: string;
     salesChannel: string;
-    description: string;
+    description?: string;
     productCount: number;
     shopwareUser: string;
     shopwarePassword: string;
@@ -67,12 +67,21 @@ interface GenerateParams {
     inspirationUrl?: string;
 }
 
+function deriveNameFromUrl(url: string): string | null {
+    try {
+        const hostname = new URL(url).hostname.replace(/^www\./, "");
+        const sld = hostname.split(".")[0];
+        return sld && sld.length > 0 ? sld : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * The actual generation task that runs in the background
  */
 async function generateTask(params: GenerateParams, ctx: ProcessContext): Promise<unknown> {
-    const { envPath, salesChannel, description, productCount, shopwareUser, shopwarePassword } =
-        params;
+    const { envPath, salesChannel, productCount, shopwareUser, shopwarePassword } = params;
 
     // Create instances per-request to avoid shared state
     const { text: textProvider } = createProvidersFromEnv();
@@ -88,6 +97,25 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         cache.clearSalesChannel(salesChannel);
         ctx.log(`Cleared existing cache for "${salesChannel}"`);
     }
+
+    // Phase 0: Crawl real store for inspiration (optional, runs before blueprint creation
+    // so brandDescription can inform the blueprint)
+    if (params.inspirationUrl && !cache.hasInspiration(salesChannel)) {
+        ctx.log(`Crawling ${params.inspirationUrl} for inspiration...`);
+        try {
+            await inspireBlueprint(params.inspirationUrl, salesChannel);
+            ctx.log("Inspiration saved");
+        } catch (err) {
+            ctx.log(
+                `Warning: Inspiration crawl failed — ${err instanceof Error ? err.message : String(err)}`
+            );
+        }
+    }
+
+    // Use brandDescription from inspiration as description fallback
+    const inspiration = cache.loadInspiration(salesChannel);
+    const effectiveDescription =
+        params.description || inspiration?.brandDescription || `${salesChannel} webshop`;
 
     // Create DataHydrator and authenticate
     ctx.log("Authenticating with Shopware...");
@@ -128,7 +156,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
             totalProducts: productCount,
             productsPerBranch: Math.ceil(productCount / 3),
         });
-        const blueprint = generator.generateBlueprint(salesChannel, description);
+        const blueprint = generator.generateBlueprint(salesChannel, effectiveDescription);
         cache.saveBlueprint(salesChannel, blueprint);
         ctx.log(`Blueprint created: ${blueprint.products.length} products`);
     } else if (usedTemplate) {
@@ -137,19 +165,6 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         ctx.log("Using existing blueprint");
     }
     ctx.setProgress("blueprint", 1, 2);
-
-    // Phase 1.5: Crawl real store for inspiration (optional)
-    if (params.inspirationUrl && !cache.hasInspiration(salesChannel)) {
-        ctx.log(`Crawling ${params.inspirationUrl} for inspiration...`);
-        try {
-            await inspireBlueprint(params.inspirationUrl, salesChannel);
-            ctx.log("Inspiration saved");
-        } catch (err) {
-            ctx.log(
-                `Warning: Inspiration crawl failed — ${err instanceof Error ? err.message : String(err)}`
-            );
-        }
-    }
 
     // Phase 2: Hydration
     if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannel)) {
@@ -299,7 +314,6 @@ async function handleGenerate(request: Request): Promise<Response> {
     const body = await parseJsonBody(request);
 
     const envPath = body.envPath as string | undefined;
-    const salesChannelRaw = (body.salesChannel as string) || "demo-store";
     const productCount = (body.productCount as number) || 90;
     const shopwareUser = body.shopwareUser as string | undefined;
     const shopwarePassword = body.shopwarePassword as string | undefined;
@@ -313,6 +327,12 @@ async function handleGenerate(request: Request): Promise<Response> {
     const skipTemplate = body.skipTemplate === true;
     const inspirationUrl =
         typeof body.inspirationUrl === "string" ? body.inspirationUrl : undefined;
+    const description = body.description as string | undefined;
+
+    // Derive salesChannel from URL if not explicitly provided
+    const salesChannelRaw =
+        (body.salesChannel as string | undefined) ||
+        (inspirationUrl ? (deriveNameFromUrl(inspirationUrl) ?? "demo-store") : "demo-store");
 
     // Validate required fields
     if (!envPath) {
@@ -328,7 +348,6 @@ async function handleGenerate(request: Request): Promise<Response> {
         return errorResponse(`Invalid salesChannel name: ${validation.error}`, 400);
     }
     const salesChannel = validation.sanitized;
-    const description = (body.description as string) || `${salesChannel} webshop`;
 
     // Start background process
     const processId = processManager.start(`Generate ${salesChannel}`, async (ctx) => {

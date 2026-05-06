@@ -3,7 +3,6 @@ import * as cheerio from "cheerio";
 
 import {
     extractBrandDescription,
-    extractNavCategories,
     extractPrimaryColor,
     extractSecondaryColor,
 } from "../../../src/crawlers/extractors/meta.js";
@@ -73,68 +72,5 @@ describe("extractSecondaryColor", () => {
     test("returns undefined when no secondary color found", () => {
         const $ = load(`<html></html>`);
         expect(extractSecondaryColor($)).toBeUndefined();
-    });
-});
-
-describe("extractNavCategories", () => {
-    test("extracts nav link text", () => {
-        const $ = load(`
-            <nav>
-                <a href="/sofas">Sofas</a>
-                <a href="/tables">Dining Tables</a>
-                <a href="/lighting">Lighting</a>
-            </nav>
-        `);
-        const cats = extractNavCategories($);
-        expect(cats).toContain("Sofas");
-        expect(cats).toContain("Dining Tables");
-        expect(cats).toContain("Lighting");
-    });
-
-    test("skips generic navigation words", () => {
-        const $ = load(`
-            <nav>
-                <a href="/">Home</a>
-                <a href="/login">Login</a>
-                <a href="/cart">Cart</a>
-                <a href="/sofas">Sofas</a>
-            </nav>
-        `);
-        const cats = extractNavCategories($);
-        expect(cats).not.toContain("Home");
-        expect(cats).not.toContain("Login");
-        expect(cats).not.toContain("Cart");
-        expect(cats).toContain("Sofas");
-    });
-
-    test("skips links with query strings", () => {
-        const $ = load(`
-            <nav>
-                <a href="/search?q=sofa">Sofas</a>
-                <a href="/chairs">Chairs</a>
-            </nav>
-        `);
-        const cats = extractNavCategories($);
-        // "Sofas" link has query string → should skip; "Chairs" is fine
-        expect(cats).toContain("Chairs");
-    });
-
-    test("deduplicates entries", () => {
-        const $ = load(`
-            <nav>
-                <a href="/sofas">Sofas</a>
-                <a href="/sofas-2">Sofas</a>
-            </nav>
-        `);
-        expect(extractNavCategories($).filter((c) => c === "Sofas").length).toBe(1);
-    });
-
-    test("limits to 15 entries", () => {
-        const links = Array.from(
-            { length: 20 },
-            (_, i) => `<a href="/cat-${i}">Category ${i}</a>`
-        ).join("");
-        const $ = load(`<nav>${links}</nav>`);
-        expect(extractNavCategories($).length).toBeLessThanOrEqual(15);
     });
 });

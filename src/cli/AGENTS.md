@@ -239,6 +239,21 @@ bun run server
 
 #### Generate Request
 
+Minimal request — name and description are derived from the inspiration URL:
+
+```bash
+curl -X POST http://localhost:3000/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "envPath": "http://localhost:8000",
+    "shopwareUser": "admin",
+    "shopwarePassword": "shopware",
+    "inspirationUrl": "https://some-music-shop.com"
+  }'
+```
+
+Full request with explicit fields:
+
 ```bash
 curl -X POST http://localhost:3000/generate \
   -H "Content-Type: application/json" \
@@ -251,17 +266,17 @@ curl -X POST http://localhost:3000/generate \
   }'
 ```
 
-| Field              | Type    | Default            | Description                                                                  |
-| ------------------ | ------- | ------------------ | ---------------------------------------------------------------------------- |
-| `envPath`          | string  | _(required)_       | Shopware URL                                                                 |
-| `salesChannel`     | string  | _(required)_       | SalesChannel name                                                            |
-| `description`      | string  | `"{name} webshop"` | Context for AI generation                                                    |
-| `productCount`     | number  | `90`               | Number of products                                                           |
-| `shopwareUser`     | string  | -                  | Shopware admin username                                                      |
-| `shopwarePassword` | string  | -                  | Shopware admin password                                                      |
-| `skipProcessors`   | boolean | `false`            | Skip post-processors after sync                                              |
-| `skipTemplate`     | boolean | `false`            | Skip checking for pre-generated templates                                    |
-| `inspirationUrl`   | string  | _(none)_           | Crawl this URL before hydrating (runs `blueprint inspire` in the background) |
+| Field              | Type    | Default                                  | Description                                                                     |
+| ------------------ | ------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
+| `envPath`          | string  | _(required)_                             | Shopware URL                                                                    |
+| `salesChannel`     | string  | derived from `inspirationUrl` hostname   | SalesChannel name; inferred from URL if omitted                                 |
+| `description`      | string  | `brandDescription` from crawl or webshop | Context for AI generation; falls back to crawled `brandDescription`             |
+| `productCount`     | number  | `90`                                     | Number of products                                                              |
+| `shopwareUser`     | string  | -                                        | Shopware admin username                                                         |
+| `shopwarePassword` | string  | -                                        | Shopware admin password                                                         |
+| `skipProcessors`   | boolean | `false`                                  | Skip post-processors after sync                                                 |
+| `skipTemplate`     | boolean | `false`                                  | Skip checking for pre-generated templates                                       |
+| `inspirationUrl`   | string  | _(none)_                                 | Crawl this URL before blueprint creation; derives name + description if omitted |
 
 #### Poll Status
 

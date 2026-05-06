@@ -24,7 +24,7 @@ import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
 import { CLIError } from "./cli/shared.js";
 
-export { CLIError };
+export { CLIError, parseCliArgs };
 
 // =============================================================================
 // CLI Argument Parsing
@@ -47,9 +47,16 @@ function parseCliArgs(): CliArgs {
         if (arg.startsWith("--")) {
             const parts = arg.slice(2).split("=");
             const key = parts[0] || "";
-            const value = parts[1];
+            let value: string | true = parts.length > 1 ? parts.slice(1).join("=") || "" : true;
+            if (value === true) {
+                const next = args[i + 1];
+                if (next && !next.startsWith("-")) {
+                    value = next;
+                    i++;
+                }
+            }
             if (key) {
-                flags[key] = value ?? true;
+                flags[key] = value;
             }
         } else if (arg.startsWith("-")) {
             const key = arg.slice(1);
@@ -182,4 +189,4 @@ async function main(): Promise<void> {
     }
 }
 
-main();
+if (import.meta.main) main();

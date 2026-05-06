@@ -5,6 +5,7 @@ generated/
 .trash/
 logs/
 tests/logs/
+tmp/inspiration/
 dist/
 /.idea/
 /.fleet/
