@@ -135,7 +135,11 @@ export async function hydrateBlueprint(
             existingProperties
         );
     } else {
-        hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
+        const inspiration = cache.loadInspiration(salesChannelName) ?? undefined;
+        if (inspiration) {
+            logger.info(`  Using inspiration from ${inspiration.sourceUrl}`, { cli: true });
+        }
+        hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties, inspiration);
     }
 
     if (!hydrateOnly) {
@@ -258,6 +262,59 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
         `  Products fixed: ${placeholderProducts.length}`,
         `  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`,
     ];
+}
+
+export async function inspireBlueprint(url: string, salesChannelName: string): Promise<string[]> {
+    const { crawlForInspiration } = await import("../crawlers/index.js");
+
+    const cache = createCacheFromEnv();
+
+    let inspiration;
+    try {
+        inspiration = await crawlForInspiration(url);
+    } catch (error) {
+        return [`Error: ${error instanceof Error ? error.message : String(error)}`];
+    }
+
+    cache.saveInspiration(salesChannelName, inspiration);
+
+    const results = [
+        `=== Blueprint Inspire ===`,
+        `Name: ${salesChannelName}`,
+        `Source: ${url}`,
+        ``,
+        `Inspiration saved:`,
+        `  Categories found: ${inspiration.categories.length}`,
+        `  Example products: ${inspiration.exampleProducts.length}`,
+    ];
+
+    if (inspiration.categories.length > 0) {
+        results.push(
+            `  Category hints: ${inspiration.categories.slice(0, 5).join(", ")}${inspiration.categories.length > 5 ? ", ..." : ""}`
+        );
+    }
+
+    if (inspiration.brandDescription) {
+        results.push(
+            `  Brand description: "${inspiration.brandDescription.slice(0, 80)}${inspiration.brandDescription.length > 80 ? "..." : ""}"`
+        );
+    }
+
+    if (inspiration.brandColors) {
+        results.push(
+            `  Brand colors: ${inspiration.brandColors.primary} / ${inspiration.brandColors.secondary}`
+        );
+    }
+
+    results.push(
+        ``,
+        `  Saved to: generated/sales-channels/${salesChannelName}/inspiration.json`,
+        ``,
+        `Next step: bun run blueprint hydrate --name=${salesChannelName}`,
+        `  (inspiration.json will be used automatically to guide AI generation)`
+    );
+
+    return results;
 }
 
 export function resolveCmsStoreDescription(

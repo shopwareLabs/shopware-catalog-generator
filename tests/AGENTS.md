@@ -29,9 +29,13 @@ This convention:
 tests/
 ├── unit/                     # Unit tests (mirrors src/ structure)
 │   ├── blueprint/            # src/blueprint/ tests
+│   ├── cli/                  # src/cli/ tests + src/main.ts arg parser
+│   ├── crawlers/             # src/crawlers/ tests (classifier, extractors, site-crawler)
+│   ├── mcp/                  # src/mcp/ tests
 │   ├── post-processors/      # src/post-processors/ tests
 │   ├── providers/            # src/providers/ tests
 │   ├── server/               # src/server/ tests
+│   ├── services/             # src/services/ tests
 │   ├── shopware/             # src/shopware/ tests
 │   ├── templates/            # src/templates/ tests
 │   ├── utils/                # src/utils/ tests
@@ -223,6 +227,43 @@ describe("utilityFunction", () => {
 ## Test Helpers
 
 Shared factories in `tests/helpers/` avoid duplicating fixture setup across test files.
+
+### fetch-mock.ts
+
+Use `mockFetch` whenever a test needs to stub `globalThis.fetch`. The cast to `typeof fetch` lives here — no test file should repeat it.
+
+```typescript
+import { mockFetch } from "../../helpers/fetch-mock.js";
+
+// Simple: same response for every URL
+mockFetch(async () => ({ ok: true, headers: { get: () => "text/html" }, text: async () => html }));
+
+// URL-based routing
+mockFetch(async (input) => {
+    const url = input.toString();
+    return url.includes("/product") ? productResponse : categoryResponse;
+});
+
+// Route table (wrap mockFetch in a local helper)
+function setupRoutedFetch(routes: Record<string, string>): void {
+    mockFetch(async (input) => {
+        const body = routes[input.toString()] ?? null;
+        return { ok: body !== null, text: async () => body ?? "", headers: { get: () => null } };
+    });
+}
+```
+
+Always restore `globalThis.fetch` in a `finally` block:
+
+```typescript
+const origFetch = globalThis.fetch;
+mockFetch(async () => ({ ... }));
+try {
+    // test
+} finally {
+    globalThis.fetch = origFetch;
+}
+```
 
 ### blueprint-factory.ts
 

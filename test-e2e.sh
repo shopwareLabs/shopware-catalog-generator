@@ -7,11 +7,13 @@
 # - AI_PROVIDER configured (github-models recommended)
 #
 # Usage:
-#   ./test-e2e.sh                    # Full test: create → hydrate → upload → verify
-#   ./test-e2e.sh --reuse=<name>     # Reuse existing blueprint, run hydrate → upload → verify
-#   ./test-e2e.sh --reuse=<name> --skip-hydrate   # Skip AI, just upload → verify
-#   ./test-e2e.sh --reuse=<name> --skip-upload    # Just verify existing data
-#   ./test-e2e.sh --cleanup=<name>   # Only cleanup specific SalesChannel
+#   ./test-e2e.sh                                                    # Full test: create → hydrate → upload → verify
+#   ./test-e2e.sh --url=https://shop.com                             # Derive name + description from URL, crawl for inspiration
+#   ./test-e2e.sh --name=myshop --description="..." --url=https://…  # Explicit name/description + inspiration crawl
+#   ./test-e2e.sh --reuse=<name>                                     # Reuse existing blueprint, run hydrate → upload → verify
+#   ./test-e2e.sh --reuse=<name> --skip-hydrate                      # Skip AI, just upload → verify
+#   ./test-e2e.sh --reuse=<name> --skip-upload                       # Just verify existing data
+#   ./test-e2e.sh --cleanup=<name>                                   # Only cleanup specific SalesChannel
 #
 # Post-processors run:
 # - CMS homepage: cms-home (root category layout with welcome text + product listing)
@@ -22,12 +24,23 @@
 
 set -e  # Exit on error
 
+# Help
+for arg in "$@"; do
+    if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+        awk '/^# test-e2e\.sh/,/^set -e/' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
+        exit 0
+    fi
+done
+
 # Parse arguments
 SKIP_HYDRATE=false
 SKIP_UPLOAD=false
 SKIP_VERIFY=false
 CLEANUP_ONLY=""
 REUSE_NAME=""
+INSPIRE_URL=""
+CUSTOM_NAME=""
+CUSTOM_DESCRIPTION=""
 
 for arg in "$@"; do
     case $arg in
@@ -46,10 +59,24 @@ for arg in "$@"; do
         --reuse=*)
             REUSE_NAME="${arg#*=}"
             ;;
+        --url=*)
+            INSPIRE_URL="${arg#*=}"
+            ;;
+        --name=*)
+            CUSTOM_NAME="${arg#*=}"
+            ;;
+        --description=*)
+            CUSTOM_DESCRIPTION="${arg#*=}"
+            ;;
     esac
 done
 
-# Determine SalesChannel name
+# Derive name from URL if --url is provided and --name is not
+if [ -z "$CUSTOM_NAME" ] && [ -n "$INSPIRE_URL" ]; then
+    CUSTOM_NAME=$(echo "$INSPIRE_URL" | sed -E 's|https?://||' | sed 's|^www\.||' | cut -d. -f1 | cut -d/ -f1)
+fi
+
+# Determine SalesChannel name and description
 SKIP_CREATE=false
 if [ -n "$REUSE_NAME" ]; then
     TEST_SALESCHANNEL="$REUSE_NAME"
@@ -57,15 +84,28 @@ if [ -n "$REUSE_NAME" ]; then
     echo "Reusing existing blueprint: $TEST_SALESCHANNEL"
 elif [ -n "$CLEANUP_ONLY" ]; then
     TEST_SALESCHANNEL="$CLEANUP_ONLY"
+elif [ -n "$CUSTOM_NAME" ]; then
+    TEST_SALESCHANNEL="$CUSTOM_NAME"
 else
     TEST_SALESCHANNEL="e2e-test-kids-store-$(date +%s)"
+fi
+
+# Default description: custom if provided, otherwise a generic fallback
+if [ -n "$CUSTOM_DESCRIPTION" ]; then
+    TEST_DESCRIPTION="$CUSTOM_DESCRIPTION"
+elif [ -z "$INSPIRE_URL" ]; then
+    TEST_DESCRIPTION="Kids store selling toys, books and games."
+else
+    TEST_DESCRIPTION="$TEST_SALESCHANNEL webshop"
 fi
 
 SW_URL="${SW_ENV_URL:-http://localhost:8000}"
 
 echo "=== E2E Test: $TEST_SALESCHANNEL ==="
 echo "Target: $SW_URL"
-echo "Phases: create=$([[ $SKIP_CREATE == true ]] && echo skip || echo run) | hydrate=$([[ $SKIP_HYDRATE == true ]] && echo skip || echo run) | upload=$([[ $SKIP_UPLOAD == true ]] && echo skip || echo run) | verify=$([[ $SKIP_VERIFY == true ]] && echo skip || echo run)"
+echo "Description: $TEST_DESCRIPTION"
+[ -n "$INSPIRE_URL" ] && echo "Inspire URL: $INSPIRE_URL"
+echo "Phases: create=$([[ $SKIP_CREATE == true ]] && echo skip || echo run) | inspire=$([[ -z $INSPIRE_URL ]] && echo skip || echo run) | hydrate=$([[ $SKIP_HYDRATE == true ]] && echo skip || echo run) | upload=$([[ $SKIP_UPLOAD == true ]] && echo skip || echo run) | verify=$([[ $SKIP_VERIFY == true ]] && echo skip || echo run)"
 echo ""
 
 # Function to cleanup on exit
@@ -111,6 +151,27 @@ if [ -n "$CLEANUP_ONLY" ]; then
     exit 0
 fi
 
+# Phase 0: Crawl real store for inspiration (optional, runs BEFORE blueprint creation
+# so the brand description can inform the blueprint)
+if [ -n "$INSPIRE_URL" ] && [ "$SKIP_CREATE" = false ]; then
+    if [ -f "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
+        echo "[0/5] Skipping inspire (inspiration.json already exists)"
+    else
+        echo "[0/5] Crawling $INSPIRE_URL for inspiration..."
+        bun run blueprint inspire --name="$TEST_SALESCHANNEL" --url="$INSPIRE_URL"
+        echo "✓ Inspiration saved"
+    fi
+    # Use brandDescription from inspiration as description fallback if not explicitly provided
+    if [ -z "$CUSTOM_DESCRIPTION" ] && [ -f "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
+        BRAND_DESC=$(jq -r '.brandDescription // empty' "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" 2>/dev/null || true)
+        if [ -n "$BRAND_DESC" ]; then
+            TEST_DESCRIPTION="$BRAND_DESC"
+            echo "  Using brand description from inspiration: $TEST_DESCRIPTION"
+        fi
+    fi
+    echo ""
+fi
+
 # Phase 1: Create blueprint
 if [ "$SKIP_CREATE" = true ]; then
     echo "[1/5] Skipping blueprint creation (--skip-create or --reuse)"
@@ -120,7 +181,7 @@ if [ "$SKIP_CREATE" = true ]; then
     fi
 else
     echo "[1/5] Creating blueprint..."
-    bun run blueprint create --name="$TEST_SALESCHANNEL" --description="Kids store selling toys, books and games." --products=10
+    bun run blueprint create --name="$TEST_SALESCHANNEL" --description="$TEST_DESCRIPTION" --products=10
 
     if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
         echo "ERROR: blueprint.json not created"

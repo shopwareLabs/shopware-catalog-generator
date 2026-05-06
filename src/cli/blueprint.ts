@@ -10,6 +10,7 @@ import {
     createBlueprint,
     fixBlueprint,
     hydrateBlueprint,
+    inspireBlueprint,
     resolveCmsStoreDescription,
 } from "../services/blueprint-service.js";
 import { logger } from "../utils/index.js";
@@ -50,6 +51,21 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
     });
 
     throwIfServiceError(lines, "HYDRATE_FAILED");
+
+    for (const line of lines) {
+        console.log(line);
+    }
+}
+
+export async function blueprintInspire(args: CliArgs): Promise<void> {
+    const salesChannelName = requireValidName(args);
+
+    if (!args.url) {
+        throw new CLIError("--url is required for blueprint inspire", "MISSING_ARG");
+    }
+
+    const lines = await inspireBlueprint(args.url, salesChannelName);
+    throwIfServiceError(lines, "INSPIRE_FAILED");
 
     for (const line of lines) {
         console.log(line);

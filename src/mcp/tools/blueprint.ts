@@ -12,6 +12,7 @@ import {
     createBlueprint,
     fixBlueprint,
     hydrateBlueprint,
+    inspireBlueprint,
 } from "../../services/blueprint-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
 
@@ -79,6 +80,29 @@ export function registerBlueprintTools(server: FastMCP): void {
                 only: args.only,
                 force: args.rehydrate,
             });
+            return lines.join("\n");
+        },
+    });
+
+    // blueprint_inspire - Crawl a website and save inspiration to guide AI generation
+    server.addTool({
+        name: "blueprint_inspire",
+        description:
+            "Crawl an existing website to extract category names, example products, and brand colors. " +
+            "Saves inspiration.json which is automatically used by blueprint_hydrate to guide AI generation " +
+            "so the result feels like it could be the customer's actual store.",
+        parameters: z.object({
+            name: z.string().describe("SalesChannel name (becomes subdomain, e.g., 'furniture')"),
+            url: z.string().url().describe("URL of the website to crawl for inspiration"),
+        }),
+        execute: async (args) => {
+            const validation = validateSubdomainName(args.name);
+            if (!validation.valid) {
+                return `Error: Invalid name - ${validation.error}`;
+            }
+            const salesChannelName = validation.sanitized;
+
+            const lines = await inspireBlueprint(args.url, salesChannelName);
             return lines.join("\n");
         },
     });

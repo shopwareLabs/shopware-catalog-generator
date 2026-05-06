@@ -154,6 +154,10 @@ export class TemplateFetcher {
      */
     private updateRepo(): boolean {
         try {
+            if (!fs.existsSync(path.join(this.cacheDir, ".git"))) {
+                logger.warn(`Not a git repository: ${this.cacheDir}`, { cli: true });
+                return false;
+            }
             logger.info(`Updating template repository...`, { cli: true });
             execSync("git pull --ff-only", {
                 cwd: this.cacheDir,

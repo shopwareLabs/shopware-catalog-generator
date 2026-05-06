@@ -214,4 +214,59 @@ describe("ManufacturerProcessor", () => {
             }
         });
     });
+
+    describe("cleanup", () => {
+        test("returns early in dry run mode", async () => {
+            const { context } = createTestContext({ dryRun: true });
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns 0 deleted when no products in SalesChannel", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("product", []);
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns 0 deleted when products have no manufacturerIds", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("product", [
+                { id: "p1", manufacturerId: undefined },
+                { id: "p2" },
+            ]);
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("unassigns and deletes orphaned manufacturers", async () => {
+            const { context, mockApi } = createTestContext();
+            // First call: products with manufacturerIds; second call: orphan check returns 0
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "p1", manufacturerId: "mfg-1" }],
+                [],
+            ]);
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(1);
+            expect(result.errors).toHaveLength(0);
+            const unassignCall = mockApi
+                .getCalls()
+                .find((c) => (c.body as Record<string, unknown>)?.unassignManufacturers);
+            expect(unassignCall).toBeDefined();
+        });
+
+        test("does not delete manufacturers still used by other products", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "p1", manufacturerId: "mfg-1" }],
+                [{ id: "p2" }],
+            ]);
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+    });
 });

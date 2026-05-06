@@ -15,7 +15,7 @@ No function in this layer calls `console.log` directly.
 
 ```
 services/
-├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, fixBlueprint
+├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, fixBlueprint, inspireBlueprint
 ├── generate-service.ts    # generate, runProcessorsForSalesChannel
 ├── image-fix-service.ts   # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 └── shopware-context.ts    # createProcessorDeps (shared bootstrap for API helpers + providers)
@@ -23,20 +23,25 @@ services/
 
 ## blueprint-service.ts
 
-Shared logic for the `blueprint create`, `blueprint hydrate`, and `blueprint fix` commands.
+Shared logic for the `blueprint create`, `blueprint hydrate`, `blueprint fix`, and `blueprint inspire` commands.
 
 ```typescript
 import {
     createBlueprint,
     hydrateBlueprint,
     fixBlueprint,
+    inspireBlueprint,
     resolveCmsStoreDescription,
 } from "./services/blueprint-service.js";
+
+// Phase 0 (optional): Crawl a real store for AI inspiration (no AI, no Shopware connection)
+const lines = await inspireBlueprint("https://some-music-shop.com", "music");
+// → saves generated/sales-channels/music/inspiration.json
 
 // Phase 1: Generate blueprint structure (no AI)
 const lines = await createBlueprint("music", "Musical instruments", 90);
 
-// Phase 2: Hydrate with AI content
+// Phase 2: Hydrate with AI content (uses inspiration.json automatically if present)
 const lines = await hydrateBlueprint("music", { only: "categories" }); // selective
 const lines = await hydrateBlueprint("music", { force: true }); // full re-hydration
 const lines = await hydrateBlueprint("music", {}); // new blueprint
@@ -44,6 +49,19 @@ const lines = await hydrateBlueprint("music", {}); // new blueprint
 // Phase 2b: Fix incomplete hydration (placeholder names)
 const lines = await fixBlueprint("music");
 ```
+
+`inspireBlueprint(url, salesChannelName)`:
+
+- Uses `crawlForInspiration()` from `src/crawlers/` (dynamically imported to avoid loading `cheerio` at startup)
+- Saves `InspirationData` to `generated/sales-channels/{name}/inspiration.json` via `cache.saveInspiration()`
+- No AI calls, no Shopware connection required
+- Returns output lines for CLI/MCP display
+
+`hydrateBlueprint` automatically loads `inspiration.json` if it exists and passes it to the hydrator:
+
+- Category AI prompt gets real category names as style examples
+- Product AI prompts get matching example products for each branch
+- `hydrateBrandColors()` AI call is skipped if `inspiration.brandColors` is present
 
 `hydrateBlueprint` supports three selective modes via the `only` option:
 

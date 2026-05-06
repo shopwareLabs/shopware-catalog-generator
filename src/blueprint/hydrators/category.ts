@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 
+import type { InspirationData } from "../../crawlers/types.js";
 import type { BlueprintCategory, TextProvider } from "../../types/index.js";
 
 import { executeWithRetry, logger } from "../../utils/index.js";
@@ -34,7 +35,8 @@ export async function hydrateCategories(
     textProvider: TextProvider,
     salesChannelName: string,
     salesChannelDescription: string,
-    categories: BlueprintCategory[]
+    categories: BlueprintCategory[],
+    inspiration?: InspirationData
 ): Promise<CategoryHydrationResult> {
     const flatCategories = flattenCategories(categories);
 
@@ -42,7 +44,12 @@ export async function hydrateCategories(
         data: { salesChannelName },
     });
 
-    const prompt = buildCategoryPrompt(salesChannelName, salesChannelDescription, flatCategories);
+    const prompt = buildCategoryPrompt(
+        salesChannelName,
+        salesChannelDescription,
+        flatCategories,
+        inspiration
+    );
     logger.debug("Category prompt built", { data: { promptLength: prompt.length } });
 
     const startTime = Date.now();
@@ -143,7 +150,8 @@ export function flattenCategories(categories: BlueprintCategory[]): BlueprintCat
 function buildCategoryPrompt(
     salesChannelName: string,
     salesChannelDescription: string,
-    categories: BlueprintCategory[]
+    categories: BlueprintCategory[],
+    inspiration?: InspirationData
 ): string {
     const categoryList = categories.map((c) => ({
         id: c.id,
@@ -152,9 +160,20 @@ function buildCategoryPrompt(
         parentId: c.parentId,
     }));
 
+    const inspirationSection =
+        inspiration && inspiration.categories.length > 0
+            ? `
+INSPIRATION FROM REAL STORE (${inspiration.sourceUrl}):
+Real categories found on the actual store: ${inspiration.categories.join(", ")}
+${inspiration.brandDescription ? `Store brand voice: "${inspiration.brandDescription}"` : ""}
+→ Use these as inspiration for naming — match the product domain and tone.
+  You don't need to copy them exactly, but stay in the same semantic space.
+`
+            : "";
+
     return `Generate content for an e-commerce store called "${salesChannelName}".
 Store context: ${salesChannelDescription}
-
+${inspirationSection}
 Create realistic content for the following structure:
 
 1. A compelling store description (2-3 sentences)

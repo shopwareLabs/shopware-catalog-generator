@@ -705,4 +705,43 @@ describe("VariantProcessor", () => {
             expect(result.skipped).toBe(1);
         });
     });
+
+    describe("cleanup", () => {
+        test("returns early in dry run mode", async () => {
+            const { context } = createTestContext({ dryRun: true });
+            const result = await VariantProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns 0 deleted when no parent products in SalesChannel", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("product", []);
+            const result = await VariantProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("returns 0 deleted when no variant children found", async () => {
+            const { context, mockApi } = createTestContext();
+            // First call: parent products; second call (equalsAny parentId): no variants
+            mockApi.mockSearchResponseSequence("product", [[{ id: "parent-1" }], [], []]);
+            const result = await VariantProcessor.cleanup!(context);
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("deletes variant children and returns count", async () => {
+            const { context, mockApi } = createTestContext();
+            // First call: parent products; second call: variant children; third: configurator search
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "parent-1" }],
+                [{ id: "variant-1" }, { id: "variant-2" }],
+                [{ id: "parent-1", configuratorSettings: [] }],
+            ]);
+            const result = await VariantProcessor.cleanup!(context);
+            expect(result.deleted).toBe(2);
+            expect(result.errors).toHaveLength(0);
+        });
+    });
 });

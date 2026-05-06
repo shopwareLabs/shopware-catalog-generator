@@ -29,9 +29,10 @@ export class CLIError extends Error {
 
 export interface CliArgs {
     command: "blueprint" | "generate" | "process" | "image" | "help";
-    subcommand?: "create" | "hydrate" | "fix";
+    subcommand?: "create" | "hydrate" | "fix" | "inspire";
     name?: string;
     description?: string;
+    url?: string;
     products?: number;
     target?: string;
     interactive?: boolean;

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { InspirationData } from "./crawlers/types.js";
 import type {
     Blueprint,
     CacheOptions,
@@ -475,6 +476,25 @@ export class DataCache implements DataCacheApi {
             "manufacturers.json"
         );
         return this.loadJsonFile<Manufacturer[]>(manufacturersFile);
+    }
+
+    // =========================================================================
+    // Inspiration Cache
+    // =========================================================================
+
+    saveInspiration(salesChannel: string, inspiration: InspirationData): void {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        this.saveJsonFile(file, inspiration);
+    }
+
+    loadInspiration(salesChannel: string): InspirationData | null {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        return this.loadJsonFile<InspirationData>(file);
+    }
+
+    hasInspiration(salesChannel: string): boolean {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
+        return this.hasCachedFile(file);
     }
 
     /**

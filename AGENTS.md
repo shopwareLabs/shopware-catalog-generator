@@ -159,12 +159,22 @@ src/
 │   ├── index.ts              # Exports ProcessManager + types
 │   └── process-manager.ts    # Background task management
 │
+├── crawlers/                 # Website crawling for store inspiration
+│   ├── index.ts              # Exports crawlForInspiration, InspirationData, InspirationDataSchema
+│   ├── types.ts              # InspirationData + ExampleProduct types with Zod schemas
+│   ├── site-crawler.ts       # crawlForInspiration(url, options): fetches URL, assembles InspirationData
+│   └── extractors/           # Cheerio-based HTML extractors
+│       ├── index.ts          # Re-exports all extractors
+│       ├── image-color.ts    # Brand color extraction from brand images (apple-touch-icon, SVG, PNG)
+│       ├── json-ld.ts        # Extract schema.org JSON-LD (BreadcrumbList, Product, Organization)
+│       └── meta.ts           # Extract theme-color, og:description, CSS vars, nav categories
+│
 ├── mcp/                      # MCP server for Cursor AI integration
 │   ├── AGENTS.md             # MCP server documentation
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
-│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix
+│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
@@ -232,6 +242,11 @@ tests/
 │   │   ├── strings.test.ts
 │   │   ├── uuid.test.ts
 │   │   └── validation.test.ts
+│   ├── crawlers/             # Crawler tests
+│   │   ├── image-color.test.ts  # Brand image color extraction (SVG, PNG, priority, fallbacks)
+│   │   ├── json-ld.test.ts   # JSON-LD extractor (BreadcrumbList, Product, ItemList, Organization)
+│   │   ├── meta.test.ts      # Meta extractor (theme-color, CSS vars, og:description, nav)
+│   │   └── site-crawler.test.ts # crawlForInspiration with mocked fetch
 │   ├── cache.test.ts         # Root-level src/ file tests
 │   ├── property-cache.test.ts
 │   └── saleschannel-cache.test.ts
@@ -258,6 +273,7 @@ Detailed documentation for each module is in their respective folders:
 
 - **[src/blueprint/AGENTS.md](src/blueprint/AGENTS.md)** - Blueprint generator, hydrator, variant resolver, hydration flow
 - **[src/cli/AGENTS.md](src/cli/AGENTS.md)** - CLI command reference (all commands, flags, options)
+- **[src/crawlers/AGENTS.md](src/crawlers/AGENTS.md)** - Website crawler for store inspiration (cheerio, JSON-LD, meta extractors)
 - **[src/fixtures/AGENTS.md](src/fixtures/AGENTS.md)** - Static data configurations (CMS pages, reviews, properties, promotions)
 - **[src/mcp/AGENTS.md](src/mcp/AGENTS.md)** - MCP server for Cursor AI integration, adding tools
 - **[src/post-processors/AGENTS.md](src/post-processors/AGENTS.md)** - Post-processor system, registry, cleanup, adding new processors
@@ -572,6 +588,7 @@ generated/
         ├── metadata.json           # SalesChannel info
         ├── blueprint.json          # Phase 1 output
         ├── hydrated-blueprint.json # Phase 2 output
+        ├── inspiration.json        # Crawled website data (blueprint inspire)
         ├── cms-blueprint.json      # AI-hydrated CMS text (used by CMS processors)
         ├── categories.json         # Category tree
         ├── property-groups.json    # Property groups synced from Shopware
@@ -1065,6 +1082,9 @@ SERVER_PORT=3000
 ## CLI Usage
 
 ```bash
+# Phase 0 (optional): Crawl a real store for AI inspiration
+bun run blueprint inspire --name=music --url=https://some-music-shop.com
+
 # Phase 1: Create blueprint (no AI)
 bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
 
@@ -1088,6 +1108,35 @@ bun run process --name=music --only=images,manufacturers
 # Full pipeline (creates blueprint, hydrates, and uploads if needed)
 bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 ```
+
+### Blueprint Inspire Options
+
+Crawl a real store URL and save extracted data as `inspiration.json` to guide AI hydration.
+No AI calls are made — this is pure HTML scraping with `cheerio`.
+
+```bash
+bun run blueprint inspire \
+  --name=NAME              # Required: SalesChannel name (must match an existing blueprint)
+  --url=URL                # Required: URL of the real store to crawl
+```
+
+What gets extracted and saved to `generated/sales-channels/{name}/inspiration.json`:
+
+- **categories** — from JSON-LD BreadcrumbList or nav links
+- **exampleProducts** — from JSON-LD Product / ItemList blocks (up to 2 category pages followed)
+- **brandColors** — from brand images first (apple-touch-icon → SVG icon → PNG favicon → og:image), falling back to `theme-color` meta / CSS custom properties if no image yields usable colors
+- **brandDescription** — from `og:description` or JSON-LD Organization/WebSite block
+
+When `inspiration.json` exists, `blueprint hydrate` automatically:
+
+- Injects real category names into the category AI prompt as style examples
+- Injects matching example products into each branch's product prompt
+- Skips the `hydrateBrandColors()` AI call and uses the extracted colors directly
+
+> **Best-effort only.** Crawling real sites is inherently fragile — bot protection, SPA rendering,
+> and HTML changes can silently degrade results. A failed or partial crawl never breaks generation;
+> hydration simply runs without inspiration context. See `src/crawlers/AGENTS.md` for tested stores
+> and known limitations.
 
 ### Blueprint Options
 
@@ -1237,6 +1286,7 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 
 | Tool                   | Description                                            |
 | ---------------------- | ------------------------------------------------------ |
+| `blueprint_inspire`    | Crawl a real store URL and save inspiration.json       |
 | `blueprint_create`     | Generate blueprint.json (no AI)                        |
 | `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
 | `blueprint_fix`        | Fix placeholder names                                  |

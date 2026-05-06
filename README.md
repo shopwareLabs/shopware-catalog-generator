@@ -178,10 +178,17 @@ bun run generate --name=music --description="Musical instruments and accessories
 For more control, run the 3-phase pipeline separately. See [CONCEPTS.md](CONCEPTS.md#running-phases-separately) for details.
 
 ```bash
+# Optional: crawl a real store to guide AI generation (no AI calls, instant)
+bun run blueprint inspire --name=music --url=https://some-music-shop.com
+
 bun run blueprint create --name=music --description="Musical instruments and accessories"
-bun run blueprint hydrate --name=music
+bun run blueprint hydrate --name=music   # uses inspiration.json automatically if present
 bun run generate --name=music
 ```
+
+`blueprint inspire` extracts categories, example products, brand colors, and a description from a real store's static HTML. The data is saved as `inspiration.json` and automatically picked up by `blueprint hydrate` to orient AI generation. No API keys needed — uses `cheerio` + `sharp`.
+
+> Results depend on the site's structure. Sites with bot protection (Cloudflare, etc.) or full SPA rendering may yield partial or no data. A failed crawl never blocks generation.
 
 ### Post-Processors
 
@@ -248,12 +255,18 @@ bun run server
 | GET    | `/health`     | Health check and active process count   |
 
 ```bash
+# Minimal: name and description are derived from the inspiration URL
 curl -X POST http://localhost:3000/generate \
   -H "Content-Type: application/json" \
-  -d '{"envPath":"http://localhost:8000","salesChannel":"music","description":"Musical instruments"}'
+  -d '{
+    "envPath": "http://localhost:8000",
+    "shopwareUser": "admin",
+    "shopwarePassword": "shopware",
+    "inspirationUrl": "https://some-music-shop.com"
+  }'
 ```
 
-See [CLI Reference](src/cli/AGENTS.md#server-mode) for all request fields.
+When `inspirationUrl` is provided, the server crawls the URL **before** creating the blueprint — so the extracted `brandDescription` and brand colors are used to orient AI generation. The `salesChannel` name is derived from the URL hostname if not explicitly set. See [CLI Reference](src/cli/AGENTS.md#server-mode) for all request fields.
 
 ## MCP Server (AI Assistant Integration)
 
@@ -305,11 +318,13 @@ bun test --coverage   # With coverage report
 ### E2E Testing
 
 ```bash
-./test-e2e.sh                              # Full: create → hydrate → upload → verify
-./test-e2e.sh --reuse=music                # Reuse existing blueprint
-./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
-./test-e2e.sh --cleanup=music              # Cleanup only
-bun run test:verify --name=music           # Verify Shopware data
+./test-e2e.sh                                                         # Full: create → hydrate → upload → verify
+./test-e2e.sh --name=stabilo --description="Writing instruments" \
+              --url=https://www.stabilo.com/com                        # With inspiration crawl
+./test-e2e.sh --reuse=music                                           # Reuse existing blueprint
+./test-e2e.sh --reuse=music --skip-hydrate                            # Skip AI, just upload
+./test-e2e.sh --cleanup=music                                         # Cleanup only
+bun run test:verify --name=music                                      # Verify Shopware data
 ```
 
 ### Extending
