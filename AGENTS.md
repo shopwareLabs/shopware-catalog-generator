@@ -297,6 +297,9 @@ The architecture uses a 3-phase pipeline for faster generation:
 
 **Expected times for 90 products (text-only hydration):**
 
+Historical estimates below predate the cost-focused GPT-6 Luna default. Luna was slower
+than GPT-4.1 in the [small live model benchmark](docs/model-benchmark-2026-09-23.md).
+
 | Provider              | Processing    | Time    |
 | --------------------- | ------------- | ------- |
 | OpenAI                | Parallel (5x) | ~5 min  |
@@ -496,6 +499,10 @@ Factory in `providers/factory.ts` creates providers from env vars:
 - `AI_PROVIDER`: openai | github-models | pollinations
 - `IMAGE_PROVIDER`: openai | pollinations | none (auto-detected if not set)
 - `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
+
+OpenAI text defaults to `gpt-6-luna` with reasoning disabled. Set `AI_MODEL=gpt-4.1-2025-04-14`
+for the previous model. Images remain `gpt-image-1-mini` / low; `gpt-image-2.5-flare`
+is an optional, higher-cost alternative. See [live benchmark](docs/model-benchmark-2026-09-23.md).
 
 **Image provider auto-detection:** When `IMAGE_PROVIDER` is not set:
 

@@ -10,6 +10,7 @@ import type {
     TextProvider,
 } from "../types/index.js";
 
+import { PROVIDER_DEFAULTS } from "../types/index.js";
 import { logger } from "../utils/index.js";
 
 /**
@@ -23,9 +24,13 @@ export class OpenAITextProvider implements TextProvider {
     readonly isSequential = false;
     readonly maxConcurrency = 5;
     readonly name = "openai";
-    readonly tokenLimit = 128000; // GPT-4 Turbo context window
+    readonly tokenLimit = PROVIDER_DEFAULTS.openai.tokenLimit;
 
-    constructor(apiKey: string, model: string = "gpt-4.1-2025-04-14", baseUrl?: string) {
+    constructor(
+        apiKey: string,
+        model: string = PROVIDER_DEFAULTS.openai.textModel,
+        baseUrl?: string
+    ) {
         this.client = new OpenAI({
             apiKey,
             baseURL: baseUrl,
@@ -43,6 +48,11 @@ export class OpenAITextProvider implements TextProvider {
             model: this.model,
         };
 
+        // Catalog copy does not need reasoning. Keep legacy/custom models' parameters unchanged.
+        if (this.model === "gpt-6-luna") {
+            requestOptions.reasoning_effort = "none";
+        }
+
         if (schema && schemaName) {
             requestOptions.response_format = zodResponseFormat(schema, schemaName);
         }
@@ -56,7 +66,7 @@ export class OpenAITextProvider implements TextProvider {
 /**
  * OpenAI image generation provider (GPT Image models)
  * Supports parallel processing with high rate limits
- * OpenAI Tier 1+ allows 50+ images/min, so 10 concurrent is safe
+ * Concurrency is not a rate limit: image quotas depend on the account's usage tier.
  */
 export class OpenAIImageProvider implements ImageProvider {
     private readonly client: OpenAI;

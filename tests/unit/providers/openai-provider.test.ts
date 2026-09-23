@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod";
 
-import { OpenAIImageProvider, OpenAITextProvider } from "../../../src/providers/index.js";
+import {
+    createProviders,
+    createProvidersFromEnv,
+    OpenAIImageProvider,
+    OpenAITextProvider,
+} from "../../../src/providers/index.js";
 
 describe("OpenAI SDK compatibility", () => {
     const requests: Request[] = [];
@@ -39,6 +44,78 @@ describe("OpenAI SDK compatibility", () => {
         if (!request) throw new Error("The SDK did not send a request");
         return request.json();
     }
+
+    test("defaults to Luna with reasoning disabled", async () => {
+        await new OpenAITextProvider("test-key").generateCompletion([]);
+        expect(await requestBody()).toEqual({
+            model: "gpt-6-luna",
+            reasoning_effort: "none",
+            messages: [],
+        });
+    });
+
+    test.each(["gpt-4.1-2025-04-14", "gpt-4o", "custom-model"])(
+        "preserves the request contract for explicit model %s",
+        async (model) => {
+            const { text } = createProviders({
+                aiProvider: "openai",
+                apiKey: "test-key",
+                textModel: model,
+                imageProvider: "none",
+            });
+            await text.generateCompletion([]);
+            expect(await requestBody()).toEqual({ model, messages: [] });
+        }
+    );
+
+    test("factory uses the same Luna default as the provider constructor", async () => {
+        const { text } = createProviders({
+            aiProvider: "openai",
+            apiKey: "test-key",
+            imageProvider: "none",
+        });
+        await text.generateCompletion([]);
+        expect(await requestBody()).toMatchObject({
+            model: "gpt-6-luna",
+            reasoning_effort: "none",
+        });
+    });
+
+    test("AI_MODEL keeps the legacy model selectable through the environment", async () => {
+        const keys = ["AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "IMAGE_PROVIDER"] as const;
+        const previous = keys.map((key) => [key, process.env[key]] as const);
+        try {
+            process.env.AI_PROVIDER = "openai";
+            process.env.AI_API_KEY = "test-key";
+            process.env.AI_MODEL = "gpt-4.1-2025-04-14";
+            process.env.IMAGE_PROVIDER = "none";
+            await createProvidersFromEnv().text.generateCompletion([]);
+            expect(await requestBody()).toEqual({ model: "gpt-4.1-2025-04-14", messages: [] });
+        } finally {
+            for (const [key, value] of previous) {
+                if (value === undefined) delete process.env[key];
+                else process.env[key] = value;
+            }
+        }
+    });
+
+    test.each([undefined, "gpt-image-2.5-flare"])(
+        "keeps Mini as default and allows opting into image model %s",
+        async (imageModel) => {
+            responseBody = { data: [{ b64_json: "aW1hZ2U=" }] };
+            const { image } = createProviders({
+                aiProvider: "openai",
+                apiKey: "test-key",
+                imageModel,
+            });
+            expect(await image.generateImage("Product photo")).toBe("aW1hZ2U=");
+            expect(await requestBody()).toMatchObject({
+                model: imageModel ?? "gpt-image-1-mini",
+                quality: "low",
+                output_format: "webp",
+            });
+        }
+    );
 
     test("sends chat messages, configured model, and authentication to a custom endpoint", async () => {
         const provider = new OpenAITextProvider(

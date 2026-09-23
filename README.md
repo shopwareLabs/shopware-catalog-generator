@@ -105,13 +105,26 @@ AI_API_KEY=sk-your-openai-key
 **Optional settings:**
 
 ```env
-AI_MODEL=gpt-4o              # Override text model
+AI_MODEL=gpt-6-luna          # OpenAI default (reasoning disabled)
 IMAGE_PROVIDER=none          # Disable images
-IMAGE_MODEL=gpt-image-1-mini # OpenAI default; or gpt-image-1.5, flux, turbo, klein
+IMAGE_MODEL=gpt-image-1-mini # OpenAI default; optional: gpt-image-2.5-flare
 IMAGE_QUALITY=low            # OpenAI only: low (fastest), medium, high, auto
 ```
 
+OpenAI uses **GPT-6 Luna without reasoning** for cost-efficient catalog text. In our
+[small live benchmark](docs/model-benchmark-2026-09-23.md), it cost about 93% less than
+GPT-4.1 but took about twice as long. Set `AI_MODEL=gpt-4.1-2025-04-14` to retain the
+previous, faster model. Explicit model overrides are preserved.
+
+Images stay on **GPT Image 1 Mini / low**. Flare produced sharper detail in the sample,
+but its estimated cost was about 54% higher and its speed advantage was small. Opt in
+with `IMAGE_MODEL=gpt-image-2.5-flare`; existing image sizes and WebP caching work unchanged.
+Pollinations image models remain `flux`, `turbo`, and `klein`.
+
 ### Expected Times (90 products)
+
+These are historical estimates, not measurements of the new Luna text default.
+Actual times depend on model, account limits, and generated content.
 
 **Text generation only (blueprint hydration):**
 

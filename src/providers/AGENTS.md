@@ -55,22 +55,33 @@ Providers may ignore `width`/`height` if they use fixed sizes or prefer their ow
 
 ### Image Providers
 
-| Provider              | Name           | Model            | maxConcurrency | Notes                     |
-| --------------------- | -------------- | ---------------- | -------------- | ------------------------- |
-| OpenAI                | `openai`       | gpt-image-1-mini | 10             | Fastest, cheapest default |
-| Pollinations (sk\_\*) | `pollinations` | flux/turbo       | 5              | Direct base64 response    |
-| Pollinations (pk\_\*) | `pollinations` | flux/turbo       | 2              | Limited parallelism       |
-| Noop                  | `none`         | -                | 1              | Disabled (no images)      |
+| Provider              | Name           | Model            | maxConcurrency | Notes                  |
+| --------------------- | -------------- | ---------------- | -------------- | ---------------------- |
+| OpenAI                | `openai`       | gpt-image-1-mini | 10             | Cost-focused default   |
+| Pollinations (sk\_\*) | `pollinations` | flux/turbo       | 5              | Direct base64 response |
+| Pollinations (pk\_\*) | `pollinations` | flux/turbo       | 2              | Limited parallelism    |
+| Noop                  | `none`         | -                | 1              | Disabled (no images)   |
 
 **OpenAI Image Notes:**
 
 - Default model: `gpt-image-1-mini` (cost-efficient, fast)
-- Available models: `gpt-image-1-mini`, `gpt-image-1`, `gpt-image-1.5` (override via `IMAGE_MODEL`)
+- Available models include `gpt-image-1-mini`, `gpt-image-1`, `gpt-image-1.5`, `gpt-image-2.5-flare` (override via `IMAGE_MODEL`)
 - Quality levels: `low` (default, cheapest), `medium`, `high`, `auto` (override via `IMAGE_QUALITY`)
 - Supported sizes: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait)
 - Requests `output_format: "webp"` for smaller payloads (matches cache format)
 - GPT image models always return base64 directly (no URL fetching needed)
 - Image generation has retry logic (3 retries, 5s backoff)
+- Concurrency is not a requests-per-minute guarantee; account image quotas vary by usage tier.
+- Mini remains the default after the September 2026 live comparison: Flare improved detail but cost more. See [benchmark](../../docs/model-benchmark-2026-09-23.md).
+
+**OpenAI Text Notes:**
+
+- Default model: `gpt-6-luna` with `reasoning_effort: "none"` for catalog copy.
+- `PROVIDER_DEFAULTS.openai.textModel` is shared by the factory and provider constructor.
+- Chat Completions and strict Zod structured outputs remain unchanged.
+- Other explicit models (including `AI_MODEL=gpt-4.1-2025-04-14`) do not receive a reasoning parameter.
+- The 128,000-token limit remains a conservative batching budget, not Luna's full context window.
+- Luna was much cheaper but slower than GPT-4.1 in the small live benchmark; do not promise a speedup.
 
 **OpenAI Image Pricing (per image, 1536x1024):**
 
@@ -96,11 +107,11 @@ All providers require an API key. Get a Pollinations key at [enter.pollinations.
 ```env
 AI_PROVIDER=pollinations|github-models|openai
 AI_API_KEY=xxx  # Required for all providers
-AI_MODEL=gpt-4o  # Optional override
+AI_MODEL=gpt-6-luna  # OpenAI default; optional override
 
 IMAGE_PROVIDER=pollinations|openai|none
 IMAGE_API_KEY=xxx
-IMAGE_MODEL=gpt-image-1-mini|gpt-image-1|gpt-image-1.5  # For OpenAI; flux|turbo|klein for Pollinations
+IMAGE_MODEL=gpt-image-1-mini|gpt-image-2.5-flare  # For OpenAI; flux|turbo|klein for Pollinations
 IMAGE_QUALITY=low|medium|high|auto  # OpenAI only, default: low
 ```
 

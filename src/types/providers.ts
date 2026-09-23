@@ -110,12 +110,12 @@ export const PROVIDER_DEFAULTS: Record<
     }
 > = {
     openai: {
-        textModel: "gpt-4.1-2025-04-14",
+        textModel: "gpt-6-luna",
         imageModel: "gpt-image-1-mini",
         supportsImages: true,
         isSequential: false,
         requiresApiKey: true,
-        tokenLimit: 128000, // GPT-4 Turbo context window
+        tokenLimit: 128000, // Conservative batching budget, not the model's full context window
     },
     "github-models": {
         baseUrl: "https://models.inference.ai.azure.com",
