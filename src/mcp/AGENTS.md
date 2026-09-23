@@ -104,6 +104,7 @@ The MCP server sets `logger.setMcpMode(true)` to suppress `console.*` output. Al
 ## Testing
 
 ```bash
+bun run test:mcp      # Actual MCP CLI + server integration, isolated cache, no credentials
 bun run mcp:dev       # Interactive terminal testing (mcp-cli)
 bun run mcp:inspect   # Web UI inspector (FastMCP)
 ```

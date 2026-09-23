@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import sharp from "sharp";
 
 import type { HydratedBlueprint } from "../../../../src/types/index.js";
 
@@ -8,6 +9,7 @@ import {
     hydrateCmsImages,
     hydrateProductImages,
     hydrateThemeMedia,
+    trimAndResize,
 } from "../../../../src/blueprint/hydrators/image.js";
 import { DataCache } from "../../../../src/cache.js";
 import { NoOpImageProvider } from "../../../../src/providers/noop-provider.js";
@@ -20,6 +22,44 @@ function createTestCache(): DataCache {
         useCache: true,
     });
 }
+
+describe("trimAndResize with native sharp", () => {
+    const source = Buffer.from(
+        '<svg width="60" height="40" xmlns="http://www.w3.org/2000/svg">' +
+            '<rect x="10" y="10" width="40" height="20" fill="#1264a3"/></svg>'
+    ).toString("base64");
+
+    test("trims the logo border and scales proportionally to the requested height", async () => {
+        const output = await trimAndResize(source, 474, 70, { transparent: true, fitHeight: true });
+        const metadata = await sharp(Buffer.from(output, "base64")).metadata();
+        expect(metadata.format).toBe("png");
+        expect(metadata.height).toBe(70);
+        expect(metadata.width).toBe(140);
+    });
+
+    test("produces a transparent favicon at the exact target size", async () => {
+        const output = await trimAndResize(source, 96, 96, true);
+        const { data, info } = await sharp(Buffer.from(output, "base64"))
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        expect(info.width).toBe(96);
+        expect(info.height).toBe(96);
+        expect(info.channels).toBe(4);
+        expect(data[3]).toBe(0);
+    });
+
+    test("produces a WebP share image at the exact target size", async () => {
+        const output = await trimAndResize(source, 1200, 630);
+        const metadata = await sharp(Buffer.from(output, "base64")).metadata();
+        expect(metadata.format).toBe("webp");
+        expect(metadata.width).toBe(1200);
+        expect(metadata.height).toBe(630);
+    });
+
+    test("preserves the original data if decoding fails", async () => {
+        expect(await trimAndResize("invalid-image", 96, 96)).toBe("invalid-image");
+    });
+});
 
 describe("buildCmsImageSpecs", () => {
     test("returns 20 image specs", () => {

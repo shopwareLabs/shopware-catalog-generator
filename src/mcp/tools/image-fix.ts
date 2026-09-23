@@ -20,7 +20,7 @@ import {
 } from "../../services/image-fix-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
 
-// Re-export for backwards-compatibility (tests may import from here)
+/** @public Backwards-compatible export; the implementation lives in the service. */
 export { THEME_MEDIA_KEYS };
 
 export function registerImageFixTools(server: FastMCP): void {
