@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
+// Each call cold-starts both Node and Bun; allow headroom on loaded CI runners.
+const CALL_TIMEOUT_MS = 30000;
+const TEST_OVERHEAD_MS = 5000;
+
 const serverPath = fileURLToPath(new URL("../../src/mcp/index.ts", import.meta.url));
 const cliPath = fileURLToPath(
     new URL("../../node_modules/@wong2/mcp-cli/src/cli.js", import.meta.url)
@@ -62,7 +66,7 @@ describe("MCP CLI end-to-end", () => {
             ],
             { cwd: directory, stdout: "pipe", stderr: "pipe" }
         );
-        const timeout = setTimeout(() => child.kill(), 10000);
+        const timeout = setTimeout(() => child.kill(), CALL_TIMEOUT_MS);
         try {
             const [stdout, stderr, exitCode] = await Promise.all([
                 new Response(child.stdout).text(),
@@ -79,72 +83,92 @@ describe("MCP CLI end-to-end", () => {
         }
     }
 
-    test("initializes the server and calls a read-only tool through the actual CLI", async () => {
-        const result = await callTool("list_processors");
-        expect(result.isError).not.toBe(true);
-        const text = result.content.map((item) => item.text).join("\n");
-        for (const name of ["images", "variants", "cms-home", "theme", "reviews"]) {
-            expect(text).toContain(name);
-        }
-    }, 15000);
+    test(
+        "initializes the server and calls a read-only tool through the actual CLI",
+        async () => {
+            const result = await callTool("list_processors");
+            expect(result.isError).not.toBe(true);
+            const text = result.content.map((item) => item.text).join("\n");
+            for (const name of ["images", "variants", "cms-home", "theme", "reviews"]) {
+                expect(text).toContain(name);
+            }
+        },
+        CALL_TIMEOUT_MS + TEST_OVERHEAD_MS
+    );
 
-    test("creates and lists a blueprint in an isolated cache", async () => {
-        const result = await callTool("blueprint_create", {
-            name: "mcp-smoke",
-            description: "MCP compatibility test",
-            products: 3,
-        });
-        expect(result.isError).not.toBe(true);
-        expect(result.content[0]?.text).toContain("Blueprint created");
-        const blueprint = blueprintSchema.parse(
-            await Bun.file(
-                join(directory, "generated/sales-channels/mcp-smoke/blueprint.json")
-            ).json()
-        );
-        expect(blueprint.salesChannel).toEqual({
-            name: "mcp-smoke",
-            description: "MCP compatibility test",
-        });
-        expect(blueprint.products).toHaveLength(3);
-        expect(blueprint.categories.length).toBeGreaterThan(0);
-        expect(new Set(blueprint.products.map((product) => product.id)).size).toBe(3);
+    test(
+        "creates and lists a blueprint in an isolated cache",
+        async () => {
+            const result = await callTool("blueprint_create", {
+                name: "mcp-smoke",
+                description: "MCP compatibility test",
+                products: 3,
+            });
+            expect(result.isError).not.toBe(true);
+            expect(result.content[0]?.text).toContain("Blueprint created");
+            const blueprint = blueprintSchema.parse(
+                await Bun.file(
+                    join(directory, "generated/sales-channels/mcp-smoke/blueprint.json")
+                ).json()
+            );
+            expect(blueprint.salesChannel).toEqual({
+                name: "mcp-smoke",
+                description: "MCP compatibility test",
+            });
+            expect(blueprint.products).toHaveLength(3);
+            expect(blueprint.categories.length).toBeGreaterThan(0);
+            expect(new Set(blueprint.products.map((product) => product.id)).size).toBe(3);
 
-        const cached = await callTool("cache_list");
-        expect(cached.isError).not.toBe(true);
-        expect(cached.content[0]?.text).toContain("mcp-smoke");
-    }, 15000);
+            const cached = await callTool("cache_list");
+            expect(cached.isError).not.toBe(true);
+            expect(cached.content[0]?.text).toContain("mcp-smoke");
+        },
+        2 * CALL_TIMEOUT_MS + TEST_OVERHEAD_MS
+    );
 
-    test("preserves schema defaults for blueprint creation", async () => {
-        const result = await callTool("blueprint_create", { name: "default-smoke" });
-        expect(result.isError).not.toBe(true);
-        const blueprint = blueprintSchema.parse(
-            await Bun.file(
-                join(directory, "generated/sales-channels/default-smoke/blueprint.json")
-            ).json()
-        );
-        expect(blueprint.products).toHaveLength(90);
-        expect(blueprint.salesChannel.description).toBe("default-smoke webshop");
-    }, 15000);
+    test(
+        "preserves schema defaults for blueprint creation",
+        async () => {
+            const result = await callTool("blueprint_create", { name: "default-smoke" });
+            expect(result.isError).not.toBe(true);
+            const blueprint = blueprintSchema.parse(
+                await Bun.file(
+                    join(directory, "generated/sales-channels/default-smoke/blueprint.json")
+                ).json()
+            );
+            expect(blueprint.products).toHaveLength(90);
+            expect(blueprint.salesChannel.description).toBe("default-smoke webshop");
+        },
+        CALL_TIMEOUT_MS + TEST_OVERHEAD_MS
+    );
 
-    test("rejects invalid tool arguments before execution", async () => {
-        await expect(
-            callTool("blueprint_create", { name: "invalid-smoke", products: "three" })
-        ).rejects.toThrow("parameter validation failed: products");
-        expect(
-            await Bun.file(
-                join(directory, "generated/sales-channels/invalid-smoke/blueprint.json")
-            ).exists()
-        ).toBe(false);
-    }, 15000);
+    test(
+        "rejects invalid tool arguments before execution",
+        async () => {
+            await expect(
+                callTool("blueprint_create", { name: "invalid-smoke", products: "three" })
+            ).rejects.toThrow("parameter validation failed: products");
+            expect(
+                await Bun.file(
+                    join(directory, "generated/sales-channels/invalid-smoke/blueprint.json")
+                ).exists()
+            ).toBe(false);
+        },
+        CALL_TIMEOUT_MS + TEST_OVERHEAD_MS
+    );
 
-    test("preserves the image-fix missing-blueprint response", async () => {
-        const result = await callTool("image_fix", {
-            name: "missing-smoke",
-            type: "theme",
-            dryRun: true,
-        });
-        expect(result.content[0]?.text).toContain(
-            'No hydrated blueprint found for "missing-smoke"'
-        );
-    }, 15000);
+    test(
+        "preserves the image-fix missing-blueprint response",
+        async () => {
+            const result = await callTool("image_fix", {
+                name: "missing-smoke",
+                type: "theme",
+                dryRun: true,
+            });
+            expect(result.content[0]?.text).toContain(
+                'No hydrated blueprint found for "missing-smoke"'
+            );
+        },
+        CALL_TIMEOUT_MS + TEST_OVERHEAD_MS
+    );
 });
