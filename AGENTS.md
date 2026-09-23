@@ -1045,6 +1045,10 @@ server.addTool({
 
 ### Linting & Formatting
 
+- `knip.json` treats module `index.ts` files and `src/cache.ts` as entry points because
+  they expose the documented reusable module interfaces. Keep these exports available
+  even when current CLI code does not import every symbol. Internal files remain checked
+  for unused exports; mark intentional compatibility exports with `@public`.
 - **Linter:** `oxlint` (via `bun run lint`)
 - **TypeCheck:** `tsc --noEmit` (included in `bun run lint`)
 - **Formatter:** `oxfmt` (via `bun run format`). Scripts use `npx oxfmt` so formatting runs under Node; under Bun, oxfmt’s worker threads trigger DataCloneError for JSON/markdown (see [bun#25610](https://github.com/oven-sh/bun/issues/25610)).

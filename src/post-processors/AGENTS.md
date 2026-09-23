@@ -76,7 +76,7 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 
 ## Available Processors
 
-| Processor        | Name               | Dependencies                               | Has Cleanup |
+| Processor        | Name               | Dependencies                               | Has Cleanup | Notes                                                                                                         |
 | ---------------- | ------------------ | ------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------- |
 | CMS Homepage     | `cms-home`         | `customers`, `promotions`, `cross-selling` | Yes         | Conditionally renders credential table, promotion codes, and Cross-Selling bullet based on `activeProcessors` |
 | CMS Text         | `cms-text`         | none                                       | Yes         |

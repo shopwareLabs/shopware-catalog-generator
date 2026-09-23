@@ -292,9 +292,16 @@ If your `bun` is installed elsewhere, adjust the path accordingly.
 ### Testing
 
 ```bash
+bun run test:mcp      # Automated MCP CLI checks (no credentials or external services)
 bun run mcp:dev       # Interactive terminal testing
 bun run mcp:inspect   # Web UI inspector
 ```
+
+`test:mcp` launches the installed `@wong2/mcp-cli` against the real Bun MCP server.
+It checks tool calls, blueprint creation, cache listing, argument validation, and schema
+defaults using a temporary cache that is removed afterward. Use Node.js 24 for the CLI,
+matching CI. To use it interactively, run `bunx --no-install mcp-cli bun run src/mcp/index.ts`
+and select `list_processors` for a read-only check.
 
 ## Contributing
 
