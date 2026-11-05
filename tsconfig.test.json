@@ -5,7 +5,7 @@
         "noEmit": true,
         "declaration": false,
         "declarationMap": false,
-        "types": ["bun-types"]
+        "types": ["bun"]
     },
     "include": ["src/**/*", "tests/**/*"],
     "exclude": ["node_modules", "dist"]

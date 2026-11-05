@@ -798,6 +798,7 @@ See **[tests/AGENTS.md](tests/AGENTS.md)** for detailed testing documentation in
 ```typescript
 // Correct
 import type { CategoryNode, SalesChannelInput } from "./types/index.js";
+
 import { DataHydrator } from "./shopware/index.js";
 ```
 

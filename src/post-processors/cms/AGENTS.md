@@ -184,8 +184,8 @@ export const NEW_ELEMENTS_PAGE: CmsPageFixture = {
 3. Create processor in `src/post-processors/cms/new-processor.ts`:
 
 ```typescript
-import { BaseCmsProcessor } from "./base-processor.js";
 import { NEW_ELEMENTS_PAGE } from "../../fixtures/index.js";
+import { BaseCmsProcessor } from "./base-processor.js";
 
 class NewProcessorImpl extends BaseCmsProcessor {
     readonly name = "cms-new";
