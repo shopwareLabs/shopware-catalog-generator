@@ -6,8 +6,8 @@
  * model selection and how many images are still missing from the cache.
  *
  * Token heuristics are calibrated from actual usage reported by OpenAI during
- * an e2e hydration run with gpt-5.4-mini (no reasoning tokens were billed at the
- * default reasoning effort). Treat the result as a forecast, not a quote.
+ * a hydration run with the default gpt-6-luna (reasoning disabled). Other models
+ * write more or less, so treat the result as a forecast, not a quote.
  */
 
 import type {
@@ -30,19 +30,19 @@ import { countCategories } from "../utils/index.js";
 const PRODUCT_BATCH_SIZE = 10;
 
 /** Share of products whose properties miss the property cache and need an options call */
-const PROPERTY_CALLS_PER_PRODUCT = 0.4;
+const PROPERTY_CALLS_PER_PRODUCT = 0.1;
 
 /**
- * Token heuristics per call type, from OpenAI usage of an e2e run (38 categories,
- * 10 products, 8 CMS pages). The product prompt carries the category tree and the
+ * Token heuristics per call type, from OpenAI usage of a gpt-6-luna run (19 categories,
+ * 20 products, 8 CMS pages). The product prompt carries the category tree and the
  * property context, so its input is large per batch.
  */
 const TOKENS = {
-    category: { input: 300, inputPerCategory: 45, outputPerCategory: 55 },
+    category: { input: 300, inputPerCategory: 67, outputPerCategory: 85 },
     brandColors: { input: 200, output: 40 },
-    productBatch: { input: 13000, outputPerProduct: 400 },
+    productBatch: { input: 13700, outputPerProduct: 440 },
     propertyBatch: { input: 10000, outputPerProduct: 120 },
-    propertyOptions: { input: 450, output: 150 },
+    propertyOptions: { input: 300, output: 100 },
     cmsPage: { input: 350, inputPerSlot: 60, outputPerSlot: 65 },
 } as const;
 
