@@ -75,7 +75,6 @@ type PropertyOnlyResponse = z.infer<typeof PropertyOnlyResponseSchema>;
 
 const CHARS_PER_TOKEN: Record<string, number> = {
     openai: 4.0,
-    "github-models": 4.0,
     pollinations: 3.5,
     default: 3.5,
 };

@@ -567,27 +567,23 @@ The generator supports multiple AI providers with a unified interface.
 ├─────────────────┬─────────────────────┬─────────────────────────────────────┤
 │    PROVIDER     │   TEXT GENERATION   │   IMAGE GENERATION                  │
 ├─────────────────┼─────────────────────┼─────────────────────────────────────┤
-│  OpenAI         │   GPT-4o            │   GPT Image 1.5                     │
+│  OpenAI         │   gpt-5.4-mini      │   gpt-image-1-mini                  │
 │                 │   Parallel (5x)     │   Paid                              │
 ├─────────────────┼─────────────────────┼─────────────────────────────────────┤
-│  GitHub Models  │   GPT-4o (Azure)    │   Uses Pollinations                 │
-│                 │   Limited (2x)      │   Free                              │
-├─────────────────┼─────────────────────┼─────────────────────────────────────┤
-│  Pollinations   │   Various models    │   Flux models                       │
+│  Pollinations   │   gpt-5.4-nano      │   flux (default), klein, zimage     │
 │                 │   Parallel w/ sk_*  │   Free                              │
 └─────────────────┴─────────────────────┴─────────────────────────────────────┘
 ```
 
 ### Provider Selection
 
-| Use Case          | Recommended   | Why                                  |
-| ----------------- | ------------- | ------------------------------------ |
-| Free (Copilot)    | GitHub Models | Free text + free Pollinations images |
-| Free (no Copilot) | Pollinations  | `pk_*` key, images use free tier     |
-| Fast & free       | Pollinations  | `sk_*` key, parallel text + images   |
-| Production        | OpenAI        | Best quality, full parallel          |
+| Use Case    | Recommended  | Why                                |
+| ----------- | ------------ | ---------------------------------- |
+| Free        | Pollinations | `pk_*` key, images use free tier   |
+| Fast & free | Pollinations | `sk_*` key, parallel text + images |
+| Production  | OpenAI       | Best quality, full parallel        |
 
-> **Recommended for most users:** `AI_PROVIDER=github-models` with a GitHub PAT — completely free if you have a Copilot subscription. Images are automatically generated via Pollinations free tier (no image API key needed).
+> **Recommended free setup:** `AI_PROVIDER=pollinations` with a `pk_*` key from enter.pollinations.ai. Images are automatically generated via the Pollinations free tier (no image API key needed). GitHub Models was retired on 2026-07-30 and is no longer supported.
 >
 > **Pollinations `pk_*` keys** have limited pollen balance. The generator automatically uses the free tier for images to preserve pollen for text generation.
 

@@ -15,10 +15,10 @@ Create a `.env` file:
 
 ```env
 # AI Provider — pick one:
-AI_PROVIDER=github-models               # Free with GitHub Copilot
-AI_API_KEY=ghp_your_github_token        # github.com/settings/tokens
-# AI_PROVIDER=pollinations              # Alternative: enter.pollinations.ai
-# AI_API_KEY=sk_your_pollinations_key
+AI_PROVIDER=pollinations                # Free tier: enter.pollinations.ai
+AI_API_KEY=pk_your_pollinations_key     # pk_ = free/sequential, sk_ = parallel
+# AI_PROVIDER=openai                    # Paid, fastest
+# AI_API_KEY=sk-your-openai-key
 
 # Shopware connection (required to sync data)
 SW_ENV_URL=http://localhost:8000
@@ -64,25 +64,24 @@ This creates a fresh single commit, cleans up all stale refs, and repackages the
 
 ## AI Providers & Performance
 
-| Provider        | API Key  | Text       | Images                  | Best For                     |
-| --------------- | -------- | ---------- | ----------------------- | ---------------------------- |
-| `github-models` | PAT      | Free       | Free (Pollinations)     | **Free with GitHub Copilot** |
-| `pollinations`  | `sk_*`   | Parallel   | Parallel (with key)     | Fast, no rate limits         |
-| `pollinations`  | `pk_*`   | Sequential | Free (pollen preserved) | Free tier                    |
-| `openai`        | `sk-...` | Parallel   | Paid (gpt-image-1)      | Production, high volume      |
+| Provider       | API Key  | Text       | Images                  | Best For                |
+| -------------- | -------- | ---------- | ----------------------- | ----------------------- |
+| `pollinations` | `pk_*`   | Sequential | Free (pollen preserved) | **Free setup**          |
+| `pollinations` | `sk_*`   | Parallel   | Parallel (with key)     | Fast, no rate limits    |
+| `openai`       | `sk-...` | Parallel   | Paid (gpt-image-1-mini) | Production, high volume |
 
-### Free Setup (GitHub Copilot)
+> GitHub Models (`AI_PROVIDER=github-models`) was [retired on July 30, 2026](https://github.blog/changelog/2026-07-30-github-models-is-now-retired/). The generator now stops with a hint to switch providers if it is still set.
 
-If you have a GitHub Copilot subscription, you can generate catalogs entirely for free — text via GitHub Models, images via Pollinations free tier:
+### Free Setup (Pollinations)
+
+Create a free publishable key at **[enter.pollinations.ai](https://enter.pollinations.ai)**. Text uses the default `openai` model (gpt-5.4-nano) and images use the Pollinations free tier, so the key's pollen is kept for text:
 
 ```env
-AI_PROVIDER=github-models
-AI_API_KEY=ghp_your_github_token
+AI_PROVIDER=pollinations
+AI_API_KEY=pk_your_pollinations_key
 ```
 
-No `IMAGE_PROVIDER` or `IMAGE_API_KEY` needed. Images are automatically generated via Pollinations free tier.
-
-> Create a personal access token at **[github.com/settings/tokens](https://github.com/settings/tokens)** (no extra scopes needed beyond Copilot access).
+No `IMAGE_PROVIDER` or `IMAGE_API_KEY` needed.
 
 ### Other Providers
 
@@ -90,10 +89,6 @@ No `IMAGE_PROVIDER` or `IMAGE_API_KEY` needed. Images are automatically generate
 # Pollinations with secret key - parallel processing, no rate limits
 AI_PROVIDER=pollinations
 AI_API_KEY=sk_your_pollinations_secret_key
-
-# Pollinations with publishable key - pollen preserved for text, images are free
-AI_PROVIDER=pollinations
-AI_API_KEY=pk_your_pollinations_key
 
 # OpenAI (full parallel processing, paid images)
 AI_PROVIDER=openai
@@ -107,7 +102,7 @@ AI_API_KEY=sk-your-openai-key
 ```env
 AI_MODEL=gpt-6-luna          # OpenAI default (reasoning disabled)
 IMAGE_PROVIDER=none          # Disable images
-IMAGE_MODEL=gpt-image-1-mini # OpenAI default; optional: gpt-image-2.5-flare
+IMAGE_MODEL=gpt-image-1-mini # OpenAI default; optional: gpt-image-2.5-flare. Pollinations: flux (default), klein, zimage
 IMAGE_QUALITY=low            # OpenAI only: low (fastest), medium, high, auto
 ```
 
@@ -119,7 +114,7 @@ previous, faster model. Explicit model overrides are preserved.
 Images stay on **GPT Image 1 Mini / low**. Flare produced sharper detail in the sample,
 but its estimated cost was about 54% higher and its speed advantage was small. Opt in
 with `IMAGE_MODEL=gpt-image-2.5-flare`; existing image sizes and WebP caching work unchanged.
-Pollinations image models remain `flux`, `turbo`, and `klein`.
+Pollinations image models remain `flux`, `klein`, and `zimage`.
 
 ### Expected Times (90 products)
 
@@ -132,7 +127,6 @@ Actual times depend on model, account limits, and generated content.
 | --------------------- | ------------- | ------- |
 | OpenAI                | Parallel (5x) | ~5 min  |
 | Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
-| GitHub Models         | Limited (2x)  | ~10 min |
 | Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full generation with images (~270 images at 3 views per product):**
@@ -143,7 +137,7 @@ Actual times depend on model, account limits, and generated content.
 | OpenAI             | gpt-image-1-mini | medium  | ~12-18 min |
 | OpenAI             | gpt-image-1.5    | medium  | ~20-25 min |
 | Pollinations       | flux (default)   | -       | ~15-20 min |
-| Pollinations       | turbo (fast)     | -       | ~10-15 min |
+| Pollinations       | zimage           | -       | ~10-15 min |
 | Any (images: none) | -                | -       | ~5-13 min  |
 
 > Image generation is the primary time factor. Use `IMAGE_PROVIDER=none` to skip images for faster testing.

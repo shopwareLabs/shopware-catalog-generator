@@ -46,21 +46,20 @@ Providers may ignore `width`/`height` if they use fixed sizes or prefer their ow
 
 ### Text Providers
 
-| Provider              | Name            | maxConcurrency | Notes                           |
-| --------------------- | --------------- | -------------- | ------------------------------- |
-| OpenAI                | `openai`        | 5              | High rate limits                |
-| GitHub Models         | `github-models` | 2              | 2 concurrent request limit      |
-| Pollinations (sk\_\*) | `pollinations`  | 5              | Secret keys have no rate limits |
-| Pollinations (pk\_\*) | `pollinations`  | 1              | Sequential processing           |
+| Provider              | Name           | maxConcurrency | Notes                           |
+| --------------------- | -------------- | -------------- | ------------------------------- |
+| OpenAI                | `openai`       | 5              | High rate limits                |
+| Pollinations (sk\_\*) | `pollinations` | 5              | Secret keys have no rate limits |
+| Pollinations (pk\_\*) | `pollinations` | 1              | Sequential processing           |
 
 ### Image Providers
 
-| Provider              | Name           | Model            | maxConcurrency | Notes                  |
-| --------------------- | -------------- | ---------------- | -------------- | ---------------------- |
-| OpenAI                | `openai`       | gpt-image-1-mini | 10             | Cost-focused default   |
-| Pollinations (sk\_\*) | `pollinations` | flux/turbo       | 5              | Direct base64 response |
-| Pollinations (pk\_\*) | `pollinations` | flux/turbo       | 2              | Limited parallelism    |
-| Noop                  | `none`         | -                | 1              | Disabled (no images)   |
+| Provider              | Name           | Model             | maxConcurrency | Notes                  |
+| --------------------- | -------------- | ----------------- | -------------- | ---------------------- |
+| OpenAI                | `openai`       | gpt-image-1-mini  | 10             | Cost-focused default   |
+| Pollinations (sk\_\*) | `pollinations` | flux/klein/zimage | 5              | Direct base64 response |
+| Pollinations (pk\_\*) | `pollinations` | flux/klein/zimage | 2              | Limited parallelism    |
+| Noop                  | `none`         | -                 | 1              | Disabled (no images)   |
 
 **OpenAI Image Notes:**
 
@@ -105,13 +104,13 @@ const { text, image } = createProvidersFromEnv();
 All providers require an API key. Get a Pollinations key at [enter.pollinations.ai](https://enter.pollinations.ai).
 
 ```env
-AI_PROVIDER=pollinations|github-models|openai
+AI_PROVIDER=pollinations|openai   # github-models was retired 2026-07-30 and now throws
 AI_API_KEY=xxx  # Required for all providers
 AI_MODEL=gpt-6-luna  # OpenAI default; optional override
 
 IMAGE_PROVIDER=pollinations|openai|none
 IMAGE_API_KEY=xxx
-IMAGE_MODEL=gpt-image-1-mini|gpt-image-2.5-flare  # For OpenAI; flux|turbo|klein for Pollinations
+IMAGE_MODEL=gpt-image-1-mini|gpt-image-2.5-flare  # For OpenAI; flux|klein|zimage for Pollinations
 IMAGE_QUALITY=low|medium|high|auto  # OpenAI only, default: low
 ```
 
@@ -144,7 +143,7 @@ case "my-provider":
 3. Add type to `AIProviderType` in `src/types/providers.ts`:
 
 ```typescript
-export type AIProviderType = "openai" | "github-models" | "pollinations" | "my-provider";
+export type AIProviderType = "openai" | "pollinations" | "my-provider";
 ```
 
 4. Export from `src/providers/index.ts`
@@ -157,4 +156,4 @@ The application uses `executeWithRetry()` for automatic retry on 429 errors:
 
 - Exponential backoff: 10s → 20s → 40s → 80s → 160s
 - Max 5 retries
-- Handles GitHub Models' 10 requests/60s limit
+- Handles provider rate limits (e.g. Pollinations pk_* keys)

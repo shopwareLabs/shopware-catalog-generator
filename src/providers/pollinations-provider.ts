@@ -10,6 +10,7 @@ import type {
     TextProvider,
 } from "../types/index.js";
 
+import { DEFAULT_POLLINATIONS_IMAGE_MODEL } from "../types/index.js";
 import { logger } from "../utils/index.js";
 
 /** Pollinations.ai text generation provider (requires API key from enter.pollinations.ai) */
@@ -130,7 +131,7 @@ export class PollinationsTextProvider implements TextProvider {
 }
 
 /** Available Pollinations image models */
-const POLLINATIONS_IMAGE_MODELS = ["flux", "klein", "turbo"] as const;
+const POLLINATIONS_IMAGE_MODELS = ["flux", "klein", "zimage"] as const;
 
 /** Pollinations.ai image generation provider. Works without API key (free, rate-limited). */
 export class PollinationsImageProvider implements ImageProvider {
@@ -141,7 +142,7 @@ export class PollinationsImageProvider implements ImageProvider {
     private readonly apiKey: string;
     private readonly model: string;
 
-    constructor(apiKey: string = "", model: string = "klein") {
+    constructor(apiKey: string = "", model: string = DEFAULT_POLLINATIONS_IMAGE_MODEL) {
         this.apiKey = apiKey;
         this.model = model;
 
@@ -185,12 +186,9 @@ export class PollinationsImageProvider implements ImageProvider {
         } catch (error) {
             if (error instanceof Error && error.name === "AbortError") {
                 logger.warn("Pollinations image generation timed out after 2 minutes");
-                logger.info(
-                    "TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=turbo",
-                    {
-                        cli: true,
-                    }
-                );
+                logger.info(`TIP: Try a different model with ${this.alternativeModelHint()}`, {
+                    cli: true,
+                });
             } else {
                 logger.warn("Pollinations image generation failed:", { data: error });
             }
@@ -246,7 +244,7 @@ export class PollinationsImageProvider implements ImageProvider {
                 errorMessage.includes("No active") &&
                 errorMessage.includes("servers available")
             ) {
-                const otherModels = POLLINATIONS_IMAGE_MODELS.filter((m) => m !== this.model);
+                const otherModels = this.alternativeModels();
                 logger.info(`\n💡 TIP: The "${this.model}" model is currently unavailable.`, {
                     cli: true,
                 });
@@ -271,9 +269,22 @@ export class PollinationsImageProvider implements ImageProvider {
         } catch {
             // If JSON parsing fails, just show the status
             logger.error(`Pollinations image generation failed: ${statusText}`);
-            logger.info(`TIP: Try a different model with IMAGE_MODEL=flux or IMAGE_MODEL=klein`, {
+            logger.info(`TIP: Try a different model with ${this.alternativeModelHint()}`, {
                 cli: true,
             });
         }
+    }
+
+    /** Free image models other than the current one */
+    private alternativeModels(): string[] {
+        return POLLINATIONS_IMAGE_MODELS.filter((m) => m !== this.model);
+    }
+
+    /** e.g. "IMAGE_MODEL=klein or IMAGE_MODEL=zimage" */
+    private alternativeModelHint(): string {
+        return this.alternativeModels()
+            .slice(0, 2)
+            .map((m) => `IMAGE_MODEL=${m}`)
+            .join(" or ");
     }
 }

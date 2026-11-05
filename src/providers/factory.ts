@@ -7,9 +7,12 @@ import type {
     TextProvider,
 } from "../types/index.js";
 
-import { PROVIDER_DEFAULTS } from "../types/index.js";
+import {
+    AI_PROVIDER_TYPES,
+    DEFAULT_POLLINATIONS_IMAGE_MODEL,
+    PROVIDER_DEFAULTS,
+} from "../types/index.js";
 import { logger } from "../utils/index.js";
-import { GitHubModelsTextProvider } from "./github-models-provider.js";
 import { NoOpImageProvider } from "./noop-provider.js";
 import { OpenAIImageProvider, OpenAITextProvider } from "./openai-provider.js";
 import { PollinationsImageProvider, PollinationsTextProvider } from "./pollinations-provider.js";
@@ -26,7 +29,7 @@ export function createProvidersFromEnv(): { text: TextProvider; image: ImageProv
  */
 export function providerConfigFromEnv(): ProviderConfig {
     return {
-        aiProvider: (process.env.AI_PROVIDER as AIProviderType) || "pollinations",
+        aiProvider: parseAIProvider(process.env.AI_PROVIDER),
         apiKey: process.env.AI_API_KEY,
         textModel: process.env.AI_MODEL,
         imageProvider: process.env.IMAGE_PROVIDER as ImageProviderType | undefined,
@@ -34,6 +37,29 @@ export function providerConfigFromEnv(): ProviderConfig {
         imageModel: process.env.IMAGE_MODEL,
         imageQuality: process.env.IMAGE_QUALITY,
     };
+}
+
+/**
+ * Validate the AI_PROVIDER value. Defaults to Pollinations when unset.
+ * Fails loudly for GitHub Models, which was retired on 2026-07-30.
+ */
+export function parseAIProvider(value: string | undefined): AIProviderType {
+    if (!value) return "pollinations";
+
+    if (value === "github-models") {
+        throw new Error(
+            "GitHub Models was retired on 2026-07-30. Set AI_PROVIDER=pollinations " +
+                "(free key at enter.pollinations.ai) or AI_PROVIDER=openai in your .env file."
+        );
+    }
+
+    const provider = AI_PROVIDER_TYPES.find((type) => type === value);
+    if (!provider) {
+        throw new Error(
+            `Unknown AI_PROVIDER "${value}". Use one of: ${AI_PROVIDER_TYPES.join(", ")}.`
+        );
+    }
+    return provider;
 }
 
 /**
@@ -66,7 +92,7 @@ export function resolveModelSelection(config: ProviderConfig): ModelSelection {
             textProvider,
             textModel,
             imageProvider,
-            imageModel: config.imageModel || "flux",
+            imageModel: config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL,
             imageFreeTier: !keyed,
         };
     }
@@ -126,9 +152,6 @@ function createTextProvider(config: ProviderConfig): TextProvider {
         case "openai":
             return new OpenAITextProvider(apiKey, model);
 
-        case "github-models":
-            return new GitHubModelsTextProvider(apiKey, model);
-
         case "pollinations":
             return new PollinationsTextProvider(model, apiKey);
 
@@ -158,7 +181,7 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
         }
 
         case "pollinations": {
-            const pollinationsModel = config.imageModel || "flux";
+            const pollinationsModel = config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL;
 
             // Use explicit IMAGE_API_KEY if set, otherwise:
             // - sk_ keys: pass through (no balance constraints)

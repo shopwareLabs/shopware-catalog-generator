@@ -289,9 +289,6 @@ function buildNotes(input: CostEstimateInput): string[] {
     if (selection.textProvider === "pollinations") {
         notes.push("Pollinations text is billed in pollen; check enter.pollinations.ai.");
     }
-    if (selection.textProvider === "github-models") {
-        notes.push("GitHub Models has no per-token price data.");
-    }
     if (selection.textProvider === "openai" && !lookupTextPrice(selection)) {
         notes.push(`No price data for text model "${selection.textModel}".`);
     }

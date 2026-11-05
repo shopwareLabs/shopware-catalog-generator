@@ -5,7 +5,6 @@ export {
     providerConfigFromEnv,
     resolveModelSelection,
 } from "./factory.js";
-export { GitHubModelsTextProvider } from "./github-models-provider.js";
 export { NoOpImageProvider } from "./noop-provider.js";
 export { OpenAIImageProvider, OpenAITextProvider } from "./openai-provider.js";
 export { PollinationsImageProvider, PollinationsTextProvider } from "./pollinations-provider.js";

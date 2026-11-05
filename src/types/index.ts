@@ -67,7 +67,11 @@ export type {
     ProviderConfig,
     TextProvider,
 } from "./providers.js";
-export { PROVIDER_DEFAULTS } from "./providers.js";
+export {
+    AI_PROVIDER_TYPES,
+    DEFAULT_POLLINATIONS_IMAGE_MODEL,
+    PROVIDER_DEFAULTS,
+} from "./providers.js";
 
 // Shopware entity types and Zod schemas
 export type {

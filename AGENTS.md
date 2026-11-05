@@ -45,7 +45,6 @@ src/
 │   ├── index.ts              # Exports + factory
 │   ├── factory.ts            # Provider creation logic
 │   ├── openai-provider.ts    # OpenAI (text + images)
-│   ├── github-models-provider.ts  # GitHub Models (text only)
 │   ├── pollinations-provider.ts   # Pollinations (text + images, free)
 │   └── noop-provider.ts      # Disabled image provider
 │
@@ -307,7 +306,6 @@ than GPT-4.1 in the [small live model benchmark](docs/model-benchmark-2026-09-23
 | --------------------- | ------------- | ------- |
 | OpenAI                | Parallel (5x) | ~5 min  |
 | Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
-| GitHub Models         | Limited (2x)  | ~10 min |
 | Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full hydration with images (~270 product + ~20 CMS + category banners):**
@@ -318,7 +316,7 @@ than GPT-4.1 in the [small live model benchmark](docs/model-benchmark-2026-09-23
 | OpenAI                | gpt-image-1-mini | medium  | Parallel (10x) | ~12-18 min |
 | OpenAI                | gpt-image-1.5    | medium  | Parallel (10x) | ~20-25 min |
 | Pollinations (sk\_\*) | flux             | -       | Parallel (5x)  | ~15-20 min |
-| Pollinations (sk\_\*) | turbo            | -       | Parallel (5x)  | ~10-15 min |
+| Pollinations (sk\_\*) | zimage           | -       | Parallel (5x)  | ~10-15 min |
 | Pollinations (pk\_\*) | flux             | -       | Limited (2x)   | ~40-50 min |
 
 > All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
@@ -493,13 +491,12 @@ Providers may ignore `width`/`height` if they use a fixed size or prefer their o
 | Provider              | maxConcurrency | Notes                           |
 | --------------------- | -------------- | ------------------------------- |
 | OpenAI                | 5              | High rate limits                |
-| GitHub Models         | 2              | 2 concurrent request limit      |
 | Pollinations (sk\_\*) | 5              | Secret keys have no rate limits |
 | Pollinations (pk\_\*) | 1              | Sequential processing           |
 
 Factory in `providers/factory.ts` creates providers from env vars:
 
-- `AI_PROVIDER`: openai | github-models | pollinations
+- `AI_PROVIDER`: openai | pollinations (`github-models` was retired on 2026-07-30 and throws a clear error)
 - `IMAGE_PROVIDER`: openai | pollinations | none (auto-detected if not set)
 - `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
 
@@ -509,7 +506,6 @@ is an optional, higher-cost alternative. See [live benchmark](docs/model-benchma
 
 **Image provider auto-detection:** When `IMAGE_PROVIDER` is not set:
 
-- `github-models` → Pollinations free tier (no key, no cost)
 - `pollinations` with `sk_*` key → Pollinations with key (parallel)
 - `pollinations` with `pk_*` key → Pollinations free tier (pollen preserved for text)
 - `openai` → OpenAI images (paid)
@@ -1069,16 +1065,16 @@ server.addTool({
 
 ```env
 # AI Provider — pick one:
-AI_PROVIDER=github-models              # Free with GitHub Copilot (recommended)
-AI_API_KEY=ghp_your_github_token       # github.com/settings/tokens
-# AI_PROVIDER=pollinations             # Alternative: enter.pollinations.ai
-# AI_API_KEY=sk_your_pollinations_key  # sk_ = parallel, pk_ = sequential
+AI_PROVIDER=pollinations               # Free tier: enter.pollinations.ai (recommended)
+AI_API_KEY=pk_your_pollinations_key    # pk_ = free/sequential, sk_ = parallel
+# AI_PROVIDER=openai                   # Paid, fastest
+# AI_API_KEY=sk-your-openai-key
 
 # Optional overrides
 AI_MODEL=gpt-6-luna   # OpenAI default; or gpt-5.4-mini, gpt-4.1-2025-04-14
-IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: github-models/pk_ → free Pollinations
-IMAGE_API_KEY=xxx                        # Not needed for github-models or pk_ keys
-IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-1, gpt-image-1.5, flux, turbo, klein
+IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
+IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
+IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-2.5-flare, flux, klein, zimage
 IMAGE_QUALITY=low  # OpenAI only: low (fastest/cheapest), medium, high, auto
 
 # Shopware connection
@@ -1444,7 +1440,7 @@ const result = await executeWithRetry(() =>
 ```
 
 Exponential backoff: 10s → 20s → 40s → 80s → 160s, max 5 retries.
-Handles GitHub Models' 10 requests/60s limit.
+Handles provider rate limits such as Pollinations pk_* keys.
 
 ### Logging
 

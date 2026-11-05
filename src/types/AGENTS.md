@@ -55,7 +55,7 @@ types/
 
 - `TextProvider` — AI text generation interface (generateCompletion, maxConcurrency, tokenLimit)
 - `ImageProvider` — AI image generation interface (generateImage)
-- `AIProviderType` — `"openai" | "github-models" | "pollinations"`
+- `AIProviderType` — `"openai" | "pollinations"` (`AI_PROVIDER_TYPES` lists them; `DEFAULT_POLLINATIONS_IMAGE_MODEL` is the shared Pollinations image default)
 - `PROVIDER_DEFAULTS` — Default concurrency and token limits per provider
 
 ## Conventions

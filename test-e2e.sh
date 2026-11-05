@@ -4,7 +4,7 @@
 # Prerequisites:
 # - Shopware running at localhost:8000
 # - SW_ENV_URL, SW_CLIENT_ID, SW_CLIENT_SECRET set in .env
-# - AI_PROVIDER configured (github-models recommended)
+# - AI_PROVIDER configured (pollinations or openai)
 #
 # Usage:
 #   ./test-e2e.sh                                                    # Full test: create → hydrate → upload → verify

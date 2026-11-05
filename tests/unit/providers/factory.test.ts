@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { resolveModelSelection } from "../../../src/providers/factory.js";
+import { parseAIProvider, resolveModelSelection } from "../../../src/providers/factory.js";
+import { PollinationsImageProvider } from "../../../src/providers/pollinations-provider.js";
+import { DEFAULT_POLLINATIONS_IMAGE_MODEL } from "../../../src/types/index.js";
 
 describe("resolveModelSelection", () => {
     test("OpenAI defaults to gpt-6-luna text and gpt-image-1-mini low quality images", () => {
@@ -47,13 +49,6 @@ describe("resolveModelSelection", () => {
         expect(selection.imageModel).toBeUndefined();
     });
 
-    test("GitHub Models falls back to free Pollinations images", () => {
-        const selection = resolveModelSelection({ aiProvider: "github-models", apiKey: "ghp_x" });
-
-        expect(selection.imageProvider).toBe("pollinations");
-        expect(selection.imageFreeTier).toBe(true);
-    });
-
     test("Pollinations sk_ keys use paid images, pk_ keys use the free tier", () => {
         const secret = resolveModelSelection({ aiProvider: "pollinations", apiKey: "sk_abc" });
         const publishable = resolveModelSelection({ aiProvider: "pollinations", apiKey: "pk_abc" });
@@ -71,5 +66,39 @@ describe("resolveModelSelection", () => {
         });
 
         expect(selection.imageFreeTier).toBe(false);
+    });
+
+    test("Pollinations images default to the shared default model", () => {
+        const selection = resolveModelSelection({ aiProvider: "pollinations" });
+
+        expect(selection.imageModel).toBe(DEFAULT_POLLINATIONS_IMAGE_MODEL);
+    });
+});
+
+describe("parseAIProvider", () => {
+    test("defaults to Pollinations when AI_PROVIDER is unset", () => {
+        expect(parseAIProvider(undefined)).toBe("pollinations");
+        expect(parseAIProvider("")).toBe("pollinations");
+    });
+
+    test("accepts supported providers", () => {
+        expect(parseAIProvider("openai")).toBe("openai");
+        expect(parseAIProvider("pollinations")).toBe("pollinations");
+    });
+
+    test("explains that GitHub Models is retired", () => {
+        expect(() => parseAIProvider("github-models")).toThrow(/retired/);
+    });
+
+    test("rejects unknown providers", () => {
+        expect(() => parseAIProvider("foo")).toThrow(/Unknown AI_PROVIDER "foo"/);
+    });
+});
+
+describe("PollinationsImageProvider", () => {
+    test("uses the same default model as the factory", () => {
+        expect(new PollinationsImageProvider()).toMatchObject({
+            model: DEFAULT_POLLINATIONS_IMAGE_MODEL,
+        });
     });
 });
