@@ -1260,6 +1260,24 @@ lane's `APP_URL`, creates a temporary admin integration with `bin/console integr
 exports its credentials only to its own child processes, and deletes the integration through
 the Admin API on exit, whether the run passed or failed. Local use only.
 
+**Lane matrix:** `./test-e2e-lanes.sh` runs the same catalog against several lanes
+(default `65,66,67,68,trunk`).
+
+```bash
+./test-e2e-lanes.sh                                  # New store, hydrated once, all default lanes
+./test-e2e-lanes.sh --lanes=67,trunk --reuse=music   # Reuse an existing hydrated blueprint
+./test-e2e-lanes.sh --lanes=67,trunk --cleanup=music # Remove the store from those lanes
+```
+
+- Content is created and hydrated once with `SW_ENV_URL` unset, so it does not depend on any shop.
+- Each lane gets its own cache copy in `generated-lanes/<lane>/`, because the cache stores
+  Shopware IDs. `test-e2e.sh` reads `CACHE_DIR` for this.
+- A failing lane or post-processor does not stop the run. `test-e2e.sh` writes `steps.tsv`
+  and `verify.json` into `E2E_RESULT_DIR`, and the wrapper turns them into
+  `e2e-results/<timestamp>/summary.md` (lane, Shopware version, step results, storefront status).
+- `verify.ts` also requests every SalesChannel domain (EN and DE) and expects HTTP 200.
+  On sw-dev lanes this needs the proxy to route `<store>.<lane>.localhost` subdomains.
+
 ## Testing
 
 ```bash

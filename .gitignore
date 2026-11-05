@@ -24,3 +24,5 @@ npm-debug.log
 .DS_Store?
 ehthumbs.db
 Thumbs.db
+generated-lanes/
+e2e-results/

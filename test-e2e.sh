@@ -16,18 +16,25 @@
 #   ./test-e2e.sh --cleanup=<name>                                   # Only cleanup specific SalesChannel
 #   ./test-e2e.sh --sw-dev=67 --reuse=<name> --skip-hydrate          # Run against a local sw-dev lane
 #
+#   ./test-e2e-lanes.sh --lanes=sw65,sw66,sw67,sw68,trunk           # Same content on several lanes (see that script)
+#
+# Environment:
+# - CACHE_DIR       cache root (default ./generated)
+# - E2E_RESULT_DIR  if set, writes steps.tsv (step, status) and verify.json there
+#
 # --sw-dev=<lane> targets a local sw-dev lane (see `sw-dev list`) instead of .env:
 # - SW_ENV_URL is set to the lane's APP_URL
 # - A temporary admin integration is created via bin/console integration:create
 # - Its credentials are only exported to this script's child processes
 # - The integration is deleted via the Admin API when the script exits (pass or fail)
 #
-# Post-processors run:
+# Post-processors run (each one runs even if an earlier one failed; the phase fails at the end):
 # - CMS homepage: cms-home (root category layout with welcome text + product listing)
 # - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form
 # - Images: images (upload pre-generated product + category images)
 # - Digital product: digital-product (creates Gift Card €50)
 # - CMS orchestrator: cms-testing (creates Testing category hierarchy)
+# - Theme: theme (child theme with brand colors + media)
 
 set -e  # Exit on error
 
@@ -82,6 +89,26 @@ for arg in "$@"; do
     esac
 done
 
+CACHE_ROOT="${CACHE_DIR:-./generated}"
+CURRENT_STEP=""
+
+# Record step results for the lane matrix (no-op without E2E_RESULT_DIR)
+record_step() {
+    [ -z "$E2E_RESULT_DIR" ] && return 0
+    mkdir -p "$E2E_RESULT_DIR"
+    printf '%s\t%s\n' "$1" "$2" >> "$E2E_RESULT_DIR/steps.tsv"
+}
+
+# Run a step; on failure record it and let set -e stop the script
+run_step() {
+    local step="$1"
+    shift
+    CURRENT_STEP="$step"
+    "$@"
+    record_step "$step" pass
+    CURRENT_STEP=""
+}
+
 # Temporary integration for --sw-dev runs (local only, removed on exit)
 SW_DEV_BIN="${SW_DEV_BIN:-$HOME/shopware-dev/bin/sw-dev}"
 TEMP_INTEGRATION_KEY=""
@@ -97,6 +124,25 @@ fetch_temp_integration_token() {
         -H 'Content-Type: application/json' \
         -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"$TEMP_INTEGRATION_KEY\",\"client_secret\":\"$TEMP_INTEGRATION_SECRET\"}" |
         jq -r '.access_token // empty'
+}
+
+# Fallback for lanes without `integration:create --access-key`: log in as the lane admin
+# (SW_DEV_ADMIN_USER / SW_DEV_ADMIN_PASSWORD, default admin / shopware) and POST the integration
+create_temp_integration_via_api() {
+    local admin_token
+    admin_token=$(curl -sf -X POST "$SW_ENV_URL/api/oauth/token" \
+        -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg u "${SW_DEV_ADMIN_USER:-admin}" --arg p "${SW_DEV_ADMIN_PASSWORD:-shopware}" \
+            '{grant_type: "password", client_id: "administration", scopes: "write", username: $u, password: $p}')" |
+        jq -r '.access_token // empty' || true)
+    [ -z "$admin_token" ] && return 1
+
+    curl -sf -o /dev/null -X POST "$SW_ENV_URL/api/integration" \
+        -H "Authorization: Bearer $admin_token" -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg label "$1" --arg key "$TEMP_INTEGRATION_KEY" --arg secret "$TEMP_INTEGRATION_SECRET" \
+            '{label: $label, accessKey: $key, secretAccessKey: $secret, admin: true}')" || return 1
+
+    [ -n "$(fetch_temp_integration_token || true)" ]
 }
 
 create_temp_integration() {
@@ -123,8 +169,10 @@ create_temp_integration() {
         --access-key="$TEMP_INTEGRATION_KEY" \
         --secret-access-key="$TEMP_INTEGRATION_SECRET")
 
-    # The pipe in sw_dev_exec hides the exit code, so prove the credentials work instead
-    if [ -z "$(fetch_temp_integration_token || true)" ]; then
+    # The pipe in sw_dev_exec hides the exit code, so prove the credentials work instead.
+    # Before 6.7 the command is missing (6.5) or has no key options (6.6): use the Admin API.
+    if [ -z "$(fetch_temp_integration_token || true)" ] &&
+        ! create_temp_integration_via_api "$integration_name"; then
         echo "ERROR: Temporary integration does not authenticate in sw-dev lane '$SW_DEV_LANE'"
         echo "$create_output" | grep -v -e "$TEMP_INTEGRATION_SECRET" | tail -5
         TEMP_INTEGRATION_KEY=""
@@ -191,6 +239,7 @@ fi
 if [ -n "$SW_DEV_LANE" ]; then
     trap delete_temp_integration EXIT
     create_temp_integration
+    record_step connect pass
 fi
 
 SW_URL="${SW_ENV_URL:-http://localhost:8000}"
@@ -206,6 +255,7 @@ echo ""
 cleanup() {
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
+        [ -n "$CURRENT_STEP" ] && record_step "$CURRENT_STEP" fail
         echo ""
         echo "=== E2E Test FAILED (exit code: $exit_code) ==="
         echo ""
@@ -249,7 +299,7 @@ fi
 # Phase 0: Crawl real store for inspiration (optional, runs BEFORE blueprint creation
 # so the brand description can inform the blueprint)
 if [ -n "$INSPIRE_URL" ] && [ "$SKIP_CREATE" = false ]; then
-    if [ -f "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
+    if [ -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
         echo "[0/5] Skipping inspire (inspiration.json already exists)"
     else
         echo "[0/5] Crawling $INSPIRE_URL for inspiration..."
@@ -257,8 +307,8 @@ if [ -n "$INSPIRE_URL" ] && [ "$SKIP_CREATE" = false ]; then
         echo "✓ Inspiration saved"
     fi
     # Use brandDescription from inspiration as description fallback if not explicitly provided
-    if [ -z "$CUSTOM_DESCRIPTION" ] && [ -f "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
-        BRAND_DESC=$(jq -r '.brandDescription // empty' "generated/sales-channels/$TEST_SALESCHANNEL/inspiration.json" 2>/dev/null || true)
+    if [ -z "$CUSTOM_DESCRIPTION" ] && [ -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/inspiration.json" ]; then
+        BRAND_DESC=$(jq -r '.brandDescription // empty' "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/inspiration.json" 2>/dev/null || true)
         if [ -n "$BRAND_DESC" ]; then
             TEST_DESCRIPTION="$BRAND_DESC"
             echo "  Using brand description from inspiration: $TEST_DESCRIPTION"
@@ -270,15 +320,15 @@ fi
 # Phase 1: Create blueprint
 if [ "$SKIP_CREATE" = true ]; then
     echo "[1/5] Skipping blueprint creation (--skip-create or --reuse)"
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
-        echo "ERROR: No blueprint found at generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json"
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
+        echo "ERROR: No blueprint found at $CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json"
         exit 1
     fi
 else
     echo "[1/5] Creating blueprint..."
-    bun run blueprint create --name="$TEST_SALESCHANNEL" --description="$TEST_DESCRIPTION" --products=10
+    run_step create bun run blueprint create --name="$TEST_SALESCHANNEL" --description="$TEST_DESCRIPTION" --products=10
 
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
         echo "ERROR: blueprint.json not created"
         exit 1
     fi
@@ -289,26 +339,26 @@ echo ""
 # Phase 2: Hydrate with AI (products + categories + CMS text)
 if [ "$SKIP_HYDRATE" = true ]; then
     echo "[2/5] Skipping AI hydration (--skip-hydrate)"
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
         echo "WARNING: No hydrated blueprint found. Upload may fail."
     fi
-elif [ -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+elif [ -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
     echo "[2/5] Skipping AI hydration (hydrated blueprint already exists)"
     # Still hydrate CMS text if not done yet
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
         echo "  Hydrating CMS text content..."
         bun run blueprint hydrate --name="$TEST_SALESCHANNEL" --only=cms
         echo "  ✓ CMS text hydrated"
     fi
 else
     echo "[2/5] Hydrating blueprint with AI (includes CMS text)..."
-    bun run blueprint hydrate --name="$TEST_SALESCHANNEL"
+    run_step hydrate bun run blueprint hydrate --name="$TEST_SALESCHANNEL"
 
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
         echo "ERROR: hydrated-blueprint.json not created"
         exit 1
     fi
-    if [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
+    if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/cms-blueprint.json" ]; then
         echo "WARNING: cms-blueprint.json not created (CMS text will use fixture defaults)"
     fi
     echo "✓ Blueprint hydrated (products + categories + CMS text)"
@@ -318,11 +368,11 @@ echo ""
 # Phase 3: Generate (upload to Shopware)
 if [ "$SKIP_UPLOAD" = true ]; then
     echo "[3/5] Skipping Shopware upload"
-elif [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+elif [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
     echo "[3/5] Skipping upload (no hydrated blueprint)"
 else
     echo "[3/5] Uploading to Shopware..."
-    bun run generate --name="$TEST_SALESCHANNEL"
+    run_step upload bun run generate --name="$TEST_SALESCHANNEL"
     echo "✓ Uploaded to Shopware"
 fi
 echo ""
@@ -330,35 +380,35 @@ echo ""
 # Phase 4: Run post-processors
 if [ "$SKIP_UPLOAD" = true ]; then
     echo "[4/5] Skipping post-processors"
-elif [ ! -f "generated/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+elif [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
     echo "[4/5] Skipping post-processors (no hydrated blueprint)"
 else
     echo "[4/5] Running post-processors..."
 
-    # Run CMS homepage processor (root category layout)
-    echo "  Running CMS homepage processor..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=cms-home
+    # Order matters: cms-testing links the CMS pages and the digital product
+    PROCESSOR_STEPS=(
+        "cms-home"
+        "cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form"
+        "images"
+        "digital-product"
+        "cms-testing"
+        "theme"
+    )
+    FAILED_PROCESSORS=()
+    for processors in "${PROCESSOR_STEPS[@]}"; do
+        echo "  Running $processors..."
+        if bun run process --name="$TEST_SALESCHANNEL" --only="$processors"; then
+            record_step "process:$processors" pass
+            continue
+        fi
+        record_step "process:$processors" fail
+        FAILED_PROCESSORS+=("$processors")
+    done
 
-    # Run CMS element processors (create demo pages)
-    echo "  Running CMS processors..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form
-
-    # Upload pre-generated product + category images
-    echo "  Running image processor..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=images
-
-    # Run digital product processor (create gift card)
-    echo "  Running digital product processor..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=digital-product
-
-    # Run CMS testing processor (create Testing category hierarchy)
-    echo "  Running CMS testing orchestrator..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=cms-testing
-
-    # Run theme processor (child theme with brand colors + media)
-    echo "  Running theme processor..."
-    bun run process --name="$TEST_SALESCHANNEL" --only=theme
-
+    if [ ${#FAILED_PROCESSORS[@]} -gt 0 ]; then
+        echo "ERROR: Post-processors failed: ${FAILED_PROCESSORS[*]}"
+        exit 1
+    fi
     echo "✓ Post-processors complete"
 fi
 echo ""
@@ -368,17 +418,19 @@ if [ "$SKIP_VERIFY" = true ]; then
     echo "[5/5] Skipping verification"
 else
     echo "[5/5] Verifying via Shopware API..."
-    bun run test:verify --name="$TEST_SALESCHANNEL"
+    VERIFY_ARGS=(--name="$TEST_SALESCHANNEL")
+    [ -n "$E2E_RESULT_DIR" ] && VERIFY_ARGS+=(--json="$E2E_RESULT_DIR/verify.json")
+    run_step verify bun run test:verify "${VERIFY_ARGS[@]}"
     echo "✓ API verification passed"
 fi
 echo ""
 
 echo "=== E2E Test PASSED ==="
 echo ""
-echo "Storefront URL: http://$TEST_SALESCHANNEL.localhost:8000"
+echo "Storefront URL: http://$TEST_SALESCHANNEL.${SW_URL#*://}"
 echo ""
 echo "To inspect the generated data:"
-echo "  cat generated/sales-channels/$TEST_SALESCHANNEL/blueprint.json | jq ."
+echo "  cat $CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json | jq ."
 echo ""
 echo "To cleanup:"
 echo "  bun run cleanup -- --salesChannel=\"$TEST_SALESCHANNEL\" --delete"

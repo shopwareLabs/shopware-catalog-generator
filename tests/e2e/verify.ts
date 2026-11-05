@@ -12,6 +12,8 @@
  * - CMS pages and Testing category
  */
 
+import { writeFileSync } from "node:fs";
+
 import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
 import type { SearchResult } from "../../src/shopware/api-types.js";
 
@@ -66,8 +68,16 @@ interface VerificationResult {
         childThemeExists: boolean;
         hasCustomColors: boolean;
     };
+    shopwareVersion?: string;
+    storefront: { domains: StorefrontDomainCheck[] };
     passed: boolean;
     errors: string[];
+}
+
+interface StorefrontDomainCheck {
+    url: string;
+    status: number | null;
+    error?: string;
 }
 
 interface ExpectedCounts {
@@ -107,6 +117,7 @@ async function verifyGeneration(
             childThemeExists: false,
             hasCustomColors: false,
         },
+        storefront: { domains: [] },
         passed: false,
         errors: [],
     };
@@ -131,6 +142,9 @@ async function verifyGeneration(
         );
         return result;
     }
+
+    result.shopwareVersion = await fetchShopwareVersion(hydrator.getAdminClient());
+    console.log(`Shopware version: ${result.shopwareVersion ?? "unknown"}`);
 
     // Verify SalesChannel
     console.log(`Verifying SalesChannel "${salesChannelName}"...`);
@@ -712,20 +726,94 @@ async function verifyGeneration(
         );
     }
 
+    // Verify storefront domains answer (EN + DE)
+    console.log(`Verifying storefront domains...`);
+    await verifyStorefrontDomains(client, salesChannel.id, result);
+
     // Overall pass/fail
     result.passed = result.errors.length === 0;
 
     return result;
 }
 
+async function fetchShopwareVersion(client: AdminApiClient): Promise<string | undefined> {
+    try {
+        const { data } = await client.invoke(
+            "infoShopwareVersion get /_info/version" as never,
+            {} as never
+        );
+        const version = (data as { version?: unknown }).version;
+        return typeof version === "string" ? version : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+async function checkStorefrontUrl(url: string): Promise<StorefrontDomainCheck> {
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+        await response.body?.cancel();
+        return { url, status: response.status };
+    } catch (error) {
+        return {
+            url,
+            status: null,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+
+async function verifyStorefrontDomains(
+    client: AdminApiClient,
+    salesChannelId: string,
+    result: VerificationResult
+): Promise<void> {
+    try {
+        const domains = await search<{ url?: string }>(
+            client,
+            "searchSalesChannelDomain post /search/sales-channel-domain",
+            {
+                limit: 10,
+                filter: [{ type: "equals", field: "salesChannelId", value: salesChannelId }],
+            }
+        );
+        const urls = domains.data.map((d) => d.url).filter((url): url is string => !!url);
+        if (urls.length === 0) {
+            result.errors.push("SalesChannel has no domains");
+            return;
+        }
+
+        // Sequential: the first request may warm up theme and HTTP cache
+        for (const url of urls) {
+            const check = await checkStorefrontUrl(url);
+            result.storefront.domains.push(check);
+            if (check.status === 200) {
+                console.log(`  ✓ ${url} → 200`);
+                continue;
+            }
+            const reason = check.error ?? `HTTP ${check.status}`;
+            console.log(`  ✗ ${url} → ${reason}`);
+            result.errors.push(`Storefront domain ${url} failed: ${reason}`);
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(`  ✗ Storefront domain check failed: ${message}`);
+        result.errors.push(`Storefront domain check failed: ${message}`);
+    }
+}
+
 // CLI entry point
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
     let salesChannelName: string | undefined;
+    let jsonFile: string | undefined;
 
     for (const arg of args) {
         if (arg.startsWith("--name=")) {
             salesChannelName = arg.slice("--name=".length);
+        }
+        if (arg.startsWith("--json=")) {
+            jsonFile = arg.slice("--json=".length);
         }
     }
 
@@ -759,6 +847,11 @@ async function main(): Promise<void> {
 
     const result = await verifyGeneration(salesChannelName, expected);
 
+    // Machine-readable result for the lane matrix summary
+    if (jsonFile) {
+        writeFileSync(jsonFile, JSON.stringify(result, null, 2));
+    }
+
     console.log("");
 
     if (result.passed) {
@@ -789,6 +882,9 @@ async function main(): Promise<void> {
         );
         console.log(
             `  Theme: ${result.theme.childThemeExists ? "✓" : "✗"} child theme, ${result.theme.hasCustomColors ? "✓" : "⊘"} custom colors`
+        );
+        console.log(
+            `  Storefront: ${result.storefront.domains.map((d) => `${d.url} ${d.status}`).join(", ")}`
         );
         process.exit(0);
     } else {

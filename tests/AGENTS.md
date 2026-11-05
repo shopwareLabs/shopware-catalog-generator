@@ -88,6 +88,10 @@ Prerequisites: Shopware running at `localhost:8000` with `SW_ENV_URL`, `SW_CLIEN
 With `--sw-dev=<lane>`, the script uses the lane's `APP_URL` and creates a temporary admin integration
 instead. It deletes the integration on exit, whether the run passed or failed.
 
+`./test-e2e-lanes.sh --lanes=65,67,trunk` hydrates once and runs upload, post-processors and
+verify on each lane with its own cache copy. It prints a per-lane summary table and writes logs to
+`e2e-results/<timestamp>/`. See the E2E section in the root `AGENTS.md`.
+
 The script runs 5 phases:
 
 1. **Blueprint creation** (`blueprint create --products=10`)
