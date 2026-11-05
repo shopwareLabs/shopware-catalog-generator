@@ -14,6 +14,13 @@
 #   ./test-e2e.sh --reuse=<name> --skip-hydrate                      # Skip AI, just upload → verify
 #   ./test-e2e.sh --reuse=<name> --skip-upload                       # Just verify existing data
 #   ./test-e2e.sh --cleanup=<name>                                   # Only cleanup specific SalesChannel
+#   ./test-e2e.sh --sw-dev=67 --reuse=<name> --skip-hydrate          # Run against a local sw-dev lane
+#
+# --sw-dev=<lane> targets a local sw-dev lane (see `sw-dev list`) instead of .env:
+# - SW_ENV_URL is set to the lane's APP_URL
+# - A temporary admin integration is created via bin/console integration:create
+# - Its credentials are only exported to this script's child processes
+# - The integration is deleted via the Admin API when the script exits (pass or fail)
 #
 # Post-processors run:
 # - CMS homepage: cms-home (root category layout with welcome text + product listing)
@@ -41,6 +48,7 @@ REUSE_NAME=""
 INSPIRE_URL=""
 CUSTOM_NAME=""
 CUSTOM_DESCRIPTION=""
+SW_DEV_LANE=""
 
 for arg in "$@"; do
     case $arg in
@@ -68,8 +76,89 @@ for arg in "$@"; do
         --description=*)
             CUSTOM_DESCRIPTION="${arg#*=}"
             ;;
+        --sw-dev=*)
+            SW_DEV_LANE="${arg#*=}"
+            ;;
     esac
 done
+
+# Temporary integration for --sw-dev runs (local only, removed on exit)
+SW_DEV_BIN="${SW_DEV_BIN:-$HOME/shopware-dev/bin/sw-dev}"
+TEMP_INTEGRATION_KEY=""
+TEMP_INTEGRATION_SECRET=""
+
+sw_dev_exec() {
+    # sw-dev prints ANSI resets; strip escape codes and carriage returns
+    "$SW_DEV_BIN" lane exec "$SW_DEV_LANE" "$@" 2>&1 | sed $'s/\x1b\\[[0-9;]*m//g' | tr -d '\r'
+}
+
+fetch_temp_integration_token() {
+    curl -sf -X POST "$SW_ENV_URL/api/oauth/token" \
+        -H 'Content-Type: application/json' \
+        -d "{\"grant_type\":\"client_credentials\",\"client_id\":\"$TEMP_INTEGRATION_KEY\",\"client_secret\":\"$TEMP_INTEGRATION_SECRET\"}" |
+        jq -r '.access_token // empty'
+}
+
+create_temp_integration() {
+    if [ ! -x "$SW_DEV_BIN" ]; then
+        echo "ERROR: sw-dev not found at $SW_DEV_BIN (set SW_DEV_BIN)"
+        exit 1
+    fi
+
+    local app_url
+    app_url=$(sw_dev_exec printenv APP_URL | tail -1)
+    if [ -z "$app_url" ]; then
+        echo "ERROR: Could not read APP_URL from sw-dev lane '$SW_DEV_LANE'"
+        exit 1
+    fi
+    export SW_ENV_URL="${app_url%/}"
+
+    TEMP_INTEGRATION_KEY="SWIA$(openssl rand -hex 11 | tr 'a-f' 'A-F')"
+    TEMP_INTEGRATION_SECRET="$(openssl rand -hex 32)"
+    local integration_name
+    integration_name="catalog-generator-e2e-$(date +%s)"
+
+    local create_output
+    create_output=$(sw_dev_exec bin/console integration:create "$integration_name" --admin \
+        --access-key="$TEMP_INTEGRATION_KEY" \
+        --secret-access-key="$TEMP_INTEGRATION_SECRET")
+
+    # The pipe in sw_dev_exec hides the exit code, so prove the credentials work instead
+    if [ -z "$(fetch_temp_integration_token || true)" ]; then
+        echo "ERROR: Temporary integration does not authenticate in sw-dev lane '$SW_DEV_LANE'"
+        echo "$create_output" | grep -v -e "$TEMP_INTEGRATION_SECRET" | tail -5
+        TEMP_INTEGRATION_KEY=""
+        exit 1
+    fi
+
+    export SW_CLIENT_ID="$TEMP_INTEGRATION_KEY"
+    export SW_CLIENT_SECRET="$TEMP_INTEGRATION_SECRET"
+    echo "Created temporary integration '$integration_name' in sw-dev lane '$SW_DEV_LANE'"
+}
+
+delete_temp_integration() {
+    [ -z "$TEMP_INTEGRATION_KEY" ] && return 0
+
+    local token integration_id
+    token=$(fetch_temp_integration_token || true)
+    if [ -z "$token" ]; then
+        echo "WARNING: Could not authenticate to delete temporary integration $TEMP_INTEGRATION_KEY. Delete it in the admin."
+        return 0
+    fi
+
+    integration_id=$(curl -sf -X POST "$SW_ENV_URL/api/search/integration" \
+        -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+        -d "{\"filter\":[{\"type\":\"equals\",\"field\":\"accessKey\",\"value\":\"$TEMP_INTEGRATION_KEY\"}],\"includes\":{\"integration\":[\"id\"]}}" |
+        jq -r '.data[0].id // empty' || true)
+
+    if [ -n "$integration_id" ] &&
+        curl -sf -o /dev/null -X DELETE "$SW_ENV_URL/api/integration/$integration_id" -H "Authorization: Bearer $token"; then
+        echo "Deleted temporary integration $TEMP_INTEGRATION_KEY"
+        TEMP_INTEGRATION_KEY=""
+        return 0
+    fi
+    echo "WARNING: Failed to delete temporary integration $TEMP_INTEGRATION_KEY. Delete it in the admin."
+}
 
 # Derive name from URL if --url is provided and --name is not
 if [ -z "$CUSTOM_NAME" ] && [ -n "$INSPIRE_URL" ]; then
@@ -99,6 +188,11 @@ else
     TEST_DESCRIPTION="$TEST_SALESCHANNEL webshop"
 fi
 
+if [ -n "$SW_DEV_LANE" ]; then
+    trap delete_temp_integration EXIT
+    create_temp_integration
+fi
+
 SW_URL="${SW_ENV_URL:-http://localhost:8000}"
 
 echo "=== E2E Test: $TEST_SALESCHANNEL ==="
@@ -117,6 +211,7 @@ cleanup() {
         echo ""
         echo "Cleanup: Run 'bun run cleanup -- --salesChannel=\"$TEST_SALESCHANNEL\" --delete' to remove test data"
     fi
+    delete_temp_integration
 }
 trap cleanup EXIT
 

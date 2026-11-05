@@ -1251,8 +1251,14 @@ Available processors with cleanup: `cms`, `customers`.
 ./test-e2e.sh --reuse=music               # Reuse existing blueprint
 ./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
 ./test-e2e.sh --cleanup=music             # Only cleanup specific SalesChannel
+./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate  # Run against a local sw-dev lane
 bun run test:verify --name=music          # Verify Shopware data
 ```
+
+`--sw-dev=<lane>` targets a local sw-dev lane instead of the `.env` shop. The script reads the
+lane's `APP_URL`, creates a temporary admin integration with `bin/console integration:create`,
+exports its credentials only to its own child processes, and deletes the integration through
+the Admin API on exit, whether the run passed or failed. Local use only.
 
 ## Testing
 

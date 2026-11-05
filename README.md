@@ -341,6 +341,7 @@ bun test --coverage   # With coverage report
 ./test-e2e.sh --reuse=music                                           # Reuse existing blueprint
 ./test-e2e.sh --reuse=music --skip-hydrate                            # Skip AI, just upload
 ./test-e2e.sh --cleanup=music                                         # Cleanup only
+./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate                # Local sw-dev lane, temporary credentials
 bun run test:verify --name=music                                      # Verify Shopware data
 ```
 
