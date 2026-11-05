@@ -17,6 +17,7 @@ import type { CliArgs } from "./cli/shared.js";
 import {
     blueprintCreate,
     blueprintFix,
+    blueprintEstimate,
     blueprintHydrate,
     blueprintInspire,
 } from "./cli/blueprint.js";
@@ -94,6 +95,7 @@ Usage:
 
 Commands:
   blueprint create   Generate blueprint.json (no AI calls)
+  blueprint estimate Forecast tokens, images and cost of 'blueprint hydrate' (no AI calls)
   blueprint hydrate  Hydrate blueprint with AI -> hydrated-blueprint.json
   blueprint fix      Fix placeholder names in hydrated blueprint
   blueprint inspire  Crawl a website and save inspiration.json to guide AI generation
@@ -110,7 +112,7 @@ Options:
   --type=<type>         Image fix type: product, category, cms, or theme
   --only=<list>         Comma-separated list:
                         - For 'process': processor names (images, manufacturers, etc.)
-                        - For 'blueprint hydrate': categories or properties
+                        - For 'blueprint hydrate' / 'blueprint estimate': categories, properties, or cms
   --rehydrate           [blueprint hydrate only] Force full re-hydration (overwrites existing, changes product names)
   --dry-run             Log actions without executing
   --no-template         [generate only] Skip checking for pre-generated templates
@@ -119,6 +121,7 @@ Options:
 Examples:
   bun run src/main.ts blueprint inspire --name=furniture --url=https://example-furniture.com
   bun run src/main.ts blueprint create --name=furniture --description="Wood furniture store"
+  bun run src/main.ts blueprint estimate --name=furniture                   # Cost forecast
   bun run src/main.ts blueprint hydrate --name=furniture
   bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
   bun run src/main.ts blueprint hydrate --name=furniture --only=properties  # Properties only
@@ -143,6 +146,8 @@ async function main(): Promise<void> {
             case "blueprint":
                 if (args.subcommand === "create") {
                     await blueprintCreate(args);
+                } else if (args.subcommand === "estimate") {
+                    await blueprintEstimate(args);
                 } else if (args.subcommand === "hydrate") {
                     await blueprintHydrate(args);
                 } else if (args.subcommand === "fix") {
@@ -152,7 +157,7 @@ async function main(): Promise<void> {
                 } else {
                     showHelp();
                     throw new CLIError(
-                        "blueprint requires subcommand: create, hydrate, fix, or inspire",
+                        "blueprint requires subcommand: create, estimate, hydrate, fix, or inspire",
                         "MISSING_SUBCOMMAND"
                     );
                 }

@@ -1,0 +1,235 @@
+import { describe, expect, test } from "bun:test";
+
+import type { CostEstimateInput } from "../../../src/blueprint/cost-estimator.js";
+import type { ModelSelection } from "../../../src/types/index.js";
+
+import {
+    estimateHydrationCost,
+    formatCostEstimate,
+    priceTokenUsage,
+} from "../../../src/blueprint/cost-estimator.js";
+import { createTestCategory, createTestProduct } from "../../helpers/blueprint-factory.js";
+
+const OPENAI_SELECTION: ModelSelection = {
+    textProvider: "openai",
+    textModel: "gpt-6-luna",
+    imageProvider: "openai",
+    imageModel: "gpt-image-1-mini",
+    imageQuality: "low",
+    imageFreeTier: false,
+};
+
+function createProducts(count: number, branchId: string): ReturnType<typeof createTestProduct>[] {
+    return Array.from({ length: count }, (_, i) =>
+        createTestProduct({ id: `${branchId}-p${i}`, primaryCategoryId: branchId })
+    );
+}
+
+function createInput(overrides: Partial<CostEstimateInput> = {}): CostEstimateInput {
+    return {
+        scope: "full",
+        blueprint: {
+            categories: [
+                createTestCategory({
+                    id: "a",
+                    hasImage: true,
+                    children: [createTestCategory({ id: "a1" })],
+                }),
+                createTestCategory({ id: "b" }),
+            ],
+            products: [...createProducts(25, "a"), ...createProducts(5, "b")],
+        },
+        selection: OPENAI_SELECTION,
+        cms: { pages: 8, slots: 20 },
+        pendingImages: { cms: 20, product: 60, category: 1, theme: 3 },
+        hasInspirationColors: false,
+        ...overrides,
+    };
+}
+
+describe("estimateHydrationCost", () => {
+    test("counts product batches per branch (ceil per branch, not overall)", () => {
+        const estimate = estimateHydrationCost(createInput());
+        const products = estimate.text.items.find((i) => i.label === "Products");
+
+        // Branch a: 25 -> 3 batches, branch b: 5 -> 1 batch
+        expect(products?.calls).toBe(4);
+    });
+
+    test("full scope includes categories, brand colors, products, properties and CMS", () => {
+        const labels = estimateHydrationCost(createInput()).text.items.map((i) => i.label);
+
+        expect(labels).toEqual([
+            "Categories",
+            "Brand colors",
+            "Products",
+            "Property options",
+            "CMS pages",
+        ]);
+    });
+
+    test("skips the brand colors call when inspiration provides colors", () => {
+        const estimate = estimateHydrationCost(createInput({ hasInspirationColors: true }));
+
+        expect(estimate.text.items.map((i) => i.label)).not.toContain("Brand colors");
+    });
+
+    test("categories scope only estimates the category call and no images", () => {
+        const estimate = estimateHydrationCost(createInput({ scope: "categories" }));
+
+        expect(estimate.text.items.map((i) => i.label)).toEqual(["Categories"]);
+        expect(estimate.text.calls).toBe(1);
+        expect(estimate.images.count).toBe(0);
+    });
+
+    test("cms scope only counts CMS text and CMS images", () => {
+        const estimate = estimateHydrationCost(createInput({ scope: "cms" }));
+
+        expect(estimate.text.items.map((i) => i.label)).toEqual(["CMS pages"]);
+        expect(estimate.images.count).toBe(20);
+    });
+
+    test("properties scope uses property batches instead of product content", () => {
+        const labels = estimateHydrationCost(createInput({ scope: "properties" })).text.items.map(
+            (i) => i.label
+        );
+
+        expect(labels).toEqual(["Product properties", "Property options"]);
+    });
+
+    test("prices images with the per-image list price for model and quality", () => {
+        const estimate = estimateHydrationCost(createInput());
+
+        expect(estimate.images.count).toBe(84);
+        expect(estimate.images.unitUsd).toBe(0.006);
+        expect(estimate.images.usd).toBeCloseTo(84 * 0.006, 6);
+    });
+
+    test("uses the higher price for medium quality", () => {
+        const estimate = estimateHydrationCost(
+            createInput({ selection: { ...OPENAI_SELECTION, imageQuality: "medium" } })
+        );
+
+        expect(estimate.images.unitUsd).toBe(0.015);
+    });
+
+    test("total is the sum of text and image cost", () => {
+        const estimate = estimateHydrationCost(createInput());
+
+        expect(estimate.text.usd).not.toBeNull();
+        expect(estimate.totalUsd).toBeCloseTo(
+            (estimate.text.usd ?? 0) + (estimate.images.usd ?? 0),
+            10
+        );
+    });
+
+    test("scales the category call with the number of categories", () => {
+        const small = estimateHydrationCost(createInput({ scope: "categories" }));
+        const large = estimateHydrationCost(
+            createInput({
+                scope: "categories",
+                blueprint: {
+                    categories: Array.from({ length: 20 }, (_, i) =>
+                        createTestCategory({ id: `c${i}` })
+                    ),
+                    products: [],
+                },
+            })
+        );
+
+        expect(large.text.inputTokens).toBeGreaterThan(small.text.inputTokens);
+        expect(large.text.outputTokens).toBeGreaterThan(small.text.outputTokens);
+    });
+
+    test("prices dated snapshots like their base model", () => {
+        const dated = estimateHydrationCost(
+            createInput({
+                selection: { ...OPENAI_SELECTION, textModel: "gpt-4.1-2025-04-14" },
+            })
+        );
+        const base = estimateHydrationCost(
+            createInput({ selection: { ...OPENAI_SELECTION, textModel: "gpt-4.1" } })
+        );
+
+        expect(dated.text.usd).toBe(base.text.usd);
+    });
+
+    test("reports unknown cost instead of guessing for models without price data", () => {
+        const estimate = estimateHydrationCost(
+            createInput({ selection: { ...OPENAI_SELECTION, textModel: "some-future-model" } })
+        );
+
+        expect(estimate.text.usd).toBeNull();
+        expect(estimate.totalUsd).toBeNull();
+        expect(estimate.notes.join(" ")).toContain("some-future-model");
+    });
+
+    test("Pollinations free tier images cost nothing", () => {
+        const estimate = estimateHydrationCost(
+            createInput({
+                selection: {
+                    textProvider: "pollinations",
+                    textModel: "openai",
+                    imageProvider: "pollinations",
+                    imageModel: "flux",
+                    imageFreeTier: true,
+                },
+            })
+        );
+
+        expect(estimate.images.usd).toBe(0);
+        expect(estimate.text.usd).toBeNull();
+    });
+
+    test("disabled images produce no image items", () => {
+        const estimate = estimateHydrationCost(
+            createInput({
+                selection: { ...OPENAI_SELECTION, imageProvider: "none", imageModel: undefined },
+            })
+        );
+
+        expect(estimate.images.items).toHaveLength(0);
+        expect(estimate.images.usd).toBe(0);
+    });
+});
+
+describe("priceTokenUsage", () => {
+    test("prices actual usage with the model list price", () => {
+        const usd = priceTokenUsage(OPENAI_SELECTION, {
+            calls: 1,
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            reasoningTokens: 0,
+        });
+
+        expect(usd).toBeCloseTo(0.1 + 0.5, 10);
+    });
+
+    test("returns null for providers without price data", () => {
+        const usd = priceTokenUsage(
+            { ...OPENAI_SELECTION, textProvider: "pollinations", textModel: "openai" },
+            { calls: 1, inputTokens: 10, outputTokens: 10, reasoningTokens: 0 }
+        );
+
+        expect(usd).toBeNull();
+    });
+});
+
+describe("formatCostEstimate", () => {
+    test("renders models, totals and the pricing date", () => {
+        const output = formatCostEstimate(estimateHydrationCost(createInput())).join("\n");
+
+        expect(output).toContain("gpt-6-luna");
+        expect(output).toContain("gpt-image-1-mini (low quality)");
+        expect(output).toContain("Estimated total: $");
+        expect(output).toContain("List prices as of");
+    });
+
+    test("shows unknown instead of a dollar amount when prices are missing", () => {
+        const estimate = estimateHydrationCost(
+            createInput({ selection: { ...OPENAI_SELECTION, textModel: "mystery" } })
+        );
+
+        expect(formatCostEstimate(estimate).join("\n")).toContain("unknown (no price data)");
+    });
+});

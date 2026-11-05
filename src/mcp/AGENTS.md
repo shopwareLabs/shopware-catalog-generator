@@ -13,7 +13,7 @@ mcp/
 ├── index.ts              # Server entry point (FastMCP, stdio transport)
 └── tools/                # Tool definitions by category
     ├── index.ts          # Re-exports all registration functions
-    ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix, blueprint_inspire
+    ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
     ├── generate.ts       # generate, process
     ├── image-fix.ts      # image_fix
     ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore, cache_empty_trash
@@ -22,25 +22,26 @@ mcp/
 
 ## Available Tools
 
-| Tool                   | CLI Equivalent                  |
-| ---------------------- | ------------------------------- |
-| `generate`             | `bun run generate --name=...`   |
-| `process`              | `bun run process --name=...`    |
-| `blueprint_inspire`    | `bun run blueprint inspire ...` |
-| `blueprint_create`     | `bun run blueprint create ...`  |
-| `blueprint_hydrate`    | `bun run blueprint hydrate ...` |
-| `blueprint_fix`        | `bun run blueprint fix ...`     |
-| `image_fix`            | `bun run image fix ...`         |
-| `cleanup`              | `bun run cleanup -- ...`        |
-| `cleanup_media`        | `bun run cleanup:media`         |
-| `cleanup_unused_props` | `bun run cleanup:props`         |
-| `cache_list`           | `bun run cache:list`            |
-| `cache_clear`          | `bun run cache:clear`           |
-| `cache_trash`          | `bun run cache:trash`           |
-| `cache_restore`        | `bun run cache:restore`         |
-| `cache_empty_trash`    | `bun run cache:empty-trash`     |
-| `list_saleschannels`   | (lookup only)                   |
-| `list_processors`      | (lookup only)                   |
+| Tool                   | CLI Equivalent                   |
+| ---------------------- | -------------------------------- |
+| `generate`             | `bun run generate --name=...`    |
+| `process`              | `bun run process --name=...`     |
+| `blueprint_inspire`    | `bun run blueprint inspire ...`  |
+| `blueprint_create`     | `bun run blueprint create ...`   |
+| `blueprint_hydrate`    | `bun run blueprint hydrate ...`  |
+| `blueprint_estimate`   | `bun run blueprint estimate ...` |
+| `blueprint_fix`        | `bun run blueprint fix ...`      |
+| `image_fix`            | `bun run image fix ...`          |
+| `cleanup`              | `bun run cleanup -- ...`         |
+| `cleanup_media`        | `bun run cleanup:media`          |
+| `cleanup_unused_props` | `bun run cleanup:props`          |
+| `cache_list`           | `bun run cache:list`             |
+| `cache_clear`          | `bun run cache:clear`            |
+| `cache_trash`          | `bun run cache:trash`            |
+| `cache_restore`        | `bun run cache:restore`          |
+| `cache_empty_trash`    | `bun run cache:empty-trash`      |
+| `list_saleschannels`   | (lookup only)                    |
+| `list_processors`      | (lookup only)                    |
 
 ## Architecture: Shared Services Layer
 

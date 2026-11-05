@@ -1,6 +1,6 @@
 export { applyCategoryHydration, flattenCategories, hydrateCategories } from "./category.js";
 export type { CategoryHydrationResult } from "./category.js";
-export { generateCmsBlueprint, hydrateCmsBlueprint } from "./cms.js";
+export { countCmsTextWork, generateCmsBlueprint, hydrateCmsBlueprint } from "./cms.js";
 export {
     buildCmsImageSpecs,
     buildThemeImageSpecs,

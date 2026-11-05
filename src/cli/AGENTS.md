@@ -74,6 +74,22 @@ bun run blueprint create --name=music --description="Musical instruments and acc
 
 **Output:** `generated/sales-channels/{name}/blueprint.json`
 
+### Blueprint Estimate
+
+Forecast AI cost for the next hydration run. Makes no AI calls and needs no Shopware connection.
+
+```bash
+bun run blueprint estimate --name=music
+bun run blueprint estimate --name=music --only=cms
+```
+
+| Flag     | Type   | Default            | Description                                          |
+| -------- | ------ | ------------------ | ---------------------------------------------------- |
+| `--name` | string | _(required)_       | SalesChannel name (blueprint must exist)             |
+| `--only` | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms` |
+
+`blueprint hydrate` prints the same forecast before it starts and the actual token usage at the end.
+
 ### Blueprint Hydrate
 
 Phase 2: Fill blueprint with AI-generated content (names, descriptions, properties, images).

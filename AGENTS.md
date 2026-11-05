@@ -22,6 +22,7 @@ src/
 │   ├── index.ts              # Re-exports all types and schemas
 │   ├── shopware.ts           # Shopware entities + Zod schemas
 │   ├── blueprint.ts          # Blueprint types
+│   ├── cost-estimate.ts      # Cost forecast types (ModelSelection, TokenUsage, CostEstimate)
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
@@ -67,6 +68,7 @@ src/
 │   ├── hydrator.ts           # Orchestrates category + product hydration
 │   ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 │   ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
+│   ├── cost-estimator.ts     # Hydration cost forecast (tokens, images, USD)
 │   └── hydrators/            # Specialized hydration modules
 │       ├── index.ts          # Re-exports all hydrators
 │       ├── category.ts       # Category names/descriptions via AI
@@ -121,6 +123,7 @@ src/
 │   ├── color-images/         # SVG color swatch images
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+│   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
@@ -174,7 +177,7 @@ src/
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
-│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix, blueprint_inspire
+│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
@@ -1072,7 +1075,7 @@ AI_API_KEY=ghp_your_github_token       # github.com/settings/tokens
 # AI_API_KEY=sk_your_pollinations_key  # sk_ = parallel, pk_ = sequential
 
 # Optional overrides
-AI_MODEL=gpt-4o
+AI_MODEL=gpt-6-luna   # OpenAI default; or gpt-5.4-mini, gpt-4.1-2025-04-14
 IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: github-models/pk_ → free Pollinations
 IMAGE_API_KEY=xxx                        # Not needed for github-models or pk_ keys
 IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-1, gpt-image-1.5, flux, turbo, klein
@@ -1100,7 +1103,10 @@ bun run blueprint inspire --name=music --url=https://some-music-shop.com
 # Phase 1: Create blueprint (no AI)
 bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
 
-# Phase 2: Hydrate with AI
+# Phase 2a (optional): Forecast AI cost before hydrating (no AI calls)
+bun run blueprint estimate --name=music
+
+# Phase 2: Hydrate with AI (prints the forecast first and the actual token usage at the end)
 bun run blueprint hydrate --name=music
 
 # Phase 2b: Selective re-hydration (preserves product names for image stability)
@@ -1177,6 +1183,24 @@ Hydration modes:
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
+
+### Cost Forecast
+
+```bash
+bun run blueprint estimate \
+  --name=NAME              # Required: SalesChannel name (blueprint must exist)
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms")
+```
+
+Forecasts text tokens, image count and USD cost for the next hydration run without calling any AI.
+`blueprint hydrate` prints the same forecast before it starts, and the actual token usage and cost
+(OpenAI only) when it finishes.
+
+- Token counts are heuristics per call type (calibrated from real runs), see `src/blueprint/cost-estimator.ts`
+- Prices live in `src/fixtures/model-pricing.ts` (`PRICING_AS_OF`). Update them when OpenAI changes prices
+- Images already in the cache (CMS, theme) are not counted
+- Pollinations is billed in pollen, so it shows as "unknown". The keyless free tier shows as $0
+- Models without a price entry show as "unknown" instead of a guess
 
 ### Generate Options
 
@@ -1301,6 +1325,7 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 | `blueprint_inspire`    | Crawl a real store URL and save inspiration.json       |
 | `blueprint_create`     | Generate blueprint.json (no AI)                        |
 | `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
+| `blueprint_estimate`   | Forecast AI tokens, images and USD cost (no AI calls)  |
 | `blueprint_fix`        | Fix placeholder names                                  |
 | `image_fix`            | Regenerate images (product/category/cms by type)       |
 | `generate`             | Full pipeline: create + hydrate + upload               |

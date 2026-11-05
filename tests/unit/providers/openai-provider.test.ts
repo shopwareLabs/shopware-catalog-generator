@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    spyOn,
+    test,
+} from "bun:test";
 import { z } from "zod";
 
 import {
@@ -227,5 +236,85 @@ describe("OpenAI SDK compatibility", () => {
             error: { message: "Invalid image request", type: "invalid_request_error" },
         };
         expect(await new OpenAIImageProvider("test-key").generateImage("Product photo")).toBeNull();
+    });
+});
+
+/**
+ * Local fake of the Chat Completions endpoint so the real OpenAI SDK
+ * request/response path is exercised without network access.
+ */
+let usageServer: ReturnType<typeof Bun.serve>;
+const requestedModels: string[] = [];
+
+beforeAll(() => {
+    usageServer = Bun.serve({
+        port: 0,
+        async fetch(req) {
+            const body = (await req.json()) as { model: string };
+            requestedModels.push(body.model);
+            return Response.json({
+                id: "chatcmpl-test",
+                object: "chat.completion",
+                created: 0,
+                model: body.model,
+                choices: [
+                    {
+                        index: 0,
+                        finish_reason: "stop",
+                        message: { role: "assistant", content: "hello", refusal: null },
+                    },
+                ],
+                usage: {
+                    prompt_tokens: 100,
+                    completion_tokens: 40,
+                    total_tokens: 140,
+                    completion_tokens_details: { reasoning_tokens: 15 },
+                },
+            });
+        },
+    });
+});
+
+afterAll(() => {
+    usageServer.stop(true);
+});
+
+function createProvider(model?: string): OpenAITextProvider {
+    return new OpenAITextProvider("sk-test", model, `http://localhost:${usageServer.port}/v1`);
+}
+
+describe("OpenAITextProvider token usage", () => {
+    test("starts with zero usage", () => {
+        expect(createProvider().getUsage()).toEqual({
+            calls: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            reasoningTokens: 0,
+        });
+    });
+
+    test("accumulates token usage across calls", async () => {
+        const provider = createProvider("gpt-5.4-nano");
+
+        const content = await provider.generateCompletion([{ role: "user", content: "hi" }]);
+        await provider.generateCompletion([{ role: "user", content: "again" }]);
+
+        expect(content).toBe("hello");
+        expect(provider.getUsage()).toEqual({
+            calls: 2,
+            inputTokens: 200,
+            outputTokens: 80,
+            reasoningTokens: 30,
+        });
+    });
+
+    test("getUsage returns a copy", async () => {
+        const provider = createProvider();
+        await provider.generateCompletion([{ role: "user", content: "hi" }]);
+
+        const snapshot = provider.getUsage();
+        snapshot.calls = 99;
+
+        expect(provider.getUsage().calls).toBe(1);
     });
 });

@@ -1,5 +1,7 @@
 import type { z } from "zod";
 
+import type { TokenUsage } from "./cost-estimate.js";
+
 /**
  * AI Provider types and interfaces
  */
@@ -36,6 +38,9 @@ export interface TextProvider {
 
     /** Token limit for this provider's model (for payload size checks) */
     readonly tokenLimit: number;
+
+    /** Accumulated token usage, when the provider reports it (used for actual-cost summaries) */
+    getUsage?(): TokenUsage;
 }
 
 /** Options for image generation sizing */

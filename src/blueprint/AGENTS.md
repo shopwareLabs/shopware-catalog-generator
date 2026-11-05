@@ -17,6 +17,7 @@ blueprint/
 ├── hydrator.ts           # BlueprintHydrator - Phase 2 orchestrator
 ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
+├── cost-estimator.ts     # Hydration cost forecast (no AI): tokens, images, USD
 ├── index.ts              # Re-exports
 └── hydrators/            # Specialized hydration modules
     ├── category.ts       # Category names/descriptions via AI

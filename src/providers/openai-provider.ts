@@ -8,6 +8,7 @@ import type {
     ImageGenerationOptions,
     ImageProvider,
     TextProvider,
+    TokenUsage,
 } from "../types/index.js";
 
 import { PROVIDER_DEFAULTS } from "../types/index.js";
@@ -20,6 +21,12 @@ import { logger } from "../utils/index.js";
 export class OpenAITextProvider implements TextProvider {
     private readonly client: OpenAI;
     private readonly model: string;
+    private readonly usage: TokenUsage = {
+        calls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+    };
 
     readonly isSequential = false;
     readonly maxConcurrency = 5;
@@ -58,8 +65,32 @@ export class OpenAITextProvider implements TextProvider {
         }
 
         const completion = await this.client.chat.completions.create(requestOptions);
+        this.recordUsage(completion.usage);
 
         return completion.choices[0]?.message.content || "";
+    }
+
+    getUsage(): TokenUsage {
+        return { ...this.usage };
+    }
+
+    private recordUsage(usage: OpenAI.CompletionUsage | undefined): void {
+        if (!usage) return;
+
+        const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? 0;
+        this.usage.calls++;
+        this.usage.inputTokens += usage.prompt_tokens;
+        this.usage.outputTokens += usage.completion_tokens;
+        this.usage.reasoningTokens += reasoningTokens;
+
+        logger.debug("OpenAI token usage", {
+            data: {
+                model: this.model,
+                inputTokens: usage.prompt_tokens,
+                outputTokens: usage.completion_tokens,
+                reasoningTokens,
+            },
+        });
     }
 }
 

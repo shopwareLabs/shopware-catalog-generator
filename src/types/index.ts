@@ -39,6 +39,19 @@ export type {
 } from "./cache.js";
 export { DEFAULT_CACHE_OPTIONS } from "./cache.js";
 
+// Cost estimate types
+export type {
+    CostEstimate,
+    HydrationScope,
+    ImageCostItem,
+    ImageModelPrice,
+    ModelSelection,
+    PendingImageCounts,
+    TextCostItem,
+    TextModelPrice,
+    TokenUsage,
+} from "./cost-estimate.js";
+
 // Export types
 export type { ExportResult, ExportValidation } from "./export.js";
 export { createEmptyValidation, getValidationWarnings } from "./export.js";

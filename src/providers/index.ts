@@ -1,5 +1,10 @@
 // Provider implementations
-export { createProviders, createProvidersFromEnv } from "./factory.js";
+export {
+    createProviders,
+    createProvidersFromEnv,
+    providerConfigFromEnv,
+    resolveModelSelection,
+} from "./factory.js";
 export { GitHubModelsTextProvider } from "./github-models-provider.js";
 export { NoOpImageProvider } from "./noop-provider.js";
 export { OpenAIImageProvider, OpenAITextProvider } from "./openai-provider.js";

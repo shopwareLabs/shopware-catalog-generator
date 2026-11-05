@@ -5,20 +5,40 @@
  * Never calls console.log directly.
  */
 
-import type { HydratedBlueprint } from "../types/index.js";
+import type { EstimateBlueprint } from "../blueprint/index.js";
+import type { DataCache } from "../cache.js";
+import type {
+    CostEstimate,
+    HydratedBlueprint,
+    HydrationScope,
+    ModelSelection,
+    PendingImageCounts,
+    TextProvider,
+} from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
 
 import {
     BlueprintGenerator,
     BlueprintHydrator,
+    buildCmsImageSpecs,
+    buildThemeImageSpecs,
+    countCmsTextWork,
+    estimateHydrationCost,
+    flattenCategories,
+    formatCostEstimate,
     generateCmsBlueprint,
     hydrateCmsBlueprint,
     hydrateCmsImages,
     hydrateProductImages,
     hydrateThemeMedia,
+    priceTokenUsage,
 } from "../blueprint/index.js";
 import { createCacheFromEnv } from "../cache.js";
-import { createProvidersFromEnv } from "../providers/index.js";
+import {
+    createProvidersFromEnv,
+    providerConfigFromEnv,
+    resolveModelSelection,
+} from "../providers/index.js";
 import { DataHydrator } from "../shopware/index.js";
 import { countCategories, logger, PropertyCollector } from "../utils/index.js";
 
@@ -56,9 +76,105 @@ export async function createBlueprint(
     ];
 }
 
+type HydrateOnly = "categories" | "properties" | "cms";
+
+/**
+ * Forecast the cost of `blueprint hydrate` without making any AI call.
+ */
+export function estimateBlueprintCost(
+    salesChannelName: string,
+    options: { only?: HydrateOnly }
+): string[] {
+    const cache = createCacheFromEnv();
+    const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
+    const blueprint = cache.loadBlueprint(salesChannelName);
+    if (!blueprint) {
+        return [
+            `Error: No blueprint found for "${salesChannelName}". ` +
+                `Run: blueprint create --name=${salesChannelName}`,
+        ];
+    }
+
+    const scope = resolveHydrationScope(options.only, Boolean(existingHydratedBlueprint));
+    const source =
+        scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
+    const estimate = buildCostEstimate(cache, salesChannelName, scope, source);
+    return formatCostEstimate(estimate);
+}
+
+/** Mirrors hydrateBlueprint: --only=categories/properties fall back to full without a hydrated blueprint */
+function resolveHydrationScope(
+    only: HydrateOnly | undefined,
+    hasHydrated: boolean
+): HydrationScope {
+    if (only === "cms") return "cms";
+    if (only && hasHydrated) return only;
+    return "full";
+}
+
+function buildCostEstimate(
+    cache: DataCache,
+    salesChannelName: string,
+    scope: HydrationScope,
+    blueprint: EstimateBlueprint & { salesChannel: { description: string } }
+): CostEstimate {
+    const selection = resolveModelSelection(providerConfigFromEnv());
+    const description = blueprint.salesChannel.description || `${salesChannelName} webshop`;
+    return estimateHydrationCost({
+        scope,
+        blueprint,
+        selection,
+        cms: countCmsTextWork(generateCmsBlueprint(salesChannelName)),
+        pendingImages: countPendingImages(cache, salesChannelName, blueprint, description),
+        hasInspirationColors: Boolean(cache.loadInspiration(salesChannelName)?.brandColors),
+    });
+}
+
+/**
+ * CMS and theme images are skipped when cached. Product and category images are
+ * counted in full: a full hydration renames products, which makes cached images stale.
+ */
+function countPendingImages(
+    cache: DataCache,
+    salesChannelName: string,
+    blueprint: EstimateBlueprint,
+    description: string
+): PendingImageCounts {
+    const isMissing =
+        (mediaType: "cms_media" | "theme_media") =>
+        (spec: { key: string }): boolean =>
+            !cache.images.hasImageForSalesChannel(salesChannelName, spec.key, mediaType);
+
+    return {
+        cms: buildCmsImageSpecs(salesChannelName, description).filter(isMissing("cms_media"))
+            .length,
+        theme: buildThemeImageSpecs(salesChannelName, description).filter(isMissing("theme_media"))
+            .length,
+        product: blueprint.products.reduce(
+            (acc, p) => acc + (p.metadata.imageDescriptions?.length ?? 0),
+            0
+        ),
+        category: flattenCategories(blueprint.categories).filter((c) => c.hasImage).length,
+    };
+}
+
+/** Report actual token usage and cost when the text provider tracks it */
+function formatActualUsage(textProvider: TextProvider, selection: ModelSelection): string[] {
+    const usage = textProvider.getUsage?.();
+    if (!usage || usage.calls === 0) return [];
+
+    const usd = priceTokenUsage(selection, usage);
+    const cost = usd === null ? "unknown (no price data)" : `$${usd.toFixed(2)}`;
+    return [
+        ``,
+        `Actual text usage: ${usage.calls} calls, ${usage.inputTokens} input + ${usage.outputTokens} output tokens ` +
+            `(${usage.reasoningTokens} reasoning) -> ${cost}`,
+    ];
+}
+
 export async function hydrateBlueprint(
     salesChannelName: string,
-    options: { only?: "categories" | "properties" | "cms"; force?: boolean }
+    options: { only?: HydrateOnly; force?: boolean }
 ): Promise<string[]> {
     const { only: hydrateOnly, force: forceHydration = false } = options;
 
@@ -81,6 +197,14 @@ export async function hydrateBlueprint(
             `Error: No blueprint found for "${salesChannelName}". ` +
                 `Run: blueprint create --name=${salesChannelName}`,
         ];
+    }
+
+    const scope = resolveHydrationScope(hydrateOnly, Boolean(existingHydratedBlueprint));
+    const estimateSource =
+        scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
+    const estimate = buildCostEstimate(cache, salesChannelName, scope, estimateSource);
+    for (const line of formatCostEstimate(estimate)) {
+        logger.info(line, { cli: true });
     }
 
     const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
@@ -121,6 +245,7 @@ export async function hydrateBlueprint(
             `CMS blueprint hydrated:`,
             `  Pages: ${hydratedCms.pages.length}`,
             `  Saved to: generated/sales-channels/${salesChannelName}/cms-blueprint.json`,
+            ...formatActualUsage(textProvider, estimate.selection),
         ];
     }
 
@@ -200,7 +325,8 @@ export async function hydrateBlueprint(
     }
 
     results.push(
-        `  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`
+        `  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`,
+        ...formatActualUsage(textProvider, estimate.selection)
     );
     return results;
 }

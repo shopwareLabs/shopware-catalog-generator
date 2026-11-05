@@ -195,9 +195,12 @@ For more control, run the 3-phase pipeline separately. See [CONCEPTS.md](CONCEPT
 bun run blueprint inspire --name=music --url=https://some-music-shop.com
 
 bun run blueprint create --name=music --description="Musical instruments and accessories"
+bun run blueprint estimate --name=music  # optional: forecast AI cost, no AI calls
 bun run blueprint hydrate --name=music   # uses inspiration.json automatically if present
 bun run generate --name=music
 ```
+
+`blueprint estimate` prints the expected tokens, image count and USD cost for the configured models. `blueprint hydrate` shows the same forecast before it starts and the actual token usage when it finishes.
 
 `blueprint inspire` extracts categories, example products, brand colors, and a description from a real store's static HTML. The data is saved as `inspiration.json` and automatically picked up by `blueprint hydrate` to orient AI generation. No API keys needed — uses `cheerio` + `sharp`.
 
