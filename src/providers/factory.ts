@@ -2,13 +2,17 @@ import type {
     AIProviderType,
     ImageProvider,
     ImageProviderType,
+    ModelSelection,
     ProviderConfig,
     TextProvider,
 } from "../types/index.js";
 
-import { PROVIDER_DEFAULTS } from "../types/index.js";
+import {
+    AI_PROVIDER_TYPES,
+    DEFAULT_POLLINATIONS_IMAGE_MODEL,
+    PROVIDER_DEFAULTS,
+} from "../types/index.js";
 import { logger } from "../utils/index.js";
-import { GitHubModelsTextProvider } from "./github-models-provider.js";
 import { NoOpImageProvider } from "./noop-provider.js";
 import { OpenAIImageProvider, OpenAITextProvider } from "./openai-provider.js";
 import { PollinationsImageProvider, PollinationsTextProvider } from "./pollinations-provider.js";
@@ -17,25 +21,92 @@ import { PollinationsImageProvider, PollinationsTextProvider } from "./pollinati
  * Create providers from environment variables
  */
 export function createProvidersFromEnv(): { text: TextProvider; image: ImageProvider } {
-    const aiProvider = (process.env.AI_PROVIDER as AIProviderType) || "pollinations";
-    const apiKey = process.env.AI_API_KEY;
-    const textModel = process.env.AI_MODEL;
-    const imageProvider = process.env.IMAGE_PROVIDER as ImageProviderType | undefined;
-    const imageApiKey = process.env.IMAGE_API_KEY;
-    const imageModel = process.env.IMAGE_MODEL;
-    const imageQuality = process.env.IMAGE_QUALITY;
+    return createProviders(providerConfigFromEnv());
+}
 
-    const config: ProviderConfig = {
-        aiProvider,
-        apiKey,
-        textModel,
-        imageProvider,
-        imageApiKey,
-        imageModel,
-        imageQuality,
+/**
+ * Read provider configuration from environment variables
+ */
+export function providerConfigFromEnv(): ProviderConfig {
+    return {
+        aiProvider: parseAIProvider(process.env.AI_PROVIDER),
+        apiKey: process.env.AI_API_KEY,
+        textModel: process.env.AI_MODEL,
+        imageProvider: process.env.IMAGE_PROVIDER as ImageProviderType | undefined,
+        imageApiKey: process.env.IMAGE_API_KEY,
+        imageModel: process.env.IMAGE_MODEL,
+        imageQuality: process.env.IMAGE_QUALITY,
     };
+}
 
-    return createProviders(config);
+/**
+ * Validate the AI_PROVIDER value. Defaults to Pollinations when unset.
+ * Fails loudly for GitHub Models, which was retired on 2026-07-30.
+ */
+export function parseAIProvider(value: string | undefined): AIProviderType {
+    if (!value) return "pollinations";
+
+    if (value === "github-models") {
+        throw new Error(
+            "GitHub Models was retired on 2026-07-30. Set AI_PROVIDER=pollinations " +
+                "(free key at enter.pollinations.ai) or AI_PROVIDER=openai in your .env file."
+        );
+    }
+
+    const provider = AI_PROVIDER_TYPES.find((type) => type === value);
+    if (!provider) {
+        throw new Error(
+            `Unknown AI_PROVIDER "${value}". Use one of: ${AI_PROVIDER_TYPES.join(", ")}.`
+        );
+    }
+    return provider;
+}
+
+/**
+ * Resolve which providers and models a config will use, without creating providers.
+ * Mirrors the defaults applied by createTextProvider/createImageProvider.
+ */
+export function resolveModelSelection(config: ProviderConfig): ModelSelection {
+    const textProvider = config.aiProvider;
+    const textModel = config.textModel || PROVIDER_DEFAULTS[textProvider].textModel;
+    const imageProvider = resolveImageProviderType(config);
+
+    if (imageProvider === "openai") {
+        const hasKey = Boolean(config.imageApiKey || config.apiKey);
+        if (!hasKey) {
+            return { textProvider, textModel, imageProvider: "none", imageFreeTier: false };
+        }
+        return {
+            textProvider,
+            textModel,
+            imageProvider,
+            imageModel: config.imageModel || "gpt-image-1-mini",
+            imageQuality: config.imageQuality || "low",
+            imageFreeTier: false,
+        };
+    }
+
+    if (imageProvider === "pollinations") {
+        const keyed = Boolean(config.imageApiKey) || (config.apiKey ?? "").startsWith("sk_");
+        return {
+            textProvider,
+            textModel,
+            imageProvider,
+            imageModel: config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL,
+            imageFreeTier: !keyed,
+        };
+    }
+
+    return { textProvider, textModel, imageProvider: "none", imageFreeTier: false };
+}
+
+/**
+ * Determine the image provider type (explicit override, main provider, or Pollinations fallback)
+ */
+function resolveImageProviderType(config: ProviderConfig): ImageProviderType {
+    if (config.imageProvider) return config.imageProvider;
+    if (!PROVIDER_DEFAULTS[config.aiProvider].supportsImages) return "pollinations";
+    return config.aiProvider === "pollinations" ? "pollinations" : "openai";
 }
 
 /**
@@ -81,9 +152,6 @@ function createTextProvider(config: ProviderConfig): TextProvider {
         case "openai":
             return new OpenAITextProvider(apiKey, model);
 
-        case "github-models":
-            return new GitHubModelsTextProvider(apiKey, model);
-
         case "pollinations":
             return new PollinationsTextProvider(model, apiKey);
 
@@ -97,21 +165,7 @@ function createTextProvider(config: ProviderConfig): TextProvider {
  * Falls back to pollinations if the main provider doesn't support images
  */
 function createImageProvider(config: ProviderConfig): ImageProvider {
-    const mainDefaults = PROVIDER_DEFAULTS[config.aiProvider];
-
-    // Determine which image provider to use
-    let imageProviderType: ImageProviderType;
-
-    if (config.imageProvider) {
-        // Explicit override from config
-        imageProviderType = config.imageProvider;
-    } else if (mainDefaults.supportsImages) {
-        // Use main provider if it supports images
-        imageProviderType = config.aiProvider === "pollinations" ? "pollinations" : "openai";
-    } else {
-        // Fall back to pollinations for free images
-        imageProviderType = "pollinations";
-    }
+    const imageProviderType = resolveImageProviderType(config);
 
     switch (imageProviderType) {
         case "openai": {
@@ -127,7 +181,7 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
         }
 
         case "pollinations": {
-            const pollinationsModel = config.imageModel || "flux";
+            const pollinationsModel = config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL;
 
             // Use explicit IMAGE_API_KEY if set, otherwise:
             // - sk_ keys: pass through (no balance constraints)

@@ -147,6 +147,20 @@ interface TextSlotRef {
     slot: CmsBlueprintSlot;
 }
 
+/**
+ * Count the AI text work in a CMS blueprint: one call per page with text slots.
+ * Used by the hydration cost forecast.
+ */
+export function countCmsTextWork(cmsBlueprint: CmsBlueprint): { pages: number; slots: number } {
+    const slotCounts = cmsBlueprint.pages
+        .map((page) => collectTextSlots(page).length)
+        .filter((count) => count > 0);
+    return {
+        pages: slotCounts.length,
+        slots: slotCounts.reduce((sum, count) => sum + count, 0),
+    };
+}
+
 function collectTextSlots(page: CmsBlueprintPage): TextSlotRef[] {
     const refs: TextSlotRef[] = [];
     for (let si = 0; si < page.sections.length; si++) {

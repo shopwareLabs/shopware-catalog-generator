@@ -39,6 +39,19 @@ export type {
 } from "./cache.js";
 export { DEFAULT_CACHE_OPTIONS } from "./cache.js";
 
+// Cost estimate types
+export type {
+    CostEstimate,
+    HydrationScope,
+    ImageCostItem,
+    ImageModelPrice,
+    ModelSelection,
+    PendingImageCounts,
+    TextCostItem,
+    TextModelPrice,
+    TokenUsage,
+} from "./cost-estimate.js";
+
 // Export types
 export type { ExportResult, ExportValidation } from "./export.js";
 export { createEmptyValidation, getValidationWarnings } from "./export.js";
@@ -54,7 +67,11 @@ export type {
     ProviderConfig,
     TextProvider,
 } from "./providers.js";
-export { PROVIDER_DEFAULTS } from "./providers.js";
+export {
+    AI_PROVIDER_TYPES,
+    DEFAULT_POLLINATIONS_IMAGE_MODEL,
+    PROVIDER_DEFAULTS,
+} from "./providers.js";
 
 // Shopware entity types and Zod schemas
 export type {

@@ -30,8 +30,9 @@ crawlers/
 ## Public API
 
 ```typescript
-import { crawlForInspiration } from "./crawlers/index.js";
 import type { InspirationData } from "./crawlers/index.js";
+
+import { crawlForInspiration } from "./crawlers/index.js";
 
 const inspiration = await crawlForInspiration("https://some-music-shop.com");
 // → InspirationData

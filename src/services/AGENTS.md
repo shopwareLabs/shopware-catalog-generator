@@ -15,7 +15,7 @@ No function in this layer calls `console.log` directly.
 
 ```
 services/
-├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, fixBlueprint, inspireBlueprint
+├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, estimateBlueprintCost, fixBlueprint, inspireBlueprint
 ├── generate-service.ts    # generate, runProcessorsForSalesChannel
 ├── image-fix-service.ts   # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 └── shopware-context.ts    # createProcessorDeps (shared bootstrap for API helpers + providers)
@@ -29,6 +29,7 @@ Shared logic for the `blueprint create`, `blueprint hydrate`, `blueprint fix`, a
 import {
     createBlueprint,
     hydrateBlueprint,
+    estimateBlueprintCost,
     fixBlueprint,
     inspireBlueprint,
     resolveCmsStoreDescription,
@@ -40,6 +41,9 @@ const lines = await inspireBlueprint("https://some-music-shop.com", "music");
 
 // Phase 1: Generate blueprint structure (no AI)
 const lines = await createBlueprint("music", "Musical instruments", 90);
+
+// Phase 2a (optional): Forecast cost of the next hydration (no AI calls)
+const lines = estimateBlueprintCost("music", { only: "cms" });
 
 // Phase 2: Hydrate with AI content (uses inspiration.json automatically if present)
 const lines = await hydrateBlueprint("music", { only: "categories" }); // selective
@@ -62,6 +66,10 @@ const lines = await fixBlueprint("music");
 - Category AI prompt gets real category names as style examples
 - Product AI prompts get matching example products for each branch
 - `hydrateBrandColors()` AI call is skipped if `inspiration.brandColors` is present
+
+`hydrateBlueprint` logs the cost forecast (via `estimateHydrationCost()` from `src/blueprint/cost-estimator.ts`)
+before creating providers, and appends the actual token usage and cost to its output lines. Actual usage is
+only available for providers that implement `TextProvider.getUsage()` (currently OpenAI).
 
 `hydrateBlueprint` supports three selective modes via the `only` option:
 

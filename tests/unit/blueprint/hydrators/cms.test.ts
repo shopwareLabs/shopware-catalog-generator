@@ -1,12 +1,31 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    countCmsTextWork,
     generateCmsBlueprint,
     hydrateCmsBlueprint,
 } from "../../../../src/blueprint/hydrators/cms.js";
 import { MockTextProvider } from "../../../mocks/text-provider.mock.js";
 
 describe("cms-hydrator", () => {
+    describe("countCmsTextWork", () => {
+        test("counts one call per page with text slots", () => {
+            const blueprint = generateCmsBlueprint("furniture");
+            const work = countCmsTextWork(blueprint);
+
+            expect(work.pages).toBeGreaterThan(0);
+            expect(work.pages).toBeLessThanOrEqual(blueprint.pages.length);
+            expect(work.slots).toBeGreaterThanOrEqual(work.pages);
+        });
+
+        test("returns zero for a blueprint without pages", () => {
+            expect(countCmsTextWork({ salesChannelName: "x", pages: [] })).toEqual({
+                pages: 0,
+                slots: 0,
+            });
+        });
+    });
+
     describe("generateCmsBlueprint", () => {
         test("returns a CmsBlueprint with correct salesChannelName", () => {
             const blueprint = generateCmsBlueprint("furniture");

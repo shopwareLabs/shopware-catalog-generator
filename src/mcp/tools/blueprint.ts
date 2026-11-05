@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import {
     createBlueprint,
+    estimateBlueprintCost,
     fixBlueprint,
     hydrateBlueprint,
     inspireBlueprint,
@@ -43,6 +44,28 @@ export function registerBlueprintTools(server: FastMCP): void {
 
             const lines = await createBlueprint(salesChannelName, description, args.products);
             return lines.join("\n");
+        },
+    });
+
+    // blueprint_estimate - Forecast hydration cost (no AI calls)
+    server.addTool({
+        name: "blueprint_estimate",
+        description:
+            "Forecast AI calls, tokens, images and USD cost of blueprint_hydrate without calling any AI. " +
+            "Uses the configured providers/models (AI_PROVIDER, AI_MODEL, IMAGE_MODEL, IMAGE_QUALITY).",
+        parameters: z.object({
+            name: z.string().describe("SalesChannel name"),
+            only: z
+                .enum(["categories", "properties", "cms"])
+                .optional()
+                .describe("Estimate a selective hydration (categories, properties, or cms)"),
+        }),
+        execute: async (args) => {
+            const validation = validateSubdomainName(args.name);
+            if (!validation.valid) {
+                return `Error: Invalid name - ${validation.error}`;
+            }
+            return estimateBlueprintCost(validation.sanitized, { only: args.only }).join("\n");
         },
     });
 

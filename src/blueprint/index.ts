@@ -1,5 +1,7 @@
 export { BlueprintGenerator } from "./generator.js";
 export { BlueprintHydrator } from "./hydrator.js";
+export { estimateHydrationCost, formatCostEstimate, priceTokenUsage } from "./cost-estimator.js";
+export type { CostEstimateInput, EstimateBlueprint } from "./cost-estimator.js";
 export {
     findPlaceholderCategories,
     findPlaceholderProducts,
@@ -8,6 +10,7 @@ export {
 export {
     buildCmsImageSpecs,
     buildThemeImageSpecs,
+    countCmsTextWork,
     flattenCategories,
     generateCmsBlueprint,
     hydrateBrandColors,

@@ -2,6 +2,5 @@
     "$schema": "https://unpkg.com/knip@6/schema.json",
     "entry": ["src/**/index.ts", "src/cache.ts"],
     "project": ["src/**/*.ts"],
-    "ignoreExportsUsedInFile": true,
-    "ignoreDependencies": ["bun-types"]
+    "ignoreExportsUsedInFile": true
 }

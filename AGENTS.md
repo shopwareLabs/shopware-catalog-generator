@@ -22,6 +22,7 @@ src/
 │   ├── index.ts              # Re-exports all types and schemas
 │   ├── shopware.ts           # Shopware entities + Zod schemas
 │   ├── blueprint.ts          # Blueprint types
+│   ├── cost-estimate.ts      # Cost forecast types (ModelSelection, TokenUsage, CostEstimate)
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
@@ -44,7 +45,6 @@ src/
 │   ├── index.ts              # Exports + factory
 │   ├── factory.ts            # Provider creation logic
 │   ├── openai-provider.ts    # OpenAI (text + images)
-│   ├── github-models-provider.ts  # GitHub Models (text only)
 │   ├── pollinations-provider.ts   # Pollinations (text + images, free)
 │   └── noop-provider.ts      # Disabled image provider
 │
@@ -67,6 +67,7 @@ src/
 │   ├── hydrator.ts           # Orchestrates category + product hydration
 │   ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 │   ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
+│   ├── cost-estimator.ts     # Hydration cost forecast (tokens, images, USD)
 │   └── hydrators/            # Specialized hydration modules
 │       ├── index.ts          # Re-exports all hydrators
 │       ├── category.ts       # Category names/descriptions via AI
@@ -121,6 +122,7 @@ src/
 │   ├── color-images/         # SVG color swatch images
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+│   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   └── review-data.ts        # Reviewer names and review templates
@@ -174,7 +176,7 @@ src/
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
-│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_fix, blueprint_inspire
+│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
@@ -304,7 +306,6 @@ than GPT-4.1 in the [small live model benchmark](docs/model-benchmark-2026-09-23
 | --------------------- | ------------- | ------- |
 | OpenAI                | Parallel (5x) | ~5 min  |
 | Pollinations (sk\_\*) | Parallel (5x) | ~5 min  |
-| GitHub Models         | Limited (2x)  | ~10 min |
 | Pollinations (pk\_\*) | Sequential    | ~13 min |
 
 **Full hydration with images (~270 product + ~20 CMS + category banners):**
@@ -315,7 +316,7 @@ than GPT-4.1 in the [small live model benchmark](docs/model-benchmark-2026-09-23
 | OpenAI                | gpt-image-1-mini | medium  | Parallel (10x) | ~12-18 min |
 | OpenAI                | gpt-image-1.5    | medium  | Parallel (10x) | ~20-25 min |
 | Pollinations (sk\_\*) | flux             | -       | Parallel (5x)  | ~15-20 min |
-| Pollinations (sk\_\*) | turbo            | -       | Parallel (5x)  | ~10-15 min |
+| Pollinations (sk\_\*) | zimage           | -       | Parallel (5x)  | ~10-15 min |
 | Pollinations (pk\_\*) | flux             | -       | Limited (2x)   | ~40-50 min |
 
 > All AI generation (text + images) happens in Phase 2 (hydration). Phase 3 only uploads cached data to Shopware, typically completing in 1-3 minutes.
@@ -490,13 +491,12 @@ Providers may ignore `width`/`height` if they use a fixed size or prefer their o
 | Provider              | maxConcurrency | Notes                           |
 | --------------------- | -------------- | ------------------------------- |
 | OpenAI                | 5              | High rate limits                |
-| GitHub Models         | 2              | 2 concurrent request limit      |
 | Pollinations (sk\_\*) | 5              | Secret keys have no rate limits |
 | Pollinations (pk\_\*) | 1              | Sequential processing           |
 
 Factory in `providers/factory.ts` creates providers from env vars:
 
-- `AI_PROVIDER`: openai | github-models | pollinations
+- `AI_PROVIDER`: openai | pollinations (`github-models` was retired on 2026-07-30 and throws a clear error)
 - `IMAGE_PROVIDER`: openai | pollinations | none (auto-detected if not set)
 - `IMAGE_QUALITY`: low | medium | high | auto (OpenAI only, default: low)
 
@@ -506,7 +506,6 @@ is an optional, higher-cost alternative. See [live benchmark](docs/model-benchma
 
 **Image provider auto-detection:** When `IMAGE_PROVIDER` is not set:
 
-- `github-models` → Pollinations free tier (no key, no cost)
 - `pollinations` with `sk_*` key → Pollinations with key (parallel)
 - `pollinations` with `pk_*` key → Pollinations free tier (pollen preserved for text)
 - `openai` → OpenAI images (paid)
@@ -798,6 +797,7 @@ See **[tests/AGENTS.md](tests/AGENTS.md)** for detailed testing documentation in
 ```typescript
 // Correct
 import type { CategoryNode, SalesChannelInput } from "./types/index.js";
+
 import { DataHydrator } from "./shopware/index.js";
 ```
 
@@ -1065,16 +1065,16 @@ server.addTool({
 
 ```env
 # AI Provider — pick one:
-AI_PROVIDER=github-models              # Free with GitHub Copilot (recommended)
-AI_API_KEY=ghp_your_github_token       # github.com/settings/tokens
-# AI_PROVIDER=pollinations             # Alternative: enter.pollinations.ai
-# AI_API_KEY=sk_your_pollinations_key  # sk_ = parallel, pk_ = sequential
+AI_PROVIDER=pollinations               # Free tier: enter.pollinations.ai (recommended)
+AI_API_KEY=pk_your_pollinations_key    # pk_ = free/sequential, sk_ = parallel
+# AI_PROVIDER=openai                   # Paid, fastest
+# AI_API_KEY=sk-your-openai-key
 
 # Optional overrides
-AI_MODEL=gpt-4o
-IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: github-models/pk_ → free Pollinations
-IMAGE_API_KEY=xxx                        # Not needed for github-models or pk_ keys
-IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-1, gpt-image-1.5, flux, turbo, klein
+AI_MODEL=gpt-6-luna   # OpenAI default; or gpt-5.4-mini, gpt-4.1-2025-04-14
+IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
+IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
+IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-2.5-flare, flux, klein, zimage
 IMAGE_QUALITY=low  # OpenAI only: low (fastest/cheapest), medium, high, auto
 
 # Shopware connection
@@ -1099,7 +1099,10 @@ bun run blueprint inspire --name=music --url=https://some-music-shop.com
 # Phase 1: Create blueprint (no AI)
 bun run blueprint create --name=music --description="Musical instruments and accessories for musicians of all levels"
 
-# Phase 2: Hydrate with AI
+# Phase 2a (optional): Forecast AI cost before hydrating (no AI calls)
+bun run blueprint estimate --name=music
+
+# Phase 2: Hydrate with AI (prints the forecast first and the actual token usage at the end)
 bun run blueprint hydrate --name=music
 
 # Phase 2b: Selective re-hydration (preserves product names for image stability)
@@ -1177,6 +1180,24 @@ Hydration modes:
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
 
+### Cost Forecast
+
+```bash
+bun run blueprint estimate \
+  --name=NAME              # Required: SalesChannel name (blueprint must exist)
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms")
+```
+
+Forecasts text tokens, image count and USD cost for the next hydration run without calling any AI.
+`blueprint hydrate` prints the same forecast before it starts, and the actual token usage and cost
+(OpenAI only) when it finishes.
+
+- Token counts are heuristics per call type (calibrated from real runs), see `src/blueprint/cost-estimator.ts`
+- Prices live in `src/fixtures/model-pricing.ts` (`PRICING_AS_OF`). Update them when OpenAI changes prices
+- Images already in the cache (CMS, theme) are not counted
+- Pollinations is billed in pollen, so it shows as "unknown". The keyless free tier shows as $0
+- Models without a price entry show as "unknown" instead of a guess
+
 ### Generate Options
 
 ```bash
@@ -1230,8 +1251,14 @@ Available processors with cleanup: `cms`, `customers`.
 ./test-e2e.sh --reuse=music               # Reuse existing blueprint
 ./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
 ./test-e2e.sh --cleanup=music             # Only cleanup specific SalesChannel
+./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate  # Run against a local sw-dev lane
 bun run test:verify --name=music          # Verify Shopware data
 ```
+
+`--sw-dev=<lane>` targets a local sw-dev lane instead of the `.env` shop. The script reads the
+lane's `APP_URL`, creates a temporary admin integration with `bin/console integration:create`,
+exports its credentials only to its own child processes, and deletes the integration through
+the Admin API on exit, whether the run passed or failed. Local use only.
 
 ## Testing
 
@@ -1300,6 +1327,7 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 | `blueprint_inspire`    | Crawl a real store URL and save inspiration.json       |
 | `blueprint_create`     | Generate blueprint.json (no AI)                        |
 | `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
+| `blueprint_estimate`   | Forecast AI tokens, images and USD cost (no AI calls)  |
 | `blueprint_fix`        | Fix placeholder names                                  |
 | `image_fix`            | Regenerate images (product/category/cms by type)       |
 | `generate`             | Full pipeline: create + hydrate + upload               |
@@ -1418,7 +1446,7 @@ const result = await executeWithRetry(() =>
 ```
 
 Exponential backoff: 10s → 20s → 40s → 80s → 160s, max 5 retries.
-Handles GitHub Models' 10 requests/60s limit.
+Handles provider rate limits such as Pollinations pk_* keys.
 
 ### Logging
 

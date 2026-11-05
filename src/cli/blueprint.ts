@@ -1,5 +1,5 @@
 /**
- * Blueprint CLI commands: create, hydrate, fix.
+ * Blueprint CLI commands: create, estimate, hydrate, fix, inspire.
  *
  * Thin wrappers that delegate to src/services/blueprint-service.ts and print output.
  */
@@ -8,6 +8,7 @@ import type { CliArgs } from "./shared.js";
 
 import {
     createBlueprint,
+    estimateBlueprintCost,
     fixBlueprint,
     hydrateBlueprint,
     inspireBlueprint,
@@ -30,18 +31,38 @@ export async function blueprintCreate(args: CliArgs): Promise<void> {
     }
 }
 
+type HydrateOnly = "categories" | "properties" | "cms";
+
+function parseHydrateOnly(args: CliArgs, command: string): HydrateOnly | undefined {
+    const hydrateOnly = args.only?.[0];
+    if (!hydrateOnly) return undefined;
+    if (hydrateOnly === "categories" || hydrateOnly === "properties" || hydrateOnly === "cms") {
+        return hydrateOnly;
+    }
+    throw new CLIError(
+        `--only must be 'categories', 'properties', or 'cms' for ${command} (got: ${hydrateOnly})`,
+        "INVALID_OPTION"
+    );
+}
+
+export async function blueprintEstimate(args: CliArgs): Promise<void> {
+    const salesChannelName = requireValidName(args);
+    const lines = estimateBlueprintCost(salesChannelName, {
+        only: parseHydrateOnly(args, "blueprint estimate"),
+    });
+
+    throwIfServiceError(lines, "ESTIMATE_FAILED");
+
+    for (const line of lines) {
+        console.log(line);
+    }
+}
+
 export async function blueprintHydrate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
 
-    const hydrateOnly = args.only?.[0] as "categories" | "properties" | "cms" | undefined;
+    const hydrateOnly = parseHydrateOnly(args, "blueprint hydrate");
     const forceHydration = args.rehydrate === true;
-
-    if (hydrateOnly && !["categories", "properties", "cms"].includes(hydrateOnly)) {
-        throw new CLIError(
-            `--only must be 'categories', 'properties', or 'cms' for blueprint hydrate (got: ${hydrateOnly})`,
-            "INVALID_OPTION"
-        );
-    }
 
     console.log(`Log file: ${logger.getLogFile()}`);
 

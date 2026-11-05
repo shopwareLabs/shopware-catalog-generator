@@ -81,9 +81,12 @@ The `test-e2e.sh` script in the project root runs a full end-to-end test against
 ./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload → verify
 ./test-e2e.sh --reuse=music --skip-upload  # Just verify existing data
 ./test-e2e.sh --cleanup=music              # Cleanup only
+./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate # Local sw-dev lane, temporary credentials
 ```
 
 Prerequisites: Shopware running at `localhost:8000` with `SW_ENV_URL`, `SW_CLIENT_ID`, `SW_CLIENT_SECRET` set in `.env`.
+With `--sw-dev=<lane>`, the script uses the lane's `APP_URL` and creates a temporary admin integration
+instead. It deletes the integration on exit, whether the run passed or failed.
 
 The script runs 5 phases:
 

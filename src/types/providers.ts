@@ -1,5 +1,7 @@
 import type { z } from "zod";
 
+import type { TokenUsage } from "./cost-estimate.js";
+
 /**
  * AI Provider types and interfaces
  */
@@ -36,6 +38,9 @@ export interface TextProvider {
 
     /** Token limit for this provider's model (for payload size checks) */
     readonly tokenLimit: number;
+
+    /** Accumulated token usage, when the provider reports it (used for actual-cost summaries) */
+    getUsage?(): TokenUsage;
 }
 
 /** Options for image generation sizing */
@@ -67,7 +72,13 @@ export interface ImageProvider {
 }
 
 /** Supported AI providers */
-export type AIProviderType = "openai" | "github-models" | "pollinations";
+export type AIProviderType = "openai" | "pollinations";
+
+/** All supported AI provider values, for validating AI_PROVIDER */
+export const AI_PROVIDER_TYPES: readonly AIProviderType[] = ["openai", "pollinations"];
+
+/** Default Pollinations image model (flux.1-schnell, free tier) */
+export const DEFAULT_POLLINATIONS_IMAGE_MODEL = "flux";
 
 /** Supported image providers */
 export type ImageProviderType = "openai" | "pollinations" | "none";
@@ -117,18 +128,10 @@ export const PROVIDER_DEFAULTS: Record<
         requiresApiKey: true,
         tokenLimit: 128000, // Conservative batching budget, not the model's full context window
     },
-    "github-models": {
-        baseUrl: "https://models.inference.ai.azure.com",
-        textModel: "gpt-4o",
-        supportsImages: false,
-        isSequential: true,
-        requiresApiKey: true,
-        tokenLimit: 128000, // GPT-4o context window
-    },
     pollinations: {
         baseUrl: "https://gen.pollinations.ai/v1",
         textModel: "openai",
-        imageModel: "flux",
+        imageModel: DEFAULT_POLLINATIONS_IMAGE_MODEL,
         supportsImages: true,
         isSequential: true,
         requiresApiKey: true,

@@ -26,6 +26,8 @@ export { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "./demo-custom
 export type { CustomerGroupKey, DemoAddress, DemoCustomer } from "./demo-customers.js";
 // Digital Products
 export { GIFT_CARD_50 } from "./digital-products.js";
+// Model pricing (hydration cost forecast)
+export { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "./model-pricing.js";
 // Promotions
 export { PROMOTIONS } from "./promotions.js";
 export type { DiscountScope, DiscountType, PromotionDefinition } from "./promotions.js";
