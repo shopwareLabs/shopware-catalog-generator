@@ -340,6 +340,10 @@ class CustomerProcessorImpl implements PostProcessor {
         if (!context.api) return new Set();
 
         try {
+            // Shopware enforces unique customer emails across ALL SalesChannels
+            // (unless "bind customers to SalesChannel" is enabled), so the lookup
+            // must not be scoped to the current SalesChannel. Otherwise demo
+            // customers created for another store cause "email already in use".
             const emails = DEMO_CUSTOMERS.map((c) => c.email);
             const customers = await context.api.searchEntities<{ email: string }>(
                 "customer",
@@ -349,13 +353,12 @@ class CustomerProcessorImpl implements PostProcessor {
                         field: "email",
                         value: emails,
                     },
-                    {
-                        type: "equals",
-                        field: "salesChannelId",
-                        value: context.salesChannelId,
-                    },
+                    // Guest accounts do not block email reuse, and they can share an
+                    // email with a registered account. Counting them could push a
+                    // registered demo email out of the result.
+                    { type: "equals", field: "guest", value: false },
                 ],
-                { limit: emails.length, includes: { customer: ["id", "email"] } }
+                { includes: { customer: ["id", "email"] } }
             );
 
             return new Set(customers.map((c) => c.email));

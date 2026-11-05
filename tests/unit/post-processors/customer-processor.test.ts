@@ -121,6 +121,44 @@ describe("CustomerProcessor", () => {
             expect(result.skipped).toBe(DEMO_CUSTOMERS.length);
         });
 
+        test("looks up existing customers across all SalesChannels", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSyncSuccess();
+            setupSalesChannelMock(mockApi);
+            setupSalutationMock(mockApi);
+            mockApi.mockFindByName("customer-group", B2B_CUSTOMER_GROUP.name, "b2b-id");
+
+            await CustomerProcessor.process(context);
+
+            // Shopware enforces unique emails globally, so a SalesChannel filter
+            // would miss customers created for another store and fail the sync.
+            const lookup = mockApi
+                .getCallsByEndpoint("search/customer")
+                .map((call) => JSON.stringify(call.body))
+                .find((body) => body.includes("equalsAny"));
+            expect(lookup).toBeDefined();
+            expect(lookup).not.toContain("salesChannelId");
+        });
+
+        test("ignores guest accounts and does not cap the lookup at one row per email", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSyncSuccess();
+            setupSalesChannelMock(mockApi);
+            setupSalutationMock(mockApi);
+            mockApi.mockFindByName("customer-group", B2B_CUSTOMER_GROUP.name, "b2b-id");
+
+            await CustomerProcessor.process(context);
+
+            // A guest and a registered account can share an email. With a limit of
+            // one row per demo email, the duplicate pushed another email out.
+            const lookup = mockApi
+                .getCallsByEndpoint("search/customer")
+                .map((call) => JSON.stringify(call.body))
+                .find((body) => body.includes("equalsAny"));
+            expect(lookup).toContain('"field":"guest"');
+            expect(lookup).not.toContain(`"limit":${DEMO_CUSTOMERS.length}`);
+        });
+
         test("skips only existing customers, creates new ones", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSyncSuccess();
