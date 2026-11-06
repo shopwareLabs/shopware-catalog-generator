@@ -9,6 +9,7 @@ import type {
     HydratedBlueprint,
     ProductCustomFieldValues,
     ProductPackaging,
+    ProductSyncResult,
     ProductType,
     SalesChannelFull,
 } from "../types/index.js";
@@ -412,6 +413,7 @@ export function buildPropertyMaps(blueprint: HydratedBlueprint): PropertyMaps {
  * @param categoryIdMap - Map of category path -> Shopware category ID
  * @param propertyOptionMap - Map of "group::option" -> { id, name }
  * @param shopware - Capabilities of the connected shop (decides which optional fields are sent)
+ * @returns How many products Shopware accepted and how many were in rejected batches
  */
 export async function syncProducts(
     dataHydrator: DataHydrator,
@@ -420,7 +422,7 @@ export async function syncProducts(
     categoryIdMap: Map<string, string>,
     propertyOptionMap: Map<string, { id: string; name: string }>,
     shopware: ShopwareCapabilities
-): Promise<void> {
+): Promise<ProductSyncResult> {
     const sendProductType = shopware.supports("productType");
     const sendOpenGraph = shopware.supports("productOpenGraph");
     const sendCustomFields = await ensureCustomFieldSet(dataHydrator, blueprint, shopware);
@@ -511,12 +513,19 @@ export async function syncProducts(
         };
     });
 
-    await dataHydrator.hydrateEnvWithProductsDirect(
+    const synced = await dataHydrator.hydrateEnvWithProductsDirect(
         productsToCreate,
         salesChannel.id,
         salesChannel.navigationCategoryId
     );
-    logger.info(`  Synced ${productsToCreate.length} products`, { cli: true });
+    const failed = productsToCreate.length - synced;
+    logger.info(`  Synced ${synced} products`, { cli: true });
+    if (failed > 0) {
+        logger.error(`  ✗ ${failed} products were rejected by Shopware (see log for details)`, {
+            cli: true,
+        });
+    }
+    return { synced, failed };
 }
 
 /**

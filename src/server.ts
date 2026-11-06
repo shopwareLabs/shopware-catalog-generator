@@ -255,7 +255,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
     syncPropertyIdsToBlueprint(hydratedBlueprint, propertyMaps);
     cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);
 
-    await syncProducts(
+    const productSync = await syncProducts(
         dataHydrator,
         hydratedBlueprint,
         salesChannelEntity,
@@ -263,7 +263,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         propertyMaps.propertyOptionMap,
         shopware
     );
-    ctx.log(`Synced ${hydratedBlueprint.products.length} products`);
+    ctx.log(`Synced ${productSync.synced} of ${hydratedBlueprint.products.length} products`);
     ctx.setProgress("upload", 4, 4);
 
     // Phase 4: Post-processors (unless skipped)
@@ -306,7 +306,8 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         salesChannelId: salesChannelEntity.id,
         salesChannelName: salesChannel,
         categories: categoryIdMap.size,
-        products: hydratedBlueprint.products.length,
+        products: productSync.synced,
+        failedProducts: productSync.failed,
         propertyGroups: hydratedBlueprint.propertyGroups.length,
         processors: processorResults,
     };

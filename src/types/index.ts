@@ -95,6 +95,7 @@ export type {
     ProductVisibilityPayload,
     PromotionDiscountPayload,
     PropertyGroup,
+    ProductSyncResult,
     PropertyOption,
     SalesChannel,
     SalesChannelFull,

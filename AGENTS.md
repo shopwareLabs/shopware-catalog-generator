@@ -1314,7 +1314,9 @@ the Admin API on exit, whether the run passed or failed. Local use only.
 - `verify.ts` also requests every SalesChannel domain (EN and DE) and expects HTTP 200. The check
   logic lives in `src/shopware/storefront-check.ts` and is unit-tested with an injected fetch.
 - `generate` and `process` exit non-zero when a post-processor returns errors, not only when it
-  throws, so a failed theme or image upload cannot be recorded as a pass.
+  throws, so a failed theme or image upload cannot be recorded as a pass. `generate` also exits
+  non-zero when Shopware rejects a product batch. Post-processors still run for the products
+  that were uploaded.
   On sw-dev lanes this needs the proxy to route `<store>.<lane>.localhost` subdomains.
 
 ## Testing
