@@ -9,6 +9,7 @@ import {
 } from "../../../src/fixtures/demo-customers.js";
 import {
     buildBusinessAccountFields,
+    buildBusinessAccountUpgrades,
     CustomerProcessor,
 } from "../../../src/post-processors/customer-processor.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
@@ -225,6 +226,70 @@ describe("CustomerProcessor", () => {
             expect(defaultAddresses[0]?.company).toBeUndefined();
         });
 
+        test("turns existing private demo customers with a company into business accounts", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSyncSuccess();
+            setupSalesChannelMock(mockApi);
+            setupSalutationMock(mockApi);
+            mockApi.mockFindByName("customer-group", B2B_CUSTOMER_GROUP.name, "b2b-id");
+            mockApi.mockSearchResponse(
+                "customer",
+                DEMO_CUSTOMERS.map((c) => ({
+                    id: `id-${c.email}`,
+                    email: c.email,
+                    accountType: "private",
+                    defaultBillingAddressId: `addr-${c.email}`,
+                }))
+            );
+
+            const result = await CustomerProcessor.process(context);
+
+            const upgradeSync = mockApi.getCallsByEndpoint("_action/sync").find((c) => {
+                const body = c.body as Record<string, unknown>;
+                return "upgrade-business-customers" in body;
+            });
+            const body = upgradeSync?.body as
+                | Record<string, { payload: Array<Record<string, unknown>> }>
+                | undefined;
+            const businessCustomers = DEMO_CUSTOMERS.filter((c) => c.company);
+            expect(businessCustomers.length).toBeGreaterThan(0);
+            expect(body?.["upgrade-business-customers"]?.payload).toEqual(
+                businessCustomers.map((c) => ({
+                    id: `id-${c.email}`,
+                    accountType: "business",
+                    company: c.company,
+                    vatIds: c.vatId ? [c.vatId] : [],
+                    addresses: [{ id: `addr-${c.email}`, company: c.company }],
+                }))
+            );
+            expect(result.errors).toEqual([]);
+            expect(result.skipped).toBe(DEMO_CUSTOMERS.length);
+        });
+
+        test("sends no update when existing demo customers are already business accounts", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSyncSuccess();
+            setupSalesChannelMock(mockApi);
+            setupSalutationMock(mockApi);
+            mockApi.mockFindByName("customer-group", B2B_CUSTOMER_GROUP.name, "b2b-id");
+            mockApi.mockSearchResponse(
+                "customer",
+                DEMO_CUSTOMERS.map((c) => ({
+                    id: `id-${c.email}`,
+                    email: c.email,
+                    accountType: c.company ? "business" : "private",
+                }))
+            );
+
+            await CustomerProcessor.process(context);
+
+            const upgradeSync = mockApi.getCallsByEndpoint("_action/sync").find((c) => {
+                const body = c.body as Record<string, unknown>;
+                return "upgrade-business-customers" in body;
+            });
+            expect(upgradeSync).toBeUndefined();
+        });
+
         test("handles API errors gracefully", async () => {
             const { context, mockApi } = createTestContext();
             setupSalesChannelMock(mockApi);
@@ -328,5 +393,28 @@ describe("buildBusinessAccountFields", () => {
         const b2b = DEMO_CUSTOMERS.filter((c) => c.group === "b2b");
         expect(b2b.length).toBeGreaterThan(0);
         expect(b2b.every((c) => c.company && c.vatId)).toBe(true);
+    });
+});
+
+describe("buildBusinessAccountUpgrades", () => {
+    test("skips customers without a company and customers that do not exist yet", () => {
+        const upgrades = buildBusinessAccountUpgrades(
+            new Map([
+                [
+                    "customer@example.com",
+                    { id: "c-1", email: "customer@example.com", accountType: "private" },
+                ],
+            ])
+        );
+        expect(upgrades).toEqual([]);
+    });
+
+    test("leaves the address out when the default billing address is unknown", () => {
+        const upgrades = buildBusinessAccountUpgrades(
+            new Map([["b2b@example.com", { id: "c-2", email: "b2b@example.com" }]])
+        );
+        expect(upgrades).toHaveLength(1);
+        expect(upgrades[0]?.payload.addresses).toBeUndefined();
+        expect(upgrades[0]?.payload.accountType).toBe("business");
     });
 });

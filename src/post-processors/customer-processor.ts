@@ -78,13 +78,13 @@ class CustomerProcessorImpl implements PostProcessor {
             const b2bGroupId = await this.getOrCreateB2bGroup(context);
 
             // Find existing customers to support idempotency
-            const existingEmails = await this.findExistingCustomerEmails(context);
+            const existingCustomers = await this.findExistingCustomers(context);
 
             // Build customer payloads
             const customerPayloads: CustomerSyncPayload[] = [];
 
             for (const customer of DEMO_CUSTOMERS) {
-                if (existingEmails.has(customer.email)) {
+                if (existingCustomers.has(customer.email)) {
                     logger.info(`    ⊘ Customer "${customer.email}" already exists`, { cli: true });
                     skipped++;
                     continue;
@@ -132,6 +132,8 @@ class CustomerProcessorImpl implements PostProcessor {
                     ],
                 });
             }
+
+            await this.upgradeToBusinessAccounts(context, existingCustomers);
 
             if (customerPayloads.length > 0) {
                 await context.api.syncEntities({
@@ -339,8 +341,34 @@ class CustomerProcessorImpl implements PostProcessor {
         return groupId;
     }
 
-    private async findExistingCustomerEmails(context: PostProcessorContext): Promise<Set<string>> {
-        if (!context.api) return new Set();
+    /**
+     * Turn existing demo customers with a company into business accounts.
+     * Demo customers created before business accounts were added are private accounts,
+     * and existing customers are otherwise skipped, so they would never get the company.
+     */
+    private async upgradeToBusinessAccounts(
+        context: PostProcessorContext,
+        existingCustomers: Map<string, ExistingCustomer>
+    ): Promise<void> {
+        const upgrades = buildBusinessAccountUpgrades(existingCustomers);
+        if (upgrades.length === 0 || !context.api) return;
+
+        await context.api.syncEntities({
+            "upgrade-business-customers": {
+                entity: "customer",
+                action: "upsert",
+                payload: upgrades.map((upgrade) => upgrade.payload),
+            },
+        });
+        for (const upgrade of upgrades) {
+            logger.info(`    ✓ Turned "${upgrade.email}" into a business account`, { cli: true });
+        }
+    }
+
+    private async findExistingCustomers(
+        context: PostProcessorContext
+    ): Promise<Map<string, ExistingCustomer>> {
+        if (!context.api) return new Map();
 
         try {
             // Shopware enforces unique customer emails across ALL SalesChannels
@@ -348,7 +376,7 @@ class CustomerProcessorImpl implements PostProcessor {
             // must not be scoped to the current SalesChannel. Otherwise demo
             // customers created for another store cause "email already in use".
             const emails = DEMO_CUSTOMERS.map((c) => c.email);
-            const customers = await context.api.searchEntities<{ email: string }>(
+            const customers = await context.api.searchEntities<ExistingCustomer>(
                 "customer",
                 [
                     {
@@ -361,14 +389,68 @@ class CustomerProcessorImpl implements PostProcessor {
                     // registered demo email out of the result.
                     { type: "equals", field: "guest", value: false },
                 ],
-                { includes: { customer: ["id", "email"] } }
+                {
+                    includes: {
+                        customer: ["id", "email", "accountType", "defaultBillingAddressId"],
+                    },
+                }
             );
 
-            return new Set(customers.map((c) => c.email));
+            return new Map(customers.map((c) => [c.email, c]));
         } catch {
-            return new Set();
+            return new Map();
         }
     }
+}
+
+/** Existing customer as returned by the demo customer lookup */
+export interface ExistingCustomer {
+    id: string;
+    email: string;
+    accountType?: string;
+    defaultBillingAddressId?: string;
+}
+
+/** Partial customer update that turns a private account into a business account */
+export interface BusinessAccountUpgrade {
+    /** Email of the demo customer (for logging, not sent) */
+    email: string;
+    payload: {
+        id: string;
+        accountType: "business";
+        company: string;
+        vatIds: string[];
+        addresses?: Array<{ id: string; company: string }>;
+    };
+}
+
+/**
+ * Updates for existing demo customers that should be business accounts but are not.
+ * Customers that already are business accounts are left alone, so re-runs send nothing.
+ * The company is also set on the default billing address, where orders read it from.
+ */
+export function buildBusinessAccountUpgrades(
+    existingCustomers: Map<string, ExistingCustomer>
+): BusinessAccountUpgrade[] {
+    return DEMO_CUSTOMERS.flatMap((customer) => {
+        const existing = existingCustomers.get(customer.email);
+        if (!existing || !customer.company || existing.accountType === "business") return [];
+
+        const addressId = existing.defaultBillingAddressId;
+        const company = customer.company;
+        return [
+            {
+                email: customer.email,
+                payload: {
+                    id: existing.id,
+                    accountType: "business",
+                    company,
+                    vatIds: customer.vatId ? [customer.vatId] : [],
+                    ...(addressId && { addresses: [{ id: addressId, company }] }),
+                },
+            },
+        ];
+    });
 }
 
 /** Customer processor singleton */
