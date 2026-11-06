@@ -420,7 +420,7 @@ export class MockApiHelpers implements ShopwareApi {
     }
 
     generateAccessKey(): string {
-        return "SWMOCKKEY1234567890123456789012";
+        return "SWSCMOCKKEY123456789012345";
     }
 
     // =========================================================================

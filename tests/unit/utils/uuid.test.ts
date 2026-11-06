@@ -29,20 +29,9 @@ describe("UUID Utilities", () => {
     });
 
     describe("generateAccessKey", () => {
-        test("generates 32-character string", () => {
-            const key = generateAccessKey();
-            expect(key.length).toBe(32);
-        });
-
-        test("starts with SW", () => {
-            const key = generateAccessKey();
-            expect(key.startsWith("SW")).toBe(true);
-        });
-
-        test("contains only uppercase letters and digits after SW prefix", () => {
-            const key = generateAccessKey();
-            const suffix = key.slice(2);
-            expect(suffix).toMatch(/^[A-Z0-9]+$/);
+        test("matches the Shopware sales channel key format", () => {
+            // AccessKeyHelper::getOrigin() routes by the first 4 characters and rejects unknown prefixes
+            expect(generateAccessKey()).toMatch(/^SWSC[A-Z0-9]{22}$/);
         });
 
         test("generates unique access keys", () => {
