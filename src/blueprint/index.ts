@@ -1,6 +1,13 @@
 export { BlueprintGenerator } from "./generator.js";
 export { BlueprintHydrator } from "./hydrator.js";
-export { estimateHydrationCost, formatCostEstimate, priceTokenUsage } from "./cost-estimator.js";
+export {
+    estimateHydrationCost,
+    estimateTranslationCost,
+    estimateTranslationSource,
+    formatCostEstimate,
+    formatTranslationEstimate,
+    priceTokenUsage,
+} from "./cost-estimator.js";
 export type { CostEstimateInput, EstimateBlueprint } from "./cost-estimator.js";
 export {
     findPlaceholderCategories,
@@ -19,5 +26,9 @@ export {
     hydrateProductImages,
     hydrateThemeMedia,
     ProductHydrator,
+    buildTranslationSource,
+    collectCmsTexts,
+    translateCatalog,
 } from "./hydrators/index.js";
+export type { TranslateCatalogInput, TranslateCatalogResult } from "./hydrators/index.js";
 export { VariantResolver } from "./variant-resolver.js";

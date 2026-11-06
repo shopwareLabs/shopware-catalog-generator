@@ -177,6 +177,17 @@ const { checks, errors } = await verifyStorefrontDomains(urls); // sequential, o
 // errors: ["SalesChannel has no domains"] when urls is empty
 ```
 
+### Languages and translation payloads (languages.ts, translation-payload.ts)
+
+`getShopLanguages(api, salesChannelId)` reads the system language and the SalesChannel
+languages (with locale codes). `planLanguageContent(languages, translations)` matches each
+language to its content: the English source for English locales, the cached translation file
+for others, nothing when no file exists. `buildTranslationOperations()` turns that plan into
+`_action/sync` operations of the form `{ id, translations: { <languageId>: fields } }` for
+products, categories, property groups/options, manufacturers and CMS slots
+(slot key `"<sectionIndex>.<blockPosition>.<slot>"`). Only entities that already exist are
+updated, so the IDs must be the ones in Shopware (see the manufacturer processor).
+
 ### Version detection (version.ts)
 
 `detectShopwareCapabilities(api)` reads `/_info/version` and the active feature flags

@@ -15,11 +15,14 @@
 #   ./test-e2e.sh --reuse=<name> --skip-upload                       # Just verify existing data
 #   ./test-e2e.sh --cleanup=<name>                                   # Only cleanup specific SalesChannel
 #   ./test-e2e.sh --sw-dev=67 --reuse=<name> --skip-hydrate          # Run against a local sw-dev lane
+#   ./test-e2e.sh --reuse=<name> --languages=none                    # English only (default: de-DE)
 #
 #   ./test-e2e-lanes.sh --lanes=sw65,sw66,sw67,sw68,trunk           # Same content on several lanes (see that script)
 #
 # Environment:
 # - CACHE_DIR       cache root (default ./generated)
+# - E2E_LANGUAGES   translation locales for the hydrate phase (default de-DE, "none" to skip);
+#                   --languages=... overrides it. Unchanged texts are reused, so reruns are cheap.
 # - E2E_RESULT_DIR  if set, writes steps.tsv (step, status) and verify.json there
 #
 # --sw-dev=<lane> targets a local sw-dev lane (see `sw-dev list`) instead of .env:
@@ -56,6 +59,7 @@ INSPIRE_URL=""
 CUSTOM_NAME=""
 CUSTOM_DESCRIPTION=""
 SW_DEV_LANE=""
+LANGUAGES="${E2E_LANGUAGES:-de-DE}"
 
 for arg in "$@"; do
     case $arg in
@@ -85,6 +89,9 @@ for arg in "$@"; do
             ;;
         --sw-dev=*)
             SW_DEV_LANE="${arg#*=}"
+            ;;
+        --languages=*)
+            LANGUAGES="${arg#*=}"
             ;;
     esac
 done
@@ -362,6 +369,15 @@ else
         echo "WARNING: cms-blueprint.json not created (CMS text will use fixture defaults)"
     fi
     echo "✓ Blueprint hydrated (products + categories + CMS text)"
+fi
+
+# Phase 2b: translate (AI, reuses unchanged entries of earlier runs)
+if [ "$SKIP_HYDRATE" = true ] || [ "$LANGUAGES" = "none" ]; then
+    echo "[2b/5] Skipping translation (cached translations are still uploaded)"
+elif [ -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
+    echo "[2b/5] Translating catalog ($LANGUAGES)..."
+    run_step translate bun run blueprint translate --name="$TEST_SALESCHANNEL" --languages="$LANGUAGES"
+    echo "✓ Catalog translated"
 fi
 echo ""
 

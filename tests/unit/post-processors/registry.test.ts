@@ -92,7 +92,7 @@ describe("PostProcessor Registry", () => {
     test("getAll returns all processors", () => {
         const all = registry.getAll();
         // 9 CMS processors + 9 other processors = 18 total
-        expect(all.length).toBe(18);
+        expect(all.length).toBe(19);
         expect(all.map((p) => p.name)).toContain("cms-video");
         expect(all.map((p) => p.name)).toContain("cms-footer-pages");
         expect(all.map((p) => p.name)).toContain("cms-testing");

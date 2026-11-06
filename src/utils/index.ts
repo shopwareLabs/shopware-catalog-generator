@@ -72,6 +72,8 @@ export {
     TimeoutError,
     withTimeout,
 } from "./retry.js";
+// Seeded random utilities
+export { createSeededRandom, seededPick } from "./seeded-random.js";
 // Shopware request utilities
 export type { ShopwareRequestContext } from "./shopware-request.js";
 export { apiPatch, apiPost, apiUpload } from "./shopware-request.js";
@@ -92,6 +94,6 @@ export {
     toStoreScopedName,
 } from "./strings.js";
 // UUID utilities
-export { generateAccessKey, generateUUID } from "./uuid.js";
+export { deterministicUUID, generateAccessKey, generateUUID } from "./uuid.js";
 export type { SubdomainValidationResult } from "./validation.js";
 export { generateSubdomainUrl, isValidSubdomain, validateSubdomainName } from "./validation.js";

@@ -83,12 +83,34 @@ bun run blueprint estimate --name=music
 bun run blueprint estimate --name=music --only=cms
 ```
 
-| Flag     | Type   | Default            | Description                                          |
-| -------- | ------ | ------------------ | ---------------------------------------------------- |
-| `--name` | string | _(required)_       | SalesChannel name (blueprint must exist)             |
-| `--only` | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms` |
+| Flag          | Type   | Default            | Description                                             |
+| ------------- | ------ | ------------------ | ------------------------------------------------------- |
+| `--name`      | string | _(required)_       | SalesChannel name (blueprint must exist)                |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`    |
+| `--languages` | string | _(none)_           | Also forecast translation: `de-DE,fr-FR`, `all`, `none` |
 
 `blueprint hydrate` prints the same forecast before it starts and the actual token usage at the end.
+
+### Blueprint Translate
+
+Translate the hydrated catalog into other locales (one AI pass per locale). Output:
+`generated/sales-channels/{name}/translations/{locale}.json`. Upload runs in `generate`
+(or `process --only=translations,reviews`).
+
+```bash
+bun run blueprint translate --name=music --languages=de-DE,fr-FR
+bun run blueprint translate --name=music --languages=all --formality=formal
+```
+
+| Flag          | Type    | Default                 | Description                                                  |
+| ------------- | ------- | ----------------------- | ------------------------------------------------------------ |
+| `--name`      | string  | _(required)_            | SalesChannel name (hydrated blueprint must exist)            |
+| `--languages` | string  | `TRANSLATION_LANGUAGES` | Locale list, `all` (SalesChannel languages) or `none`        |
+| `--formality` | string  | _(AI picks per locale)_ | `formal` or `informal`                                       |
+| `--force`     | boolean | `false`                 | Re-translate everything instead of reusing unchanged entries |
+
+`generate` accepts `--languages` too. Without it (and without `TRANSLATION_LANGUAGES`) it shows
+the translation forecast and asks in a terminal; outside a terminal it stays English only.
 
 ### Blueprint Hydrate
 

@@ -1,17 +1,19 @@
 /**
- * Review Processor - Generates and creates product reviews
+ * Review Processor - Creates product reviews from cached content (no AI)
  *
  * 1. Reads reviewCount from product metadata
- * 2. Generates reviews via AI (if text provider available)
- * 3. Creates reviews in Shopware
+ * 2. Builds the English reviews deterministically (`buildProductReviews`)
+ * 3. Spreads them across the SalesChannel languages: review i is written in
+ *    language i % n, using the translated title/content when a translation exists
  *
- * Review distribution:
- * - 0 reviews: ~17% of products
- * - 1-2 reviews: ~28% of products
- * - 3-5 reviews: ~33% of products
- * - 8-10 reviews: ~22% of products
+ * `product_review` has one `languageId` and no translations, so every review belongs to
+ * exactly one language. Review IDs are derived from (product, index), so re-runs upsert
+ * the same rows.
  */
 
+import type { GeneratedReview } from "../fixtures/index.js";
+import type { LanguageContent } from "../shopware/index.js";
+import type { BlueprintProduct } from "../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -19,9 +21,85 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
-import { getReviewContent, REVIEW_TEMPLATES, REVIEWER_NAMES } from "../fixtures/index.js";
+import { buildProductReviews } from "../fixtures/index.js";
 import { getAllSalesChannelProductIds, searchAllByEqualsAny } from "../shopware/api-helpers.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
+import {
+    getShopLanguages,
+    loadAllTranslations,
+    planReviewLanguages,
+} from "../shopware/languages.js";
+import { apiPost, deterministicUUID, logger } from "../utils/index.js";
+
+interface ReviewPayload {
+    id: string;
+    [field: string]: unknown;
+}
+
+/** Title and content of review `index` in the given language (English fallback) */
+function localizedReview(
+    productId: string,
+    index: number,
+    review: GeneratedReview,
+    language: LanguageContent | undefined
+): { title: string; content: string } {
+    if (!language || language.content.kind === "source") return review;
+    const translated = language.content.file.reviews[productId]?.reviews[index];
+    return translated ?? review;
+}
+
+/** Shopware review rows for one product */
+export function buildReviewPayload(
+    product: Pick<BlueprintProduct, "id" | "name">,
+    reviewCount: number,
+    salesChannelId: string,
+    languages: LanguageContent[]
+): ReviewPayload[] {
+    return buildProductReviews(product.id, product.name, reviewCount).map((review, i) => {
+        const language = languages[i % Math.max(languages.length, 1)];
+        const { title, content } = localizedReview(product.id, i, review, language);
+        return {
+            id: deterministicUUID(`review:${product.id}:${i}`),
+            productId: product.id,
+            salesChannelId,
+            ...(language && { languageId: language.language.id }),
+            title,
+            content,
+            points: review.rating,
+            status: true,
+            externalUser: review.user,
+            externalEmail: review.email,
+        };
+    });
+}
+
+/**
+ * Review languages for this SalesChannel. Empty when they cannot be read, then reviews
+ * are written without `languageId` (Shopware uses the context language).
+ */
+async function resolveReviewLanguages(context: PostProcessorContext): Promise<LanguageContent[]> {
+    try {
+        const languages = await getShopLanguages(context.api, context.salesChannelId);
+        const translations = loadAllTranslations(context.cache, context.salesChannelName);
+        return planReviewLanguages(languages, translations);
+    } catch (error) {
+        logger.warn("Could not read SalesChannel languages for reviews", { data: error });
+        return [];
+    }
+}
+
+/**
+ * True when the product has reviews this generator did not create with stable IDs
+ * (older runs used random IDs). Those are kept, so the product is skipped.
+ * Our own reviews are upserted again, which updates their language and text.
+ */
+export function hasForeignReviews(existingIds: string[], payload: Array<{ id: string }>): boolean {
+    const ours = new Set(payload.map((r) => r.id));
+    return existingIds.some((id) => !ours.has(id));
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Review Processor implementation
@@ -31,9 +109,6 @@ class ReviewProcessorImpl implements PostProcessor {
     readonly description = "Generate product reviews";
     readonly dependsOn: string[] = []; // No dependencies
 
-    /** Cache of products that already have reviews */
-    private productsWithReviews: Set<string> = new Set();
-
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { blueprint, cache, options } = context;
 
@@ -41,28 +116,22 @@ class ReviewProcessorImpl implements PostProcessor {
         let skipped = 0;
         const errors: string[] = [];
         let totalReviews = 0;
+        let legacyProducts = 0;
 
-        // Reset cache for each run
-        this.productsWithReviews = new Set();
+        const languages = options.dryRun ? [] : await resolveReviewLanguages(context);
+        if (languages.length > 1) {
+            const locales = languages.map((l) => l.language.locale).join(", ");
+            logger.info(`    Reviews spread across ${locales}`, { cli: true });
+        }
 
         for (const product of blueprint.products) {
             try {
                 const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
-
                 const reviewCount = metadata?.reviewCount || 0;
 
                 if (reviewCount === 0) {
                     skipped++;
                     continue;
-                }
-
-                // In dry run, skip API check (no network calls)
-                if (!options.dryRun) {
-                    const hasExistingReviews = await this.productHasReviews(context, product.id);
-                    if (hasExistingReviews) {
-                        skipped++;
-                        continue;
-                    }
                 }
 
                 if (options.dryRun) {
@@ -75,72 +144,41 @@ class ReviewProcessorImpl implements PostProcessor {
                     continue;
                 }
 
-                // Generate reviews
-                const reviews = this.generateReviews(product.name, reviewCount);
-                totalReviews += reviews.length;
-
-                // Create reviews in Shopware
-                const reviewPayload = reviews.map((review) => ({
-                    id: generateUUID(),
-                    productId: product.id,
-                    salesChannelId: context.salesChannelId,
-                    title: review.title,
-                    content: review.content,
-                    points: review.rating,
-                    status: true, // Approved
-                    externalUser: review.user,
-                    externalEmail: review.email,
-                }));
-
-                if (reviewPayload.length > 0) {
-                    try {
-                        if (context.api) {
-                            // Use new API helpers
-                            await context.api.syncEntities({
-                                createReviews: {
-                                    entity: "product_review",
-                                    action: "upsert",
-                                    payload: reviewPayload,
-                                },
-                            });
-                        } else {
-                            // Fallback to legacy method
-                            const response = await apiPost(context, "_action/sync", {
-                                createReviews: {
-                                    entity: "product_review",
-                                    action: "upsert",
-                                    payload: reviewPayload,
-                                },
-                            });
-
-                            if (!response.ok) {
-                                logger.apiError("_action/sync (reviews)", response.status, {
-                                    productId: product.id,
-                                    reviewCount: reviewPayload.length,
-                                });
-                                errors.push(
-                                    `Failed to create reviews for ${product.name}: API returned ${response.status}`
-                                );
-                            }
-                        }
-                    } catch (error) {
-                        errors.push(
-                            `Failed to create reviews for ${product.name}: ${error instanceof Error ? error.message : String(error)}`
-                        );
-                    }
+                const payload = buildReviewPayload(
+                    product,
+                    reviewCount,
+                    context.salesChannelId,
+                    languages
+                );
+                const existingIds = await this.existingReviewIds(context, product.id);
+                if (hasForeignReviews(existingIds, payload)) {
+                    legacyProducts++;
+                    skipped++;
+                    continue;
                 }
+                totalReviews += payload.length;
+
+                const error = await this.createReviews(context, payload);
+                if (error) errors.push(`Failed to create reviews for ${product.name}: ${error}`);
 
                 processed++;
             } catch (error) {
                 errors.push(
-                    `Failed to process reviews for ${product.name}: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to process reviews for ${product.name}: ${errorMessage(error)}`
                 );
             }
         }
 
-        logger.info(`    Generated ${totalReviews} reviews for ${processed} products`, {
+        logger.info(`    Wrote ${totalReviews} reviews for ${processed} products`, {
             cli: true,
         });
+        if (legacyProducts > 0) {
+            logger.warn(
+                `    ⚠ ${legacyProducts} products keep reviews from an older run (English only). ` +
+                    `Replace them: bun run cleanup -- --salesChannel="${context.salesChannelName}" --processors=reviews`,
+                { cli: true }
+            );
+        }
 
         return {
             name: this.name,
@@ -149,6 +187,30 @@ class ReviewProcessorImpl implements PostProcessor {
             errors,
             durationMs: 0,
         };
+    }
+
+    /** Upsert review rows, returns an error message on failure */
+    private async createReviews(
+        context: PostProcessorContext,
+        payload: ReviewPayload[]
+    ): Promise<string | null> {
+        const operations = {
+            createReviews: { entity: "product_review", action: "upsert" as const, payload },
+        };
+        try {
+            if (context.api) {
+                await context.api.syncEntities(operations);
+                return null;
+            }
+            const response = await apiPost(context, "_action/sync", operations);
+            if (response.ok) return null;
+            logger.apiError("_action/sync (reviews)", response.status, {
+                reviewCount: payload.length,
+            });
+            return `API returned ${response.status}`;
+        } catch (error) {
+            return errorMessage(error);
+        }
     }
 
     /**
@@ -211,104 +273,24 @@ class ReviewProcessorImpl implements PostProcessor {
         return { name: this.name, deleted, errors, durationMs: 0 };
     }
 
-    /**
-     * Generate reviews for a product
-     */
-    private generateReviews(
-        productName: string,
-        count: number
-    ): Array<{
-        user: string;
-        email: string;
-        title: string;
-        content: string;
-        rating: number;
-    }> {
-        const reviews: Array<{
-            user: string;
-            email: string;
-            title: string;
-            content: string;
-            rating: number;
-        }> = [];
-
-        for (let i = 0; i < count; i++) {
-            // Generate random rating (weighted toward positive)
-            // Distribution: 5 stars (40%), 4 stars (30%), 3 stars (15%), 2 stars (10%), 1 star (5%)
-            const ratingRoll = Math.random();
-            let rating: number;
-            if (ratingRoll < 0.4) rating = 5;
-            else if (ratingRoll < 0.7) rating = 4;
-            else if (ratingRoll < 0.85) rating = 3;
-            else if (ratingRoll < 0.95) rating = 2;
-            else rating = 1;
-
-            // Generate random reviewer
-            const firstName = this.randomPick(REVIEWER_NAMES.firstNames);
-            const lastName = this.randomPick(REVIEWER_NAMES.lastNames);
-            const user = `${firstName} ${lastName}`;
-            const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`;
-
-            // Generate title based on rating
-            let title: string;
-            if (rating >= 4) {
-                title = this.randomPick(REVIEW_TEMPLATES.positiveTitles);
-            } else if (rating === 3) {
-                title = this.randomPick(REVIEW_TEMPLATES.neutralTitles);
-            } else {
-                title = this.randomPick(REVIEW_TEMPLATES.negativeTitles);
-            }
-
-            // Generate content using fixture helper
-            const productType = productName.split(" - ")[0] || productName;
-            const content = getReviewContent(rating, productType);
-
-            reviews.push({ user, email, title, content, rating });
-        }
-
-        return reviews;
-    }
-
-    private randomPick<T>(arr: readonly T[]): T {
-        const index = Math.floor(Math.random() * arr.length);
-        return arr[index] as T;
-    }
-
-    /**
-     * Check if a product already has reviews in Shopware
-     */
-    private async productHasReviews(
+    /** IDs of the reviews this product already has in Shopware */
+    private async existingReviewIds(
         context: PostProcessorContext,
         productId: string
-    ): Promise<boolean> {
-        // Use cached result if available
-        if (this.productsWithReviews.has(productId)) {
-            return true;
-        }
-
+    ): Promise<string[]> {
         try {
-            interface ReviewCountResponse {
-                total?: number;
-            }
-
             const response = await apiPost(context, "search/product-review", {
                 filter: [{ type: "equals", field: "productId", value: productId }],
-                limit: 1,
+                limit: 500,
                 includes: { product_review: ["id"] },
             });
-
-            if (response.ok) {
-                const data = (await response.json()) as ReviewCountResponse;
-                if (data.total && data.total > 0) {
-                    this.productsWithReviews.add(productId);
-                    return true;
-                }
-            }
+            if (!response.ok) return [];
+            const data = (await response.json()) as { data?: Array<{ id?: string }> };
+            return (data.data ?? []).map((r) => r.id).filter((id): id is string => Boolean(id));
         } catch {
-            // On error, assume no reviews (will try to create)
+            // On error, assume no reviews (upsert by stable ID cannot duplicate ours)
+            return [];
         }
-
-        return false;
     }
 }
 

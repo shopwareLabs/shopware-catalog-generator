@@ -77,9 +77,9 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 
 ## Available Processors
 
-| Processor        | Name               | Dependencies                               | Has Cleanup | Notes                                                                                                                                      |
-| ---------------- | ------------------ | ------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| CMS Homepage     | `cms-home`         | `customers`, `promotions`, `cross-selling` | Yes         | Conditionally renders credential table, promotion codes, and Cross-Selling bullet based on `activeProcessors`                              |
+| Processor        | Name               | Dependencies                               | Has Cleanup | Notes                                                                                                                                                                                 |
+| ---------------- | ------------------ | ------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CMS Homepage     | `cms-home`         | `customers`, `promotions`, `cross-selling` | Yes         | Conditionally renders credential table, promotion codes, and Cross-Selling bullet based on `activeProcessors`                                                                         |
 | CMS Text         | `cms-text`         | none                                       | Yes         |
 | CMS Images       | `cms-images`       | none                                       | Yes         |
 | CMS Video        | `cms-video`        | none                                       | Yes         |
@@ -89,12 +89,13 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 | CMS Footer Pages | `cms-footer-pages` | none                                       | Yes         |
 | CMS Testing      | `cms-testing`      | all `cms-*`, `digital-product`             | Yes         |
 | Cross-Selling    | `cross-selling`    | none                                       | Yes         |
-| Customers        | `customers`        | none                                       | Yes         | B2B demo accounts are business accounts (`accountType`, `company`, `vatIds`, address company). Existing private demo accounts are upgraded |
+| Customers        | `customers`        | none                                       | Yes         | B2B demo accounts are business accounts (`accountType`, `company`, `vatIds`, address company). Existing private demo accounts are upgraded                                            |
 | Digital Product  | `digital-product`  | none                                       | Yes         |
-| Images           | `images`           | none                                       | Yes         | Product media get `alt`/`title`; cover becomes `openGraphMediaId` when `productOpenGraph` is supported (6.7.10)                            |
-| Manufacturers    | `manufacturers`    | none                                       | Yes         |
+| Images           | `images`           | none                                       | Yes         | Product media get `alt`/`title`; cover becomes `openGraphMediaId` when `productOpenGraph` is supported (6.7.10)                                                                       |
+| Manufacturers    | `manufacturers`    | none                                       | Yes         | Shopware is the source of truth: existing manufacturers are matched by name, the cache is rewritten with their IDs (cached IDs can be stale)                                          |
 | Promotions       | `promotions`       | none                                       | Yes         |
-| Reviews          | `reviews`          | none                                       | Yes         |
+| Reviews          | `reviews`          | none                                       | Yes         | Review _i_ goes to SalesChannel language _i % n_ (translated text when cached). Stable IDs, so re-runs upsert; products with legacy random-ID reviews are skipped with a cleanup hint |
+| Translations     | `translations`     | `manufacturers`, `variants`, `cms-testing` | No          | Writes `translations/{locale}.json` as entity translations (products, categories, properties, manufacturers, CMS slots). No AI                                                        |
 | Theme            | `theme`            | none                                       | Yes         |
 | Variants         | `variants`         | `manufacturers`                            | Yes         |
 

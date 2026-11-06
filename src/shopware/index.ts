@@ -43,6 +43,23 @@ export { ShopwareCleanup } from "./cleanup.js";
 export { ShopwareClient } from "./client.js";
 export { ShopwareExporter } from "./export.js";
 export { ShopwareHydrator } from "./hydrator.js";
+// Export language resolution and translation payloads
+export {
+    getShopLanguages,
+    languageOf,
+    type LanguageContent,
+    type LocaleContent,
+    planLanguageContent,
+    planReviewLanguages,
+    loadAllTranslations,
+    resolveLocaleContent,
+    SYSTEM_LANGUAGE_ID,
+} from "./languages.js";
+export {
+    buildTranslationOperations,
+    type CmsPageStructure,
+    type TranslationPayloadInput,
+} from "./translation-payload.js";
 // Export storefront domain checks (used by the E2E verifier)
 export {
     checkStorefrontUrl,

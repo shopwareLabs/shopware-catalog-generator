@@ -159,7 +159,7 @@ function countPendingImages(
 }
 
 /** Report actual token usage and cost when the text provider tracks it */
-function formatActualUsage(textProvider: TextProvider, selection: ModelSelection): string[] {
+export function formatActualUsage(textProvider: TextProvider, selection: ModelSelection): string[] {
     const usage = textProvider.getUsage?.();
     if (!usage || usage.calls === 0) return [];
 

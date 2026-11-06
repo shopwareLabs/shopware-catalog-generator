@@ -473,6 +473,7 @@ import { ManufacturerProcessor } from "./manufacturer-processor.js";
 import { PromotionProcessor } from "./promotion-processor.js";
 import { ReviewProcessor } from "./review-processor.js";
 import { ThemeProcessor } from "./theme-processor.js";
+import { TranslationProcessor } from "./translation-processor.js";
 import { VariantProcessor } from "./variant-processor.js";
 
 // Re-export processors
@@ -495,6 +496,7 @@ export { ManufacturerProcessor } from "./manufacturer-processor.js";
 export { PromotionProcessor } from "./promotion-processor.js";
 export { ReviewProcessor } from "./review-processor.js";
 export { ThemeProcessor } from "./theme-processor.js";
+export { TranslationProcessor } from "./translation-processor.js";
 export { VariantProcessor } from "./variant-processor.js";
 
 // Register all processors with the registry
@@ -521,3 +523,5 @@ registry.register(PromotionProcessor);
 registry.register(ReviewProcessor);
 registry.register(ThemeProcessor);
 registry.register(VariantProcessor);
+// Writes cached translations after all translated entities exist
+registry.register(TranslationProcessor);

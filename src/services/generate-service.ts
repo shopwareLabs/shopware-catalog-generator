@@ -6,7 +6,7 @@
  */
 
 import type { PostProcessorResult } from "../post-processors/index.js";
-import type { ProductSyncResult } from "../types/index.js";
+import type { LanguageSelection, ProductSyncResult } from "../types/index.js";
 
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
@@ -23,11 +23,21 @@ import { createTemplateFetcherFromEnv } from "../templates/index.js";
 import { isIncompleteHydration, logger, validateBlueprint } from "../utils/index.js";
 import { createBlueprint, hydrateBlueprint } from "./blueprint-service.js";
 import { createProcessorDeps } from "./shopware-context.js";
+import {
+    formatTranslationForecast,
+    resolveTargetLocales,
+    runTranslation,
+} from "./translation-service.js";
 
 export interface GenerateOptions {
     products?: number;
     dryRun?: boolean;
     noTemplate?: boolean;
+    /**
+     * Languages to translate the catalog into. Undefined keeps English only, but cached
+     * translations (e.g. from a template) are still uploaded.
+     */
+    languages?: LanguageSelection;
 }
 
 /**
@@ -168,6 +178,10 @@ export async function generate(
         }
     }
 
+    const translation = await runTranslationStep(salesChannelName, options.languages, dryRun);
+    results.push(...translation.lines);
+    if (translation.error) return [...results, translation.error];
+
     results.push(`Step 3: Syncing to Shopware...`);
 
     if (dryRun) {
@@ -201,6 +215,7 @@ export async function generate(
             name: salesChannelName,
             description: blueprint.salesChannel.description,
             imperialEnglishDomain: shopware.supports("measurementUnits"),
+            locales: translation.locales,
         });
         results.push(`  Created SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
     } else {
@@ -267,6 +282,50 @@ export async function generate(
     ].filter((line): line is string => line !== undefined);
     results.push(...errorLines);
     return results;
+}
+
+interface TranslationStepResult {
+    lines: string[];
+    /** Locales with a cached translation (become SalesChannel domains) */
+    locales: string[];
+    error?: string;
+}
+
+/**
+ * Step 2b: translate the catalog. Without a selection, cached translations (e.g. from a
+ * template) are kept and nothing is sent to the AI.
+ */
+async function runTranslationStep(
+    salesChannelName: string,
+    languages: LanguageSelection | undefined,
+    dryRun: boolean
+): Promise<TranslationStepResult> {
+    const cache = createCacheFromEnv();
+    const cached = cache.listTranslationLocales(salesChannelName);
+
+    if (!languages || languages.mode === "none") {
+        const lines =
+            cached.length > 0
+                ? [`Step 2b: Using cached translations (${cached.join(", ")})`]
+                : [`Step 2b: English only (use --languages=all or --languages=de-DE to translate)`];
+        return { lines, locales: cached };
+    }
+
+    if (dryRun) {
+        const locales = await resolveTargetLocales(languages, salesChannelName);
+        return {
+            lines: [
+                `Step 2b: [DRY RUN] Would translate into ${locales.join(", ") || "nothing"}`,
+                ...formatTranslationForecast(cache, salesChannelName, locales),
+            ],
+            locales: cached,
+        };
+    }
+
+    const result = await runTranslation(salesChannelName, { languages });
+    const error = result.lines.find((l) => l.startsWith("Error:"));
+    if (error) return { lines: [`Step 2b: Translating...`], locales: [], error };
+    return { lines: [`Step 2b: Translating...`, ...result.lines], locales: result.locales };
 }
 
 async function runHydration(
