@@ -187,6 +187,7 @@ export async function generate(
         salesChannel = await dataHydrator.createSalesChannel({
             name: salesChannelName,
             description: blueprint.salesChannel.description,
+            imperialEnglishDomain: shopware.supports("measurementUnits"),
         });
         results.push(`  Created SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
     } else {

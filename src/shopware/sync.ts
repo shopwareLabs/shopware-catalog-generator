@@ -5,7 +5,13 @@
  * These orchestrate the DataHydrator to sync data to Shopware.
  */
 
-import type { HydratedBlueprint, ProductType, SalesChannelFull } from "../types/index.js";
+import type {
+    HydratedBlueprint,
+    ProductCustomFieldValues,
+    ProductPackaging,
+    ProductType,
+    SalesChannelFull,
+} from "../types/index.js";
 import type { DataHydrator } from "./index.js";
 import type { ShopwareCapabilities } from "./version.js";
 
@@ -416,6 +422,8 @@ export async function syncProducts(
     shopware: ShopwareCapabilities
 ): Promise<void> {
     const sendProductType = shopware.supports("productType");
+    const sendOpenGraph = shopware.supports("productOpenGraph");
+    const sendCustomFields = await ensureCustomFieldSet(dataHydrator, blueprint, shopware);
 
     type ProductToCreate = {
         id: string;
@@ -443,6 +451,10 @@ export async function syncProducts(
         metaTitle?: string;
         metaDescription?: string;
         type?: ProductType;
+        packaging?: ProductPackaging;
+        customFields?: ProductCustomFieldValues;
+        ogTitle?: string;
+        ogDescription?: string;
     };
 
     const productsToCreate: ProductToCreate[] = blueprint.products.map((p) => {
@@ -489,6 +501,13 @@ export async function syncProducts(
             ...(p.metaDescription && { metaDescription: p.metaDescription }),
             ...(p.deliveryTimeIndex !== undefined && { deliveryTimeIndex: p.deliveryTimeIndex }),
             ...(sendProductType && { type: p.type ?? "physical" }),
+            ...(p.metadata.packaging && { packaging: p.metadata.packaging }),
+            ...(sendCustomFields &&
+                p.metadata.customFields && { customFields: p.metadata.customFields }),
+            ...(sendOpenGraph && {
+                ogTitle: p.metaTitle ?? p.name,
+                ...(p.metaDescription && { ogDescription: p.metaDescription }),
+            }),
         };
     });
 
@@ -498,6 +517,31 @@ export async function syncProducts(
         salesChannel.navigationCategoryId
     );
     logger.info(`  Synced ${productsToCreate.length} products`, { cli: true });
+}
+
+/**
+ * Create the product custom field set when any product carries custom field values.
+ * A failure is logged and products are uploaded without custom fields.
+ *
+ * @returns Whether products should send their custom field values
+ */
+async function ensureCustomFieldSet(
+    dataHydrator: DataHydrator,
+    blueprint: HydratedBlueprint,
+    shopware: ShopwareCapabilities
+): Promise<boolean> {
+    if (!blueprint.products.some((p) => p.metadata.customFields)) return false;
+
+    try {
+        await dataHydrator.ensureProductCustomFieldSet(shopware.supports("customFieldSearchable"));
+        return true;
+    } catch (error) {
+        logger.warn("Could not create custom field set - products are uploaded without it", {
+            cli: true,
+            data: error,
+        });
+        return false;
+    }
 }
 
 // =============================================================================

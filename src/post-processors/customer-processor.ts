@@ -8,6 +8,7 @@
  * Credentials are also displayed on the homepage (via home-processor.ts).
  */
 
+import type { DemoCustomer } from "../fixtures/demo-customers.js";
 import type { CustomerSyncPayload } from "../types/index.js";
 import type {
     PostProcessor,
@@ -108,6 +109,7 @@ class CustomerProcessorImpl implements PostProcessor {
                     defaultPaymentMethodId: paymentMethodId,
                     languageId: await this.getLanguageId(context),
                     email: customer.email,
+                    ...buildBusinessAccountFields(customer),
                     firstName: customer.firstName,
                     lastName: customer.lastName,
                     salutationId,
@@ -121,6 +123,7 @@ class CustomerProcessorImpl implements PostProcessor {
                             salutationId,
                             firstName: customer.firstName,
                             lastName: customer.lastName,
+                            ...(customer.company && { company: customer.company }),
                             street: customer.address.street,
                             zipcode: customer.address.zipcode,
                             city: customer.address.city,
@@ -370,3 +373,18 @@ class CustomerProcessorImpl implements PostProcessor {
 
 /** Customer processor singleton */
 export const CustomerProcessor = new CustomerProcessorImpl();
+
+/**
+ * Business account fields for demo customers with a company.
+ * Shopware then shows the company and VAT ID in the account and on orders.
+ */
+export function buildBusinessAccountFields(
+    customer: DemoCustomer
+): { accountType: "business"; company: string; vatIds: string[] } | Record<string, never> {
+    if (!customer.company) return {};
+    return {
+        accountType: "business",
+        company: customer.company,
+        vatIds: customer.vatId ? [customer.vatId] : [],
+    };
+}

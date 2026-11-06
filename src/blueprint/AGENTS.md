@@ -38,6 +38,7 @@ Creates the complete structure instantly without AI:
 - 3 levels deep with 3-5 subcategories per level
 - ~30 products per top-level branch (90 total default)
 - Random metadata: prices, review counts, variant flags, image views
+- Packaging (~15% of products, `PACKAGING_OPTIONS`) and custom field values (`cg_featured` always true for topsellers, `cg_launch_year`, `cg_internal_note`)
 - Cross-category assignments for realistic distribution
 - Storefront flags: `isTopseller` (~10%), `isNew` (~15%), `isShippingFree` (~8%)
 - Physical attributes: `weight` (0.1-25kg), `width`/`height`/`length` (mm)

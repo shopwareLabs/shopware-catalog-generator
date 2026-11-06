@@ -1,9 +1,13 @@
 import { createHash } from "crypto";
 
+import type { UnitDefinition } from "../fixtures/index.js";
 import type {
     CategoryNode,
+    DomainMeasurementUnits,
     MediaEntityPayload,
     PricePayload,
+    ProductCustomFieldValues,
+    ProductPackaging,
     ProductSyncPayload,
     ProductInput,
     ProductType,
@@ -18,6 +22,8 @@ import type {
 import type { Schemas } from "./admin-client.js";
 import type { SearchResult, SyncOperation } from "./api-types.js";
 
+import { buildCustomFieldConfig, PRODUCT_CUSTOM_FIELD_SET } from "../fixtures/index.js";
+import { IMPERIAL_MEASUREMENT_UNITS } from "../types/index.js";
 import {
     buildCategoryPath,
     CATEGORY_PATH_SEPARATOR,
@@ -367,6 +373,115 @@ export class ShopwareHydrator extends ShopwareClient {
     }
 
     /**
+     * Ensure `unit` entities exist for the given definitions (idempotent, matched by short code).
+     * A fresh Shopware has no units, so missing ones are created.
+     *
+     * @returns Map of unit short code -> unit ID
+     */
+    async ensureUnits(units: UnitDefinition[]): Promise<Map<string, string>> {
+        const unitIds = new Map<string, string>();
+        if (units.length === 0) return unitIds;
+
+        const { data } = await this.getClient().invoke(
+            "searchUnit post /search/unit" as never,
+            {
+                body: {
+                    limit: 100,
+                    filter: [
+                        {
+                            type: "equalsAny",
+                            field: "shortCode",
+                            value: units.map((unit) => unit.shortCode),
+                        },
+                    ],
+                },
+            } as never
+        );
+        const existing = (data as { data?: Array<{ id: string; shortCode: string }> })?.data ?? [];
+        for (const unit of existing) {
+            unitIds.set(unit.shortCode, unit.id);
+        }
+
+        const missing = units.filter((unit) => !unitIds.has(unit.shortCode));
+        if (missing.length === 0) return unitIds;
+
+        const payload = missing.map((unit) => ({
+            id: generateUUID(),
+            shortCode: unit.shortCode,
+            name: unit.name,
+        }));
+        await this.sync([{ entity: "unit", action: "upsert", payload }]);
+        for (const unit of payload) {
+            unitIds.set(unit.shortCode, unit.id);
+        }
+        logger.info(
+            `  ✓ Created ${payload.length} unit(s): ${missing.map((u) => u.name).join(", ")}`,
+            {
+                cli: true,
+            }
+        );
+        return unitIds;
+    }
+
+    /**
+     * Ensure the product custom field set from `fixtures/custom-fields.ts` exists (idempotent, found by name).
+     *
+     * @param includeInSearch - Send `includeInSearch` per field (Shopware 6.7.7+ only)
+     * @returns ID of the custom field set
+     */
+    async ensureProductCustomFieldSet(includeInSearch: boolean): Promise<string> {
+        const set = PRODUCT_CUSTOM_FIELD_SET;
+        const { data } = await this.getClient().invoke(
+            "searchCustomFieldSet post /search/custom-field-set" as never,
+            {
+                body: { limit: 1, filter: [{ type: "equals", field: "name", value: set.name }] },
+            } as never
+        );
+        const existing = (data as { data?: Array<{ id: string }> })?.data?.[0];
+        if (existing) {
+            logger.info(`  ⊘ Custom field set "${set.name}" already exists`, { cli: true });
+            return existing.id;
+        }
+
+        const setId = generateUUID();
+        await this.sync([
+            {
+                entity: "custom_field_set",
+                action: "upsert",
+                payload: [
+                    {
+                        id: setId,
+                        name: set.name,
+                        active: true,
+                        global: false,
+                        position: 1,
+                        config: { label: { "en-GB": set.label } },
+                        relations: set.entities.map((entityName) => ({
+                            id: generateUUID(),
+                            entityName,
+                        })),
+                        customFields: set.fields.map((field, index) => ({
+                            id: generateUUID(),
+                            name: field.name,
+                            type: field.type,
+                            active: true,
+                            config: {
+                                ...buildCustomFieldConfig(field),
+                                customFieldPosition: index + 1,
+                            },
+                            ...(includeInSearch && { includeInSearch: field.includeInSearch }),
+                        })),
+                    },
+                ],
+            },
+        ]);
+        logger.info(`  ✓ Created custom field set "${set.name}" (${set.fields.length} fields)`, {
+            cli: true,
+        });
+        return setId;
+    }
+
+    /**
      * Direct product creation with explicit category IDs
      * Used by the new generate flow that passes all category assignments
      */
@@ -398,6 +513,10 @@ export class ShopwareHydrator extends ShopwareClient {
             metaDescription?: string;
             deliveryTimeIndex?: number;
             type?: ProductType;
+            packaging?: ProductPackaging;
+            customFields?: ProductCustomFieldValues;
+            ogTitle?: string;
+            ogDescription?: string;
         }>,
         salesChannelId: string,
         navigationCategoryId: string
@@ -408,11 +527,18 @@ export class ShopwareHydrator extends ShopwareClient {
 
         const hasTieredProducts = products.some((p) => p.hasTieredPricing);
 
-        const [taxId, currencyId, deliveryTimeIds, ruleId] = await Promise.all([
+        const [taxId, currencyId, deliveryTimeIds, ruleId, unitIds] = await Promise.all([
             this.getStandardTaxId(),
             this.getDefaultCurrencyId(),
             this.getDeliveryTimeIds(),
             hasTieredProducts ? this.getAlwaysValidRuleId() : Promise.resolve(null),
+            this.ensureUnits(collectPackagingUnits(products)).catch((error: unknown) => {
+                logger.warn("Could not create units - products are uploaded without unitId", {
+                    cli: true,
+                    data: error,
+                });
+                return new Map<string, string>();
+            }),
         ]);
 
         const productPayload = products.map((p) => {
@@ -440,6 +566,14 @@ export class ShopwareHydrator extends ShopwareClient {
                     currencyId: currencyId,
                     gross: originalPrice,
                     net: originalPrice,
+                    linked: true,
+                };
+                // Lowest price of the last 30 days (EU price indication): between sale and list price
+                const regulationPrice = Math.round(((p.price + originalPrice) / 2) * 100) / 100;
+                priceEntry.regulationPrice = {
+                    currencyId: currencyId,
+                    gross: regulationPrice,
+                    net: regulationPrice,
                     linked: true,
                 };
             }
@@ -470,7 +604,22 @@ export class ShopwareHydrator extends ShopwareClient {
                 ean: p.ean,
                 manufacturerNumber: p.manufacturerNumber,
                 ...(p.type && { type: p.type }),
+                ...(p.customFields && { customFields: p.customFields }),
+                ...(p.ogTitle && { ogTitle: p.ogTitle }),
+                ...(p.ogDescription && { ogDescription: p.ogDescription }),
             };
+
+            // Packaging / reference price ("6 pc, 1 pc = $4.99")
+            if (p.packaging) {
+                const unitId = unitIds.get(p.packaging.unitShortCode);
+                if (unitId) {
+                    product.unitId = unitId;
+                }
+                product.purchaseUnit = p.packaging.purchaseUnit;
+                product.referenceUnit = p.packaging.referenceUnit;
+                product.packUnit = p.packaging.packUnit;
+                product.packUnitPlural = p.packaging.packUnitPlural;
+            }
 
             // "New" badge: always set to current upload time so the badge
             // never ages out on the storefront, regardless of when the blueprint
@@ -821,6 +970,7 @@ export class ShopwareHydrator extends ShopwareClient {
             languageId: string;
             currencyId: string;
             snippetSetId: string | undefined;
+            measurementUnits?: DomainMeasurementUnits;
         }> = [
             {
                 id: generateUUID(),
@@ -828,6 +978,10 @@ export class ShopwareHydrator extends ShopwareClient {
                 languageId: storefront.languageId,
                 currencyId: usdCurrencyId,
                 snippetSetId: storefront.snippetSetId,
+                // USD domain shows inches/pounds; the German domain keeps Shopware's metric default
+                ...(input.imperialEnglishDomain && {
+                    measurementUnits: IMPERIAL_MEASUREMENT_UNITS,
+                }),
             },
         ];
 
@@ -1451,4 +1605,21 @@ export class ShopwareHydrator extends ShopwareClient {
             return false;
         }
     }
+}
+
+/**
+ * Distinct unit definitions needed by the given products (by short code).
+ */
+function collectPackagingUnits(
+    products: Array<{ packaging?: ProductPackaging }>
+): UnitDefinition[] {
+    const byShortCode = new Map<string, UnitDefinition>();
+    for (const { packaging } of products) {
+        if (!packaging || byShortCode.has(packaging.unitShortCode)) continue;
+        byShortCode.set(packaging.unitShortCode, {
+            shortCode: packaging.unitShortCode,
+            name: packaging.unitName,
+        });
+    }
+    return [...byShortCode.values()];
 }

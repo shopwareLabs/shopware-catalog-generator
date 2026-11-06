@@ -387,3 +387,44 @@ describe("ShopwareHydrator.createSalesChannel - multi-domain", () => {
         logger.setMcpMode(false);
     });
 });
+
+describe("ShopwareHydrator.createSalesChannel - measurement units", () => {
+    type DomainPayload = { url: string; measurementUnits?: unknown };
+
+    async function createDomains(imperialEnglishDomain?: boolean): Promise<DomainPayload[]> {
+        logger.setMcpMode(true);
+        const { client, capturedSyncPayloads } = buildHydratorMockClient();
+        const hydrator = new ShopwareHydrator(client);
+        hydrator.envPath = "http://localhost:8000";
+
+        await hydrator.createSalesChannel({
+            name: "beauty",
+            description: "Beauty store",
+            imperialEnglishDomain,
+        });
+        logger.setMcpMode(false);
+
+        const scSync = capturedSyncPayloads.find(
+            (op) => (op as { entity: string }).entity === "sales_channel"
+        ) as { payload: Array<{ domains: DomainPayload[] }> };
+        return scSync.payload[0]?.domains ?? [];
+    }
+
+    test("English domain gets imperial units, German domain stays metric", async () => {
+        const domains = await createDomains(true);
+
+        const en = domains.find((d) => d.url.includes("beauty.localhost"));
+        const de = domains.find((d) => d.url.includes("beauty-de.localhost"));
+        expect(en?.measurementUnits).toEqual({
+            system: "imperial",
+            units: { length: "in", weight: "lb" },
+        });
+        expect(de?.measurementUnits).toBeUndefined();
+    });
+
+    test("sends no measurement units unless asked (shops older than 6.7.1)", async () => {
+        const domains = await createDomains(undefined);
+
+        expect(domains.every((d) => d.measurementUnits === undefined)).toBe(true);
+    });
+});

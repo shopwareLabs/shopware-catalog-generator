@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 
+import type { ProductCustomFieldValues } from "./blueprint.js";
+
 // =============================================================================
 // Zod Schemas (for AI response validation)
 // =============================================================================
@@ -80,7 +82,24 @@ export interface SalesChannelInput {
     description: string;
     /** Base URL for the sales channel (e.g., "http://furniture.localhost:8000") */
     baseUrl?: string;
+    /**
+     * Use imperial units (in/lb) on the English domain. Only sent when the shop
+     * supports per-domain measurement units (Shopware 6.7.1+); the German domain stays metric.
+     */
+    imperialEnglishDomain?: boolean;
 }
+
+/** Per-domain measurement units (`sales_channel_domain.measurementUnits`, Shopware 6.7.1+) */
+export interface DomainMeasurementUnits {
+    system: "metric" | "imperial";
+    units: { length: string; weight: string };
+}
+
+/** Imperial measurement units for the English/USD domain */
+export const IMPERIAL_MEASUREMENT_UNITS: DomainMeasurementUnits = {
+    system: "imperial",
+    units: { length: "in", weight: "lb" },
+};
 
 /** Product image data */
 export interface ProductImage {
@@ -134,6 +153,13 @@ export interface PricePayload {
         net: number;
         linked: boolean;
     };
+    /** Lowest price of the last 30 days (EU price indication), Shopware 6.4.10+ */
+    regulationPrice?: {
+        currencyId: string;
+        gross: number;
+        net: number;
+        linked: boolean;
+    };
 }
 
 /** Product visibility in a sync payload */
@@ -182,6 +208,17 @@ export interface ProductSyncPayload {
     metaDescription?: string;
     properties?: Array<{ id: string }>;
     prices?: TieredPricePayload[];
+    /** Unit for content display / reference price (created on demand) */
+    unitId?: string;
+    purchaseUnit?: number;
+    referenceUnit?: number;
+    packUnit?: string;
+    packUnitPlural?: string;
+    /** Values for the `catalog_generator` custom field set */
+    customFields?: ProductCustomFieldValues;
+    /** Social sharing fields (Shopware 6.7.10+) */
+    ogTitle?: string;
+    ogDescription?: string;
     /** Allows additional Shopware-specific fields without casting */
     [key: string]: unknown;
 }

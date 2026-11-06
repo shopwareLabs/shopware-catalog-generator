@@ -7,7 +7,10 @@ import {
     DEMO_CUSTOMERS,
     DEMO_PASSWORD,
 } from "../../../src/fixtures/demo-customers.js";
-import { CustomerProcessor } from "../../../src/post-processors/customer-processor.js";
+import {
+    buildBusinessAccountFields,
+    CustomerProcessor,
+} from "../../../src/post-processors/customer-processor.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
 
 function setupSalesChannelMock(mockApi: MockApiHelpers): void {
@@ -211,6 +214,15 @@ describe("CustomerProcessor", () => {
             const b2bCustomer = payload.find((p) => p.email === "b2b@example.com");
             expect(b2bCustomer).toBeDefined();
             expect(b2bCustomer!.groupId).toBe("b2b-group-id");
+            expect(b2bCustomer!.accountType).toBe("business");
+            expect(b2bCustomer!.company).toBe("Schmidt Industrial GmbH");
+            expect(b2bCustomer!.vatIds).toEqual(["DE123456789"]);
+            const b2bAddresses = b2bCustomer!.addresses as Array<Record<string, unknown>>;
+            expect(b2bAddresses[0]?.company).toBe("Schmidt Industrial GmbH");
+
+            expect(defaultCustomer!.accountType).toBeUndefined();
+            const defaultAddresses = defaultCustomer!.addresses as Array<Record<string, unknown>>;
+            expect(defaultAddresses[0]?.company).toBeUndefined();
         });
 
         test("handles API errors gracefully", async () => {
@@ -286,5 +298,35 @@ describe("CustomerProcessor", () => {
             expect(result.errors.length).toBeGreaterThan(0);
             expect(result.errors[0]).toContain("Customer cleanup failed");
         });
+    });
+});
+
+describe("buildBusinessAccountFields", () => {
+    test("returns business fields for customers with a company", () => {
+        expect(
+            buildBusinessAccountFields({
+                ...DEMO_CUSTOMERS[0]!,
+                company: "ACME",
+                vatId: "DE1",
+            })
+        ).toEqual({ accountType: "business", company: "ACME", vatIds: ["DE1"] });
+    });
+
+    test("sends an empty VAT ID list when a company has no VAT ID", () => {
+        expect(
+            buildBusinessAccountFields({ ...DEMO_CUSTOMERS[0]!, company: "ACME" }).vatIds
+        ).toEqual([]);
+    });
+
+    test("returns nothing for private customers", () => {
+        expect(buildBusinessAccountFields({ ...DEMO_CUSTOMERS[0]!, company: undefined })).toEqual(
+            {}
+        );
+    });
+
+    test("every B2B demo customer is a business account", () => {
+        const b2b = DEMO_CUSTOMERS.filter((c) => c.group === "b2b");
+        expect(b2b.length).toBeGreaterThan(0);
+        expect(b2b.every((c) => c.company && c.vatId)).toBe(true);
     });
 });

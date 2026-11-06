@@ -330,6 +330,7 @@ class ImageProcessorImpl implements PostProcessor {
                 id: img.mediaId,
                 private: false,
                 ...(mediaFolderId && { mediaFolderId }),
+                ...buildProductMediaTexts(productName, img.view),
             }));
 
             const mediaResponse = await apiPost(context, "_action/sync", {
@@ -366,6 +367,10 @@ class ImageProcessorImpl implements PostProcessor {
         const coverUpdate = {
             id: productId,
             coverId: firstMedia.productMediaId,
+            // Social sharing image (Shopware 6.7.10+): same image as the cover
+            ...(context.shopware.supports("productOpenGraph") && {
+                openGraphMediaId: firstMedia.mediaId,
+            }),
         };
 
         // Sync product_media relations and cover
@@ -678,3 +683,15 @@ class ImageProcessorImpl implements PostProcessor {
 
 /** Image processor singleton */
 export const ImageProcessor = new ImageProcessorImpl();
+
+/**
+ * Alt text and title for a product image, e.g. "Oak Desk (front view)".
+ * Screen readers and image search use the alt text; the title shows as tooltip.
+ */
+export function buildProductMediaTexts(
+    productName: string,
+    view: string
+): { alt: string; title: string } {
+    const text = `${productName} (${view} view)`;
+    return { alt: text, title: text };
+}

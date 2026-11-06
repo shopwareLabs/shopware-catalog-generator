@@ -70,6 +70,16 @@ describe("ShopwareCapabilities.supports", () => {
         expect(ShopwareCapabilities.fromVersion("6.7.16.0").supports("productType")).toBe(true);
     });
 
+    test("gates the catalog field features on their first release", () => {
+        const at = (v: string): ShopwareCapabilities => ShopwareCapabilities.fromVersion(v);
+        expect(at("6.7.6.0").supports("customFieldSearchable")).toBe(false);
+        expect(at("6.7.7.0").supports("customFieldSearchable")).toBe(true);
+        expect(at("6.7.9.0").supports("productOpenGraph")).toBe(false);
+        expect(at("6.7.10.0").supports("productOpenGraph")).toBe(true);
+        expect(at("6.7.0.0").supports("measurementUnits")).toBe(false);
+        expect(at("6.7.1.0").supports("measurementUnits")).toBe(true);
+    });
+
     test("6.5 and 6.6 support none of the listed features", () => {
         for (const raw of ["6.5.9999999.9999999-dev", "6.6.9999999.9999999-dev"]) {
             const capabilities = ShopwareCapabilities.fromVersion(raw);

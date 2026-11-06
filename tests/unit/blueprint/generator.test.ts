@@ -364,3 +364,41 @@ describe("BlueprintGenerator", () => {
         });
     });
 });
+
+describe("BlueprintGenerator - packaging and custom fields", () => {
+    const blueprint = new BlueprintGenerator({ totalProducts: 300 }).generateBlueprint(
+        "test",
+        "Test store"
+    );
+    const metadata = blueprint.products.map((p) => p.metadata);
+
+    test("gives a share of products a complete packaging option", () => {
+        const packaged = metadata.filter((m) => m.packaging);
+        expect(packaged.length).toBeGreaterThan(0);
+        expect(packaged.length).toBeLessThan(metadata.length);
+        for (const { packaging } of packaged) {
+            expect(packaging?.unitShortCode).toBeTruthy();
+            expect(packaging?.unitName).toBeTruthy();
+            expect(packaging?.purchaseUnit).toBeGreaterThan(0);
+            expect(packaging?.referenceUnit).toBeGreaterThan(0);
+            expect(packaging?.packUnit).toBeTruthy();
+            expect(packaging?.packUnitPlural).toBeTruthy();
+        }
+    });
+
+    test("gives every product custom field values", () => {
+        const currentYear = new Date().getFullYear();
+        for (const m of metadata) {
+            expect(typeof m.customFields?.cg_featured).toBe("boolean");
+            expect(m.customFields?.cg_launch_year).toBeLessThanOrEqual(currentYear);
+            expect(m.customFields?.cg_launch_year).toBeGreaterThanOrEqual(currentYear - 7);
+            expect(m.customFields?.cg_internal_note).toMatch(/^Demo batch [A-Z0-9]{4}$/);
+        }
+    });
+
+    test("marks every topseller as featured", () => {
+        const topsellers = metadata.filter((m) => m.isTopseller);
+        expect(topsellers.length).toBeGreaterThan(0);
+        expect(topsellers.every((m) => m.customFields?.cg_featured)).toBe(true);
+    });
+});

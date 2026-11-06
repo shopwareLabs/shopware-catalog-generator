@@ -206,6 +206,16 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
 
     ctx.setProgress("upload", 0, 4);
 
+    // Shopware version decides which optional fields are sent
+    const deps = createProcessorDeps({
+        baseURL: envPath,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        username: shopwareUser,
+        password: shopwarePassword,
+        skipProviders: params.skipProcessors,
+    });
+    const shopware = await detectShopwareCapabilities(deps.apiHelpers);
+
     // Create or find SalesChannel
     let salesChannelEntity = await dataHydrator.findSalesChannelByName(salesChannel);
     const isNew = !salesChannelEntity;
@@ -215,6 +225,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         salesChannelEntity = await dataHydrator.createSalesChannel({
             name: salesChannel,
             description: hydratedBlueprint.salesChannel.description,
+            imperialEnglishDomain: shopware.supports("measurementUnits"),
         });
         ctx.log(`Created SalesChannel: ${salesChannelEntity.id}`);
     } else {
@@ -240,14 +251,6 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
 
     // Sync products
     ctx.log("Syncing products...");
-    const deps = createProcessorDeps({
-        baseURL: envPath,
-        getAccessToken: () => dataHydrator.getAccessToken(),
-        username: shopwareUser,
-        password: shopwarePassword,
-        skipProviders: params.skipProcessors,
-    });
-    const shopware = await detectShopwareCapabilities(deps.apiHelpers);
     const propertyMaps = buildPropertyMaps(hydratedBlueprint);
     syncPropertyIdsToBlueprint(hydratedBlueprint, propertyMaps);
     cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);

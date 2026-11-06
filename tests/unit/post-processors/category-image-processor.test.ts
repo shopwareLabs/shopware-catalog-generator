@@ -61,6 +61,12 @@ describe("CategoryImageProcessor", () => {
         expect(uploaded).toBe(true);
         expect(mockApi.getCallsByEndpoint("_action/media/").length).toBeGreaterThan(0);
         expect(mockApi.getCallsByEndpoint("_action/sync").length).toBeGreaterThan(0);
+
+        const mediaPayload = JSON.stringify(
+            mockApi.getCallsByEndpoint("_action/sync").map((call) => call.body)
+        );
+        expect(mediaPayload).toContain('"alt":"Guitars"');
+        expect(mediaPayload).toContain('"title":"Guitars"');
     });
 
     test("cleanupCategoryImages clears media for categories under sales channel root", async () => {

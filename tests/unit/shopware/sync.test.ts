@@ -37,6 +37,7 @@ function createMockDataHydrator(): DataHydrator {
         getExistingPropertyGroups: mock(async () => []),
         hydrateEnvWithPropertyGroups: mock(async () => {}),
         hydrateEnvWithProductsDirect: mock(async () => {}),
+        ensureProductCustomFieldSet: mock(async () => "set-1"),
     } as unknown as DataHydrator;
 }
 
@@ -958,5 +959,99 @@ describe("syncProducts — product type", () => {
         );
 
         expect(syncedTypes(dataHydrator)).toEqual([undefined]);
+    });
+});
+
+describe("syncProducts — version-gated product fields", () => {
+    const categoryIdMap = new Map<string, string>();
+    const customFields = { cg_featured: true, cg_launch_year: 2024, cg_internal_note: "Batch A" };
+
+    function createProduct(): ReturnType<typeof createTestProduct> {
+        const product = createTestProduct({
+            name: "Desk Lamp",
+            description: "<p>Bright light. Two settings.</p>",
+            metaTitle: "Desk Lamp | Store",
+            metaDescription: "Bright desk lamp",
+        });
+        product.metadata.customFields = customFields;
+        product.metadata.packaging = {
+            unitShortCode: "pc",
+            unitName: "Piece",
+            purchaseUnit: 2,
+            referenceUnit: 1,
+            packUnit: "Pair",
+            packUnitPlural: "Pairs",
+        };
+        return product;
+    }
+
+    async function syncOne(
+        version: string,
+        dataHydrator: DataHydrator = createMockDataHydrator()
+    ): Promise<Record<string, unknown>> {
+        await syncProducts(
+            dataHydrator,
+            createTestBlueprint({ products: [createProduct()] }),
+            createMockSalesChannel(),
+            categoryIdMap,
+            new Map(),
+            ShopwareCapabilities.fromVersion(version)
+        );
+        const mockFn = dataHydrator.hydrateEnvWithProductsDirect as ReturnType<typeof mock>;
+        const products = mockFn.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+        return products[0] ?? {};
+    }
+
+    test("sends Open Graph fields on 6.7.10+", async () => {
+        const product = await syncOne("6.7.10.0");
+
+        expect(product.ogTitle).toBe("Desk Lamp | Store");
+        expect(product.ogDescription).toBe("Bright desk lamp");
+    });
+
+    test("never sends descriptionTeaser (Shopware derives it and rejects writes)", async () => {
+        const product = await syncOne("6.7.16.0");
+
+        expect(Object.keys(product)).not.toContain("descriptionTeaser");
+    });
+
+    test("leaves Open Graph fields out before 6.7.10", async () => {
+        const product = await syncOne("6.6.10.0");
+
+        expect(product.ogTitle).toBeUndefined();
+        expect(product.ogDescription).toBeUndefined();
+    });
+
+    test("always sends packaging and custom fields (supported since 6.0)", async () => {
+        const product = await syncOne("6.6.10.0");
+
+        expect(product.customFields).toEqual(customFields);
+        expect(product.packaging).toMatchObject({ unitShortCode: "pc", purchaseUnit: 2 });
+    });
+
+    test("creates the custom field set with includeInSearch only on 6.7.7+", async () => {
+        const modern = createMockDataHydrator();
+        const legacy = createMockDataHydrator();
+
+        await syncOne("6.7.7.0", modern);
+        await syncOne("6.7.6.0", legacy);
+
+        const call = (h: DataHydrator): unknown =>
+            (h.ensureProductCustomFieldSet as ReturnType<typeof mock>).mock.calls[0]?.[0];
+        expect(call(modern)).toBe(true);
+        expect(call(legacy)).toBe(false);
+    });
+
+    test("uploads products without custom fields when the set cannot be created", async () => {
+        const dataHydrator = createMockDataHydrator();
+        dataHydrator.ensureProductCustomFieldSet = mock(async () => {
+            throw new Error("forbidden");
+        });
+        logger.setMcpMode(true);
+
+        const product = await syncOne("6.7.16.0", dataHydrator);
+
+        logger.setMcpMode(false);
+        expect(product.customFields).toBeUndefined();
     });
 });

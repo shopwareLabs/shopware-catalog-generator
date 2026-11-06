@@ -26,6 +26,10 @@ export interface DemoCustomer {
     salutationKey: "mr" | "mrs";
     /** Billing/shipping address */
     address: DemoAddress;
+    /** Company name - turns the account into a business account (accountType "business") */
+    company?: string;
+    /** VAT ID of the company (only used together with `company`) */
+    vatId?: string;
 }
 
 /** Demo address */
@@ -59,6 +63,8 @@ export const DEMO_CUSTOMERS: readonly DemoCustomer[] = [
         group: "b2b",
         salutationKey: "mrs",
         address: { street: "Industrieweg 42", zipcode: "80331", city: "Munich" },
+        company: "Schmidt Industrial GmbH",
+        vatId: "DE123456789",
     },
     {
         email: "jane@example.com",
@@ -75,5 +81,7 @@ export const DEMO_CUSTOMERS: readonly DemoCustomer[] = [
         group: "b2b",
         salutationKey: "mr",
         address: { street: "Commerce Blvd 7", zipcode: "60311", city: "Frankfurt" },
+        company: "Business Supplies Ltd.",
+        vatId: "DE987654321",
     },
 ];
