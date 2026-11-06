@@ -11,7 +11,7 @@ import {
     runProcessorsForSalesChannel,
 } from "../services/generate-service.js";
 import { logger } from "../utils/index.js";
-import { CLIError, requireValidName, verifyShopwareConnection } from "./shared.js";
+import { requireValidName, throwIfServiceError, verifyShopwareConnection } from "./shared.js";
 
 export async function generate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
@@ -31,15 +31,8 @@ export async function generate(args: CliArgs): Promise<void> {
         noTemplate: args.noTemplate,
     });
 
-    // Check for error response before printing (mirrors processCommand)
-    if (lines.some((l) => l.startsWith("Error:"))) {
-        const errorLine = lines.find((l) => l.startsWith("Error:"))!;
-        throw new CLIError(errorLine.slice("Error: ".length), "GENERATE_FAILED");
-    }
-
-    for (const line of lines) {
-        console.log(line);
-    }
+    printServiceOutput(lines);
+    throwIfServiceError(lines, "GENERATE_FAILED");
 }
 
 export async function processCommand(args: CliArgs): Promise<void> {
@@ -58,13 +51,16 @@ export async function processCommand(args: CliArgs): Promise<void> {
         args.dryRun ?? false
     );
 
-    // Check for error response
-    if (lines.some((l) => l.startsWith("Error:"))) {
-        const errorLine = lines.find((l) => l.startsWith("Error:"))!;
-        throw new CLIError(errorLine.slice("Error: ".length), "PROCESS_FAILED");
-    }
+    printServiceOutput(lines);
+    throwIfServiceError(lines, "PROCESS_FAILED");
+}
 
-    for (const line of lines) {
+/**
+ * Print the progress and summary lines so they are not lost when the run ends with an error.
+ * The "Error:" line itself is reported by the thrown CLIError.
+ */
+function printServiceOutput(lines: string[]): void {
+    for (const line of lines.filter((l) => !l.startsWith("Error:"))) {
         console.log(line);
     }
 }

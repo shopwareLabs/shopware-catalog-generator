@@ -43,6 +43,16 @@ export { ShopwareCleanup } from "./cleanup.js";
 export { ShopwareClient } from "./client.js";
 export { ShopwareExporter } from "./export.js";
 export { ShopwareHydrator } from "./hydrator.js";
+// Export storefront domain checks (used by the E2E verifier)
+export {
+    checkStorefrontUrl,
+    collectDomainUrls,
+    describeStorefrontFailure,
+    type StorefrontCheckOptions,
+    type StorefrontDomainCheck,
+    type StorefrontVerification,
+    verifyStorefrontDomains,
+} from "./storefront-check.js";
 // Export sync utilities
 export type { PropertyMaps } from "./sync.js";
 export {

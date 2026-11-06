@@ -16,9 +16,15 @@ import { writeFileSync } from "node:fs";
 
 import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
 import type { SearchResult } from "../../src/shopware/api-types.js";
+import type { StorefrontDomainCheck } from "../../src/shopware/index.js";
 
 import { createCacheFromEnv } from "../../src/cache.js";
-import { DataHydrator } from "../../src/shopware/index.js";
+import {
+    collectDomainUrls,
+    DataHydrator,
+    describeStorefrontFailure,
+    verifyStorefrontDomains,
+} from "../../src/shopware/index.js";
 import { countCategories, isPlaceholder } from "../../src/utils/index.js";
 
 /**
@@ -72,12 +78,6 @@ interface VerificationResult {
     storefront: { domains: StorefrontDomainCheck[] };
     passed: boolean;
     errors: string[];
-}
-
-interface StorefrontDomainCheck {
-    url: string;
-    status: number | null;
-    error?: string;
 }
 
 interface ExpectedCounts {
@@ -728,7 +728,7 @@ async function verifyGeneration(
 
     // Verify storefront domains answer (EN + DE)
     console.log(`Verifying storefront domains...`);
-    await verifyStorefrontDomains(client, salesChannel.id, result);
+    await verifySalesChannelStorefront(client, salesChannel.id, result);
 
     // Overall pass/fail
     result.passed = result.errors.length === 0;
@@ -749,21 +749,8 @@ async function fetchShopwareVersion(client: AdminApiClient): Promise<string | un
     }
 }
 
-async function checkStorefrontUrl(url: string): Promise<StorefrontDomainCheck> {
-    try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-        await response.body?.cancel();
-        return { url, status: response.status };
-    } catch (error) {
-        return {
-            url,
-            status: null,
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
-}
-
-async function verifyStorefrontDomains(
+/** Fetch the SalesChannel domains and check that every storefront URL answers with 200 */
+async function verifySalesChannelStorefront(
     client: AdminApiClient,
     salesChannelId: string,
     result: VerificationResult
@@ -777,29 +764,22 @@ async function verifyStorefrontDomains(
                 filter: [{ type: "equals", field: "salesChannelId", value: salesChannelId }],
             }
         );
-        const urls = domains.data.map((d) => d.url).filter((url): url is string => !!url);
-        if (urls.length === 0) {
-            result.errors.push("SalesChannel has no domains");
-            return;
-        }
-
-        // Sequential: the first request may warm up theme and HTTP cache
-        for (const url of urls) {
-            const check = await checkStorefrontUrl(url);
-            result.storefront.domains.push(check);
-            if (check.status === 200) {
-                console.log(`  ✓ ${url} → 200`);
-                continue;
-            }
-            const reason = check.error ?? `HTTP ${check.status}`;
-            console.log(`  ✗ ${url} → ${reason}`);
-            result.errors.push(`Storefront domain ${url} failed: ${reason}`);
+        const verification = await verifyStorefrontDomains(collectDomainUrls(domains.data));
+        result.storefront.domains.push(...verification.checks);
+        result.errors.push(...verification.errors);
+        for (const check of verification.checks) {
+            console.log(formatStorefrontCheck(check));
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.log(`  ✗ Storefront domain check failed: ${message}`);
         result.errors.push(`Storefront domain check failed: ${message}`);
     }
+}
+
+function formatStorefrontCheck(check: StorefrontDomainCheck): string {
+    const reason = describeStorefrontFailure(check);
+    return reason ? `  ✗ ${check.url} → ${reason}` : `  ✓ ${check.url} → 200`;
 }
 
 // CLI entry point

@@ -146,6 +146,19 @@ const hydrator = new DataHydrator();
 // Has methods from all above classes
 ```
 
+### Storefront domain checks (storefront-check.ts)
+
+Pure functions used by the E2E verifier to confirm every SalesChannel domain answers with HTTP 200.
+`fetchFn` and `timeoutMs` are injectable so the logic is unit-tested without a running shop.
+
+```typescript
+import { collectDomainUrls, verifyStorefrontDomains } from "./storefront-check.js";
+
+const urls = collectDomainUrls(domainSearchResult.data); // drops missing/empty urls
+const { checks, errors } = await verifyStorefrontDomains(urls); // sequential, one error per failing domain
+// errors: ["SalesChannel has no domains"] when urls is empty
+```
+
 ## Cleanup SSOT
 
 Each module/processor is the Single Source of Truth for entities it creates:
