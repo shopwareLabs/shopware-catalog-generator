@@ -159,6 +159,24 @@ const { checks, errors } = await verifyStorefrontDomains(urls); // sequential, o
 // errors: ["SalesChannel has no domains"] when urls is empty
 ```
 
+### Version detection (version.ts)
+
+`detectShopwareCapabilities(api)` reads `/_info/version` and the active feature flags
+(`/_action/feature-flag`, 6.6+) once per run. It never throws: an unreadable version yields
+capabilities where every version check passes. The result is passed to post-processors as
+`context.shopware`; the upload code receives it once a feature needs it.
+
+```typescript
+const shopware = await detectShopwareCapabilities(deps.apiHelpers);
+shopware.describe(); // "6.7.16.0" or "6.7 dev build (6.7.9999999.9999999-dev), flags: v6.8.0.0"
+shopware.supports("productType"); // feature from src/fixtures/shopware-features.ts
+shopware.isAtLeast("6.7.1.0");
+shopware.isFlagActive("v6.8.0.0");
+
+// Tests: build capabilities for a fake shop
+ShopwareCapabilities.fromVersion("6.6.10.0");
+```
+
 ## Cleanup SSOT
 
 Each module/processor is the Single Source of Truth for entities it creates:

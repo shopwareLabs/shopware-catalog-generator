@@ -26,6 +26,9 @@ export { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "./demo-custom
 export type { CustomerGroupKey, DemoAddress, DemoCustomer } from "./demo-customers.js";
 // Digital Products
 export { GIFT_CARD_50 } from "./digital-products.js";
+// Shopware feature list (version gating)
+export { MIN_SUPPORTED_SHOPWARE_VERSION, SHOPWARE_FEATURES } from "./shopware-features.js";
+export type { ShopwareFeature } from "./shopware-features.js";
 // Model pricing (hydration cost forecast)
 export { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "./model-pricing.js";
 // Promotions

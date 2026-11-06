@@ -73,6 +73,9 @@ export {
     PROVIDER_DEFAULTS,
 } from "./providers.js";
 
+// Shopware version detection types
+export type { ShopwareFeatureRequirement, ShopwareVersion } from "./shopware-version.js";
+
 // Shopware entity types and Zod schemas
 export type {
     CategoryNode,

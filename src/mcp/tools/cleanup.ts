@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DataCache } from "../../cache.js";
 import { cleanupProcessors, registry } from "../../post-processors/index.js";
 import { createProcessorDeps } from "../../services/shopware-context.js";
-import { DataHydrator } from "../../shopware/index.js";
+import { DataHydrator, detectShopwareCapabilities } from "../../shopware/index.js";
 
 export function registerCleanupTools(server: FastMCP): void {
     const processorNames = registry.getNames();
@@ -165,6 +165,7 @@ export function registerCleanupTools(server: FastMCP): void {
                     blueprint,
                     cache,
                     api: apiHelpers,
+                    shopware: await detectShopwareCapabilities(apiHelpers),
                     options: {
                         batchSize: 5,
                         dryRun: args.dryRun,

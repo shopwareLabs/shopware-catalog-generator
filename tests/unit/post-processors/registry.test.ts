@@ -14,7 +14,9 @@ import {
     VariantProcessor,
     VideoProcessor,
 } from "../../../src/post-processors/index.js";
+import { ShopwareCapabilities } from "../../../src/shopware/version.js";
 import { logger } from "../../../src/utils/index.js";
+import { TEST_SHOPWARE_VERSION } from "../../helpers/post-processor-context.js";
 import { MockApiHelpers } from "../../mocks/index.js";
 
 // Mock context for testing
@@ -36,6 +38,7 @@ function createMockContext(): PostProcessorContext {
         },
         cache: {} as PostProcessorContext["cache"],
         api: new MockApiHelpers(),
+        shopware: ShopwareCapabilities.fromVersion(TEST_SHOPWARE_VERSION),
         options: {
             batchSize: 5,
             dryRun: false,

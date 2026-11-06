@@ -137,6 +137,23 @@ describe("DigitalProductProcessor", () => {
                 fs.unlinkSync(cacheFile);
             }
         });
+
+        test("creates download media in the product download folder", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+            mockApi.mockSearchResponse("media-default-folder", [
+                { folder: { id: "download-folder" } },
+            ]);
+
+            await DigitalProductProcessor.process(context);
+
+            const mediaCall = mockApi
+                .getCallsByEndpoint("_action/sync")
+                .find((call) => JSON.stringify(call.body).includes('"private":true'));
+            expect(JSON.stringify(mediaCall?.body)).toContain('"mediaFolderId":"download-folder"');
+        });
     });
 
     describe("cleanup", () => {

@@ -44,6 +44,21 @@ interface LogEntry {
     data?: unknown;
 }
 
+/**
+ * JSON.stringify replacer that keeps Error details. Error properties are not enumerable,
+ * so a plain JSON.stringify(error) gives "{}".
+ */
+function serializeErrors(_key: string, value: unknown): unknown {
+    if (!(value instanceof Error)) return value;
+    return {
+        ...value,
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+        ...(value.cause !== undefined ? { cause: value.cause } : {}),
+    };
+}
+
 class Logger {
     private logDir: string;
     private logFile: string;
@@ -131,7 +146,9 @@ class Logger {
 
         if (entry.data !== undefined) {
             const dataStr =
-                typeof entry.data === "string" ? entry.data : JSON.stringify(entry.data, null, 2);
+                typeof entry.data === "string"
+                    ? entry.data
+                    : JSON.stringify(entry.data, serializeErrors, 2);
             line += `\n${dataStr}`;
         }
 

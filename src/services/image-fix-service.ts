@@ -11,7 +11,7 @@ import type { HydratedBlueprint } from "../types/index.js";
 import { hydrateThemeMedia } from "../blueprint/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, runProcessors } from "../post-processors/index.js";
 import { createProvidersFromEnv } from "../providers/index.js";
-import { DataHydrator } from "../shopware/index.js";
+import { DataHydrator, detectShopwareCapabilities } from "../shopware/index.js";
 import { createProcessorDeps } from "./shopware-context.js";
 
 export const THEME_MEDIA_KEYS = ["store-logo", "store-favicon", "store-share"] as const;
@@ -313,6 +313,7 @@ async function uploadViaProcessors(params: ImageFixUploadParams): Promise<void> 
             textProvider: deps.textProvider,
             imageProvider: deps.imageProvider,
             api: deps.apiHelpers,
+            shopware: await detectShopwareCapabilities(deps.apiHelpers),
             options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
         },
         params.processors.split(",")

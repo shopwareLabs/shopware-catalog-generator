@@ -26,7 +26,8 @@ src/
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
-│   └── property-cache.ts     # Property cache types
+│   ├── property-cache.ts     # Property cache types
+│   └── shopware-version.ts   # ShopwareVersion, ShopwareFeatureRequirement
 │
 ├── shopware/                 # Shopware API operations
 │   ├── AGENTS.md             # Shopware module documentation
@@ -39,6 +40,7 @@ src/
 │   ├── hydrator.ts           # Create products/categories/SalesChannels
 │   ├── export.ts             # Export/sync existing data + getExistingPropertyGroups
 │   ├── storefront-check.ts   # Storefront domain checks (expects HTTP 200, injectable fetch)
+│   ├── version.ts            # Shopware version + feature flag detection, supports(feature)
 │   └── cleanup.ts            # Delete operations (SalesChannel-centric)
 │
 ├── providers/                # AI provider implementations
@@ -126,7 +128,8 @@ src/
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
-│   └── review-data.ts        # Reviewer names and review templates
+│   ├── review-data.ts        # Reviewer names and review templates
+│   └── shopware-features.ts  # Feature → first Shopware version (version gating)
 │
 ├── templates/                # Pre-generated catalog templates
 │   ├── AGENTS.md             # Templates documentation
@@ -230,7 +233,8 @@ tests/
 │   │   ├── export.test.ts
 │   │   ├── hydrator-ordering.test.ts
 │   │   ├── storefront-check.test.ts
-│   │   └── sync.test.ts
+│   │   ├── sync.test.ts
+│   │   └── version.test.ts
 │   ├── templates/            # Template tests
 │   │   └── fetcher.test.ts
 │   ├── utils/                # Utility tests
@@ -399,6 +403,33 @@ New lookup methods on `ShopwareClient`:
 - `getLanguageId(localeCode: string): Promise<string | null>` — searches `language` by `locale.code`
 - `getSnippetSetId(iso: string): Promise<string | null>` — searches `snippet_set` by `iso`
 
+### Shopware Version Gating
+
+The generator supports Shopware 6.6 and newer. 6.5 is best-effort: it runs, but a warning
+is logged. The connected shop's version and active feature flags are detected once per run:
+
+- Version from `GET /api/_info/version`. Branch and trunk checkouts report
+  `<major>.<minor>.9999999.9999999-dev`, which sorts after every release of that minor.
+- Active flags from `GET /api/_action/feature-flag` (6.6+, 6.5 has none). A 6.7 dev build
+  running with `v6.8.0.0` active is the only way to tell a 6.8 lane from trunk.
+
+Every optional feature is listed once in `src/fixtures/shopware-features.ts` with the
+first release that supports it (and optionally a flag that enables it earlier):
+
+```typescript
+// Upload code and post-processors
+if (context.shopware.supports("productType")) {
+    payload.type = product.type;
+}
+```
+
+**Rule:** blueprints and templates always store every field. Fields are only left out at
+upload time, so one template works on every Shopware version. If the version cannot be read,
+every version check passes (previous behaviour) and a warning is printed.
+
+Check the Shopware source before adding a feature (`#[Entity(since: ...)]`, `new Since(...)`,
+or `git tag --contains` on the commit that added the field).
+
 ### Post-Processor System
 
 Post-processors run after initial Shopware upload for resource-intensive tasks:
@@ -419,6 +450,7 @@ interface PostProcessorContext {
     textProvider?: TextProvider;
     imageProvider?: ImageProvider;
     api: ShopwareApiHelpers; // Required — all API calls must go through this
+    shopware: ShopwareCapabilities; // Version + feature flags of the connected shop
     options: PostProcessorOptions;
 }
 

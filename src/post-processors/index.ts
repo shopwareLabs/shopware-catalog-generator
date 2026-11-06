@@ -12,6 +12,7 @@
 
 import type { DataCacheApi } from "../cache.js";
 import type { ShopwareApi } from "../shopware/api-helpers.js";
+import type { ShopwareCapabilities } from "../shopware/version.js";
 import type { HydratedBlueprint, ImageProvider, TextProvider } from "../types/index.js";
 
 import { logger } from "../utils/index.js";
@@ -45,6 +46,12 @@ export interface PostProcessorContext {
      * Required. Provides searchEntities, syncEntities, deleteEntities, post, patch, postRaw, etc.
      */
     api: ShopwareApi;
+
+    /**
+     * Version and feature flags of the connected shop, detected once per run.
+     * Use `shopware.supports("<feature>")` to leave out fields an older shop rejects.
+     */
+    shopware: ShopwareCapabilities;
 
     /** Processing options */
     options: PostProcessorOptions;

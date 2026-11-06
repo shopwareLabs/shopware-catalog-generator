@@ -28,6 +28,7 @@ fixtures/
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 ├── property-groups.ts    # Universal property groups (Color with hex codes)
 ├── review-data.ts        # Reviewer names and review content templates
+├── shopware-features.ts  # Feature → first Shopware version, MIN_SUPPORTED_SHOPWARE_VERSION
 └── color-images/         # SVG color swatch images
     ├── gradient.svg
     ├── rainbow.svg

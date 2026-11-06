@@ -639,12 +639,30 @@ class DigitalProductProcessorImpl implements PostProcessor {
     }
 
     /**
+     * Find the default media folder for product downloads, null if the shop has none
+     */
+    private async findProductDownloadFolderId(
+        context: PostProcessorContext
+    ): Promise<string | null> {
+        const defaultFolders = await context.api.searchEntities<{ folder?: { id: string } }>(
+            "media-default-folder",
+            [{ type: "equals", field: "entity", value: "product_download" }],
+            { associations: { folder: {} }, limit: 1 }
+        );
+        return defaultFolders[0]?.folder?.id ?? null;
+    }
+
+    /**
      * Create a media file for download (PDF voucher)
      */
     private async createDownloadMedia(context: PostProcessorContext): Promise<string | null> {
         const mediaId = generateUUID();
 
         try {
+            // Private media must live in the product download folder. Shopware 6.5 hides
+            // private media outside that folder from API contexts, so the upload would 404.
+            const mediaFolderId = await this.findProductDownloadFolderId(context);
+
             // Create the media entity
             const createResponse = await apiPost(context, "_action/sync", {
                 createMedia: {
@@ -654,7 +672,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
                         {
                             id: mediaId,
                             private: true, // Download files should be private
-                            mediaFolderId: null,
+                            mediaFolderId,
                         },
                     ],
                 },

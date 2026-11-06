@@ -101,6 +101,28 @@ describe("Logger", () => {
             expect(content).toContain('"code": 500');
             expect(content).toContain("Something failed");
         });
+
+        test("serializes Error objects instead of writing {}", () => {
+            const cause = new Error("root cause");
+            logger.error("error object", { data: new Error("upload failed", { cause }) });
+
+            const content = fs.readFileSync(logger.getLogFile(), "utf-8");
+
+            expect(content).toContain('"message": "upload failed"');
+            expect(content).toContain('"name": "Error"');
+            expect(content).toContain("root cause");
+            expect(content).not.toContain("error object\n{}");
+        });
+
+        test("serializes Error objects nested in data", () => {
+            logger.error("nested error", { data: { step: "media", error: new TypeError("bad") } });
+
+            const content = fs.readFileSync(logger.getLogFile(), "utf-8");
+
+            expect(content).toContain('"step": "media"');
+            expect(content).toContain('"name": "TypeError"');
+            expect(content).toContain('"message": "bad"');
+        });
     });
 
     describe("apiError", () => {

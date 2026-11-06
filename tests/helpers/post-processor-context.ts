@@ -13,6 +13,7 @@ import type { ImageProvider, ProductMetadata } from "../../src/types/index.js";
 import type { HydratedBlueprint } from "../../src/types/index.js";
 import type { MockApiHelpers } from "../mocks/index.js";
 
+import { ShopwareCapabilities } from "../../src/shopware/version.js";
 import { createMockApiHelpers, createMockDataCache, MockDataCache } from "../mocks/index.js";
 import { createTestBlueprint } from "./blueprint-factory.js";
 
@@ -28,7 +29,12 @@ export interface TestContextOptions {
     activeProcessors?: string[];
     options?: Partial<PostProcessorOptions>;
     mockApi?: MockApiHelpers;
+    /** Shopware capabilities of the fake shop (default: 6.7.16.0, no flags) */
+    shopware?: ShopwareCapabilities;
 }
+
+/** Shopware version the test context pretends to talk to */
+export const TEST_SHOPWARE_VERSION = "6.7.16.0";
 
 export interface TestContextResult {
     context: PostProcessorContext;
@@ -50,6 +56,7 @@ export function createTestContext(opts: TestContextOptions = {}): TestContextRes
         blueprint: opts.blueprint ?? createTestBlueprint(),
         cache: mockCache,
         api: mockApi,
+        shopware: opts.shopware ?? ShopwareCapabilities.fromVersion(TEST_SHOPWARE_VERSION),
         imageProvider: opts.imageProvider,
         options: {
             batchSize: 5,

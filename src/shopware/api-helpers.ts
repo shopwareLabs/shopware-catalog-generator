@@ -52,6 +52,9 @@ interface SearchResponse<T = Record<string, unknown>> {
     data: T[];
 }
 
+/** Refresh the Admin API token when it expires within this window */
+const SESSION_REFRESH_MARGIN_MS = 30_000;
+
 /** Token getter function type */
 export type TokenGetter = () => Promise<string>;
 
@@ -554,7 +557,26 @@ export class ShopwareApiHelpers implements ShopwareApi {
      * Get authorization headers.
      * Reads from the AdminApiClient session, falls back to custom token getter.
      */
+    /**
+     * The official client only logs in (or refreshes) inside its own invoke().
+     * Raw fetch calls read the session token directly, so make sure there is a
+     * valid one first, e.g. when a raw GET is the very first request of a run.
+     */
+    private async ensureSession(): Promise<void> {
+        const { accessToken, expirationTime } = this.client.getSessionData();
+        const expiresSoon = expirationTime <= Date.now() + SESSION_REFRESH_MARGIN_MS;
+        if (accessToken && !expiresSoon) return;
+
+        try {
+            await this.client.invoke("infoShopwareVersion get /_info/version", {});
+        } catch (error) {
+            logger.warn("Could not establish an Admin API session", { data: error });
+        }
+    }
+
     private async getAuthHeadersAsync(): Promise<Record<string, string>> {
+        await this.ensureSession();
+
         // Try client session first
         const sessionToken = this.client.getSessionData().accessToken;
         if (sessionToken) {
