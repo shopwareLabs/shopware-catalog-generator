@@ -123,9 +123,11 @@ src/
 │   │   ├── form.ts           # Form elements page
 │   │   └── home-listing.ts   # Home listing page (root category)
 │   ├── color-images/         # SVG color swatch images
+│   ├── custom-fields.ts      # Product custom field set (catalog_generator)
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
+│   ├── packaging-units.ts    # Units + packaging options (reference prices)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
 │   ├── review-data.ts        # Reviewer names and review templates

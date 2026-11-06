@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 
-import { ImageProcessor } from "../../../src/post-processors/image-processor.js";
+import {
+    buildProductMediaTexts,
+    ImageProcessor,
+} from "../../../src/post-processors/image-processor.js";
+import { ShopwareCapabilities } from "../../../src/shopware/version.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
 import { createMockProductMetadata, MockImageProvider } from "../../mocks/index.js";
@@ -334,6 +338,75 @@ describe("ImageProcessor", () => {
             expect(result.deleted).toBeGreaterThanOrEqual(2);
             expect(mockApi.deleteEntitiesMock).toHaveBeenCalled();
             expect(mockApi.deleteEntityMock).toHaveBeenCalled();
+        });
+    });
+});
+
+describe("ImageProcessor - accessibility and social sharing", () => {
+    type SyncBody = Record<string, { entity: string; payload: Array<Record<string, unknown>> }>;
+
+    async function uploadOneProduct(version: string): Promise<SyncBody[]> {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "p-a11y",
+                    name: "Desk Lamp",
+                    metadata: createMockProductMetadata({
+                        imageDescriptions: [{ view: "front", prompt: "lamp" }],
+                    }),
+                }),
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map([
+                ["p-a11y", { imageDescriptions: [{ view: "front" as const, prompt: "lamp" }] }],
+            ]),
+            cachedImages: new Set(["p-a11y-front"]),
+            dryRun: false,
+            imageProvider: new MockImageProvider(),
+            shopware: ShopwareCapabilities.fromVersion(version),
+        });
+        mockApi.mockPostResponse("search/product", {
+            data: [{ id: "p-a11y", media: [], coverId: null }],
+        });
+        mockApi.mockPostResponse("search/media", { data: [] });
+        mockApi.mockPostResponse("search/media-folder", { data: [{ id: "folder-1" }] });
+        mockApi.mockPostResponse("_action/sync", { success: true });
+
+        await ImageProcessor.process(context);
+
+        return mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body as SyncBody);
+    }
+
+    test("new product media get alt text and title", async () => {
+        const bodies = await uploadOneProduct("6.7.16.0");
+
+        const media = bodies.find((b) => b.createMedia)?.createMedia?.payload[0];
+        expect(media?.alt).toBe("Desk Lamp (front view)");
+        expect(media?.title).toBe("Desk Lamp (front view)");
+    });
+
+    test("cover image doubles as social sharing image on 6.7.10+", async () => {
+        const bodies = await uploadOneProduct("6.7.10.0");
+
+        const media = bodies.find((b) => b.createMedia)?.createMedia?.payload[0];
+        const cover = bodies.find((b) => b.updateCover)?.updateCover?.payload[0];
+        expect(cover?.openGraphMediaId).toBe(media?.id as string);
+    });
+
+    test("no social sharing image before 6.7.10", async () => {
+        const bodies = await uploadOneProduct("6.7.9.0");
+
+        const cover = bodies.find((b) => b.updateCover)?.updateCover?.payload[0];
+        expect(cover).toBeDefined();
+        expect(cover?.openGraphMediaId).toBeUndefined();
+    });
+
+    test("buildProductMediaTexts names product and view", () => {
+        expect(buildProductMediaTexts("Chair", "side")).toEqual({
+            alt: "Chair (side view)",
+            title: "Chair (side view)",
         });
     });
 });

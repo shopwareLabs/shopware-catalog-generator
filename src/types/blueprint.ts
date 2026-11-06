@@ -229,6 +229,43 @@ export interface ProductMetadata {
 
     /** Purchase step size (matches minPurchase when set) */
     purchaseSteps?: number;
+
+    // Packaging / reference price
+    /**
+     * Unit and packaging data (~15% of products). Drives Shopware's content display
+     * and reference price ("6 pc, 1 pc = $4.99"). Undefined = no unit shown.
+     */
+    packaging?: ProductPackaging;
+
+    // Custom fields
+    /** Values for the `catalog_generator` custom field set (see fixtures/custom-fields.ts) */
+    customFields?: ProductCustomFieldValues;
+}
+
+/** Packaging data of a product (mirrors Shopware's unit/purchaseUnit/referenceUnit/packUnit) */
+export interface ProductPackaging {
+    /** Short code of the Shopware unit (e.g. "pc", "kg"); the unit is created on upload */
+    unitShortCode: string;
+    /** Unit display name (e.g. "Piece") */
+    unitName: string;
+    /** Amount of the unit in one sales unit (e.g. 6) */
+    purchaseUnit: number;
+    /** Base amount for the reference price (e.g. 1) */
+    referenceUnit: number;
+    /** Packaging label, singular (e.g. "Pack") */
+    packUnit: string;
+    /** Packaging label, plural (e.g. "Packs") */
+    packUnitPlural: string;
+}
+
+/** Custom field values stored per product */
+export interface ProductCustomFieldValues {
+    /** Highlighted in the catalog (switch) */
+    cg_featured: boolean;
+    /** Year the product was launched (int) */
+    cg_launch_year: number;
+    /** Free text note, indexed for search on shops that support it */
+    cg_internal_note: string;
 }
 
 /** Variant configuration for a single property group */

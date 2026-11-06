@@ -28,7 +28,7 @@ types/
 - `HydratedBlueprint` — Phase 2 output (filled with AI content)
 - `BlueprintCategory`, `BlueprintProduct` — Category/product nodes
 - `BlueprintConfig` — Generator configuration (topLevelCategories, maxDepth, etc.)
-- `ProductMetadata` — Per-product metadata (variant flags, image descriptions, review counts, storefront flags, physical attributes, EAN, purchase constraints)
+- `ProductMetadata` — Per-product metadata (variant flags, image descriptions, review counts, storefront flags, physical attributes, EAN, purchase constraints, optional `packaging` and `customFields`)
 - `VariantConfig` — Variant property group + selected options
 - `CmsBlueprint`, `CmsBlueprintPage` — CMS text content structure
 - `BrandColors` — AI-generated brand colors for theme customization (primary, secondary only; buy button, text, and price colors are derived deterministically via Material Design principles)

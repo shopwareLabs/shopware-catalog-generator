@@ -21,6 +21,13 @@ export {
     VIDEO_ELEMENTS_PAGE,
     WELCOME_PAGE,
 } from "./cms/index.js";
+// Custom Fields (product custom field set)
+export { buildCustomFieldConfig, PRODUCT_CUSTOM_FIELD_SET } from "./custom-fields.js";
+export type {
+    CustomFieldDefinition,
+    CustomFieldSetDefinition,
+    CustomFieldType,
+} from "./custom-fields.js";
 // Demo Customers
 export { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "./demo-customers.js";
 export type { CustomerGroupKey, DemoAddress, DemoCustomer } from "./demo-customers.js";
@@ -31,6 +38,14 @@ export { MIN_SUPPORTED_SHOPWARE_VERSION, SHOPWARE_FEATURES } from "./shopware-fe
 export type { ShopwareFeature } from "./shopware-features.js";
 // Model pricing (hydration cost forecast)
 export { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "./model-pricing.js";
+// Packaging units (unit entities + packaging options for reference prices)
+export {
+    findPackagingUnit,
+    PACKAGING_OPTIONS,
+    PACKAGING_SHARE,
+    PACKAGING_UNITS,
+} from "./packaging-units.js";
+export type { PackagingOption, UnitDefinition } from "./packaging-units.js";
 // Promotions
 export { PROMOTIONS } from "./promotions.js";
 export type { DiscountScope, DiscountType, PromotionDefinition } from "./promotions.js";

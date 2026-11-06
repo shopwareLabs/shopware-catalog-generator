@@ -96,6 +96,22 @@ await hydrator.hydrateEnvWithProducts(products, category, salesChannelName);
 
 **Product payload** includes: sale/list prices, `markAsTopseller`, `releaseDate` (for "New" badge), `shippingFree`, `weight`/`width`/`height`/`length`, `ean`, `manufacturerNumber`, `minPurchase`/`maxPurchase`/`purchaseSteps`, `metaTitle`/`metaDescription`, and `deliveryTimeId`.
 
+Catalog fields added on top (all optional, old blueprints still upload):
+
+| Field                                                                   | Source                                  | Gate                                |
+| ----------------------------------------------------------------------- | --------------------------------------- | ----------------------------------- |
+| `price[].regulationPrice` (lowest previous price)                       | Midpoint between sale and list price    | none (6.4.10+)                      |
+| `unitId`, `purchaseUnit`, `referenceUnit`, `packUnit`, `packUnitPlural` | `metadata.packaging` (~15% of products) | none (6.0+)                         |
+| `customFields` (`cg_*`)                                                 | `metadata.customFields`                 | none, skipped if set creation fails |
+| `ogTitle`, `ogDescription`                                              | `metaTitle ?? name`, `metaDescription`  | `productOpenGraph` (6.7.10)         |
+
+- `ensureUnits(units)` finds units by short code and creates the missing ones (a fresh shop has
+  no unit rows). It returns a short code → ID map. If it fails, products upload without `unitId`.
+- `ensureProductCustomFieldSet(includeInSearch)` finds the `catalog_generator` set by name or
+  creates it. `includeInSearch` is only sent when `customFieldSearchable` (6.7.7) is supported.
+- `descriptionTeaser` (6.7.12+) is never sent: Shopware derives it from the description on write
+  and rejects it from API clients (`WriteProtected`).
+
 **Idempotency:** `deliveryTimeId` is read from the blueprint's `deliveryTimeIndex` (set deterministically in Phase 1) so delivery times are stable across re-runs. `releaseDate` for `isNew` products is intentionally set to `new Date().toISOString()` at upload time — this keeps the "New" badge permanently visible on the storefront regardless of when the blueprint was originally generated.
 
 **Tiered pricing null-fallback:** `getAlwaysValidRuleId()` logs a warning and returns `null` when no "Always valid" / "Always true" rule is found. Tiered prices are only attached when the rule ID is non-null (`if (hasTieredPricing && ruleId)`). This prevents accidentally binding prices to arbitrary business rules on stores with custom rule configurations.
@@ -112,6 +128,8 @@ await hydrator.hydrateEnvWithProducts(products, category, salesChannelName);
 | `{name}-de.{host}` | German (`de-DE`)             | EUR      |
 
 The German domain is skipped with a warning if `de-DE` language or its snippet set is not installed in Shopware. USD falls back to the Storefront's default currency if not found. All lookups run in parallel with `Promise.all` via `ShopwareClient.getLanguageId()` and `ShopwareClient.getSnippetSetId()`.
+
+**Imperial English domain:** with `imperialEnglishDomain: true` (callers pass `supports("measurementUnits")`, 6.7.1+) the English domain gets `measurementUnits: { system: "imperial", units: { length: "in", weight: "lb" } }`. The German domain stays metric.
 
 ### ShopwareCleanup
 

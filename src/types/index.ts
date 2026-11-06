@@ -22,7 +22,9 @@ export type {
     ImageDescription,
     ImageView,
     Manufacturer,
+    ProductCustomFieldValues,
     ProductMetadata,
+    ProductPackaging,
     ProductProperty,
     ProductType,
     ReviewCount,
@@ -83,6 +85,7 @@ export type {
     CategorySyncPayload,
     CustomerAddressPayload,
     CustomerSyncPayload,
+    DomainMeasurementUnits,
     ProductImage,
     ProductInput,
     ProductReview,
@@ -102,6 +105,7 @@ export type {
 
 // Zod schemas for AI response validation
 export {
+    IMPERIAL_MEASUREMENT_UNITS,
     ProductDefinition,
     ProductReviewDefinition,
     PropertyGroupDefinition,

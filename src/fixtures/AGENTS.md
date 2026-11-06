@@ -23,8 +23,10 @@ fixtures/
 │   ├── text-images.ts    # Text & Images page
 │   ├── commerce.ts       # Commerce elements page
 │   └── form.ts           # Form elements page
-├── demo-customers.ts     # Demo customer accounts + B2B group (credentials for homepage)
+├── custom-fields.ts      # Product custom field set (catalog_generator: cg_featured, cg_launch_year, cg_internal_note)
+├── demo-customers.ts     # Demo customer accounts + B2B group, B2B accounts are business accounts (company, VAT ID)
 ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+├── packaging-units.ts    # Units (pc, kg, m) and packaging options (Pair, Pack, Box, ...) for reference prices
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 ├── property-groups.ts    # Universal property groups (Color with hex codes)
 ├── review-data.ts        # Reviewer names and review content templates

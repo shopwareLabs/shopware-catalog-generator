@@ -14,10 +14,13 @@ import type {
     BlueprintConfig,
     BlueprintProduct,
     ImageView,
+    ProductCustomFieldValues,
     ProductMetadata,
+    ProductPackaging,
     ReviewCount,
 } from "../types/index.js";
 
+import { findPackagingUnit, PACKAGING_OPTIONS, PACKAGING_SHARE } from "../fixtures/index.js";
 import { DEFAULT_BLUEPRINT_CONFIG } from "../types/index.js";
 import { createShortHash, generateNumericHash, generateUUID, randomPick } from "../utils/index.js";
 
@@ -314,6 +317,9 @@ export class BlueprintGenerator {
         const hasMaxPurchase = !hasTieredPricing && Math.random() < 0.1;
         const maxPurchase = hasMaxPurchase ? (randomPick([3, 5, 10, 20, 50]) as number) : undefined;
 
+        // Packaging / reference price (~15% of products)
+        const packaging = Math.random() < PACKAGING_SHARE ? generatePackaging() : undefined;
+
         return {
             imageCount,
             imageDescriptions,
@@ -336,6 +342,37 @@ export class BlueprintGenerator {
             manufacturerNumber: `MPN-${createShortHash(productId + "-mpn", 8).toUpperCase()}`,
             ...(minPurchase && { minPurchase, purchaseSteps: minPurchase }),
             ...(maxPurchase && { maxPurchase }),
+            ...(packaging && { packaging }),
+            customFields: generateCustomFields(productId, isTopseller),
         };
     }
+}
+
+/**
+ * Pick a packaging option and resolve its unit so the blueprint is self-contained.
+ */
+function generatePackaging(): ProductPackaging {
+    const option = randomPick([...PACKAGING_OPTIONS]);
+    const unit = findPackagingUnit(option.unitShortCode);
+    return {
+        unitShortCode: option.unitShortCode,
+        unitName: unit?.name ?? option.unitShortCode,
+        purchaseUnit: option.purchaseUnit,
+        referenceUnit: option.referenceUnit,
+        packUnit: option.packUnit,
+        packUnitPlural: option.packUnitPlural,
+    };
+}
+
+/**
+ * Values for the `catalog_generator` custom field set.
+ * Topsellers are always featured; the rest with a small chance.
+ */
+function generateCustomFields(productId: string, isTopseller: boolean): ProductCustomFieldValues {
+    const currentYear = new Date().getFullYear();
+    return {
+        cg_featured: isTopseller || Math.random() < 0.1,
+        cg_launch_year: currentYear - randomInRange(0, 7),
+        cg_internal_note: `Demo batch ${createShortHash(productId + "-batch", 4).toUpperCase()}`,
+    };
 }

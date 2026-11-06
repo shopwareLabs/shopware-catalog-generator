@@ -186,6 +186,8 @@ export class CategoryImageProcessor {
                             id: mediaId,
                             private: false,
                             ...(mediaFolderId && { mediaFolderId }),
+                            alt: categoryName,
+                            title: categoryName,
                         },
                     ],
                 },

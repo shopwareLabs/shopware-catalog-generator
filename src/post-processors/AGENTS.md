@@ -77,9 +77,9 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 
 ## Available Processors
 
-| Processor        | Name               | Dependencies                               | Has Cleanup | Notes                                                                                                         |
-| ---------------- | ------------------ | ------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------- |
-| CMS Homepage     | `cms-home`         | `customers`, `promotions`, `cross-selling` | Yes         | Conditionally renders credential table, promotion codes, and Cross-Selling bullet based on `activeProcessors` |
+| Processor        | Name               | Dependencies                               | Has Cleanup | Notes                                                                                                           |
+| ---------------- | ------------------ | ------------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| CMS Homepage     | `cms-home`         | `customers`, `promotions`, `cross-selling` | Yes         | Conditionally renders credential table, promotion codes, and Cross-Selling bullet based on `activeProcessors`   |
 | CMS Text         | `cms-text`         | none                                       | Yes         |
 | CMS Images       | `cms-images`       | none                                       | Yes         |
 | CMS Video        | `cms-video`        | none                                       | Yes         |
@@ -89,9 +89,9 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 | CMS Footer Pages | `cms-footer-pages` | none                                       | Yes         |
 | CMS Testing      | `cms-testing`      | all `cms-*`, `digital-product`             | Yes         |
 | Cross-Selling    | `cross-selling`    | none                                       | Yes         |
-| Customers        | `customers`        | none                                       | Yes         |
+| Customers        | `customers`        | none                                       | Yes         | B2B demo accounts are business accounts (`accountType`, `company`, `vatIds`, address company)                   |
 | Digital Product  | `digital-product`  | none                                       | Yes         |
-| Images           | `images`           | none                                       | Yes         |
+| Images           | `images`           | none                                       | Yes         | Product media get `alt`/`title`; cover becomes `openGraphMediaId` when `productOpenGraph` is supported (6.7.10) |
 | Manufacturers    | `manufacturers`    | none                                       | Yes         |
 | Promotions       | `promotions`       | none                                       | Yes         |
 | Reviews          | `reviews`          | none                                       | Yes         |

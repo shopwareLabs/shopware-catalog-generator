@@ -30,6 +30,14 @@ export const SHOPWARE_FEATURES = {
         description: "Measurement systems and per-domain measurement units",
         since: "6.7.1.0",
     },
+    customFieldSearchable: {
+        description: "custom_field.includeInSearch (custom field values in product search)",
+        since: "6.7.7.0",
+    },
+    productOpenGraph: {
+        description: "product.ogTitle / ogDescription / openGraphMediaId (social sharing)",
+        since: "6.7.10.0",
+    },
 } as const satisfies Record<string, ShopwareFeatureRequirement>;
 
 /** Name of a feature in SHOPWARE_FEATURES */
