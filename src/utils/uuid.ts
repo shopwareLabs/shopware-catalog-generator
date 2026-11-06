@@ -18,19 +18,24 @@ export function generateUUID(): string {
     return crypto.randomUUID().replace(/-/g, "");
 }
 
+/** Shopware routes Store API keys by this prefix (`AccessKeyHelper::SALES_CHANNEL_IDENTIFIER`) */
+const SALES_CHANNEL_KEY_PREFIX = "SWSC";
+/** Shopware's keys are base64 of 16 random characters without padding, uppercased: 22 characters */
+const SALES_CHANNEL_KEY_RANDOM_LENGTH = 22;
+const ACCESS_KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
 /**
- * Generate a random access key for a SalesChannel
+ * Generate a Store API access key for a SalesChannel.
  *
- * @returns A 32-character access key starting with "SW"
+ * Shopware rejects keys without the "SWSC" prefix (403 FRAMEWORK__API_INVALID_ACCESS_KEY).
+ *
+ * @returns A 26-character access key: "SWSC" plus 22 uppercase letters and digits
  *
  * @example
- * generateAccessKey() // "SWAB12CD34EF56GH78IJ90KL12MN34"
+ * generateAccessKey() // "SWSCAB12CD34EF56GH78IJ90KL"
  */
 export function generateAccessKey(): string {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let key = "SW";
-    for (let i = 0; i < 30; i++) {
-        key += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return key;
+    const bytes = crypto.getRandomValues(new Uint8Array(SALES_CHANNEL_KEY_RANDOM_LENGTH));
+    const random = Array.from(bytes, (b) => ACCESS_KEY_CHARS.charAt(b % ACCESS_KEY_CHARS.length));
+    return SALES_CHANNEL_KEY_PREFIX + random.join("");
 }
