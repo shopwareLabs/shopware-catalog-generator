@@ -229,7 +229,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
     private async findExistingGiftCard(context: PostProcessorContext): Promise<string | null> {
         try {
             interface ProductResponse {
-                data?: Array<{ id: string }>;
+                data?: Array<{ id: string; type?: string }>;
             }
 
             const response = await apiPost(context, "search/product", {
@@ -245,13 +245,29 @@ class DigitalProductProcessorImpl implements PostProcessor {
 
             if (response.ok) {
                 const data = (await response.json()) as ProductResponse;
-                return data.data?.[0]?.id || null;
+                const existing = data.data?.[0];
+                if (existing) this.warnIfWrongProductType(context, existing.type);
+                return existing?.id || null;
             }
         } catch (error) {
             logger.warn("Failed to find existing gift card", { data: error });
         }
 
         return null;
+    }
+
+    /**
+     * Product type is immutable, so a gift card created before type support stays physical
+     * (on 6.8 it then needs shipping). It can only be fixed by deleting and recreating it.
+     */
+    private warnIfWrongProductType(context: PostProcessorContext, type: string | undefined): void {
+        if (!context.shopware.supports("productType")) return;
+        if (type === undefined || type === GIFT_CARD_50.type) return;
+        logger.warn(
+            `    ⚠ Gift card exists with product type "${type}" instead of "${GIFT_CARD_50.type}". ` +
+                `The type cannot be changed; delete product ${GIFT_CARD_50.productNumber} to recreate it.`,
+            { cli: true }
+        );
     }
 
     /**
@@ -389,6 +405,8 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 isCloseout: false,
                 markAsTopseller: false,
                 deliveryTimeId: deliveryTimeId ?? undefined,
+                // Immutable in Shopware: must be set on create. 6.8 no longer derives it from downloads.
+                ...(context.shopware.supports("productType") && { type: GIFT_CARD_50.type }),
             };
 
             const response = await apiPost(context, "_action/sync", {

@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const GIFT_CARD_50 = {
     productNumber: "GIFT-CARD-50",
     name: "Digital Gift Card €50",
+    type: "digital" as const,
     /** Path to the pre-generated product image */
     imagePath: path.join(__dirname, "digital-products", "gift-card-50.png"),
     description: `<div class="gift-card-description">

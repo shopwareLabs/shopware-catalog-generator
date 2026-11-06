@@ -240,6 +240,14 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
 
     // Sync products
     ctx.log("Syncing products...");
+    const deps = createProcessorDeps({
+        baseURL: envPath,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        username: shopwareUser,
+        password: shopwarePassword,
+        skipProviders: params.skipProcessors,
+    });
+    const shopware = await detectShopwareCapabilities(deps.apiHelpers);
     const propertyMaps = buildPropertyMaps(hydratedBlueprint);
     syncPropertyIdsToBlueprint(hydratedBlueprint, propertyMaps);
     cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);
@@ -249,7 +257,8 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         hydratedBlueprint,
         salesChannelEntity,
         categoryIdMap,
-        propertyMaps.propertyOptionMap
+        propertyMaps.propertyOptionMap,
+        shopware
     );
     ctx.log(`Synced ${hydratedBlueprint.products.length} products`);
     ctx.setProgress("upload", 4, 4);
@@ -262,13 +271,6 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         ctx.log(`Running post-processors: ${processorNames.join(", ")}`);
         ctx.setProgress("processors", 0, processorNames.length);
 
-        const deps = createProcessorDeps({
-            baseURL: envPath,
-            getAccessToken: () => dataHydrator.getAccessToken(),
-            username: shopwareUser,
-            password: shopwarePassword,
-        });
-
         const results = await runProcessors(
             {
                 salesChannelId: salesChannelEntity.id,
@@ -278,7 +280,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
                 textProvider: deps.textProvider,
                 imageProvider: deps.imageProvider,
                 api: deps.apiHelpers,
-                shopware: await detectShopwareCapabilities(deps.apiHelpers),
+                shopware,
                 options: DEFAULT_PROCESSOR_OPTIONS,
             },
             processorNames

@@ -6,6 +6,7 @@ import type {
     PricePayload,
     ProductSyncPayload,
     ProductInput,
+    ProductType,
     ProductReview,
     PropertyGroup,
     PropertyOption,
@@ -396,6 +397,7 @@ export class ShopwareHydrator extends ShopwareClient {
             metaTitle?: string;
             metaDescription?: string;
             deliveryTimeIndex?: number;
+            type?: ProductType;
         }>,
         salesChannelId: string,
         navigationCategoryId: string
@@ -467,6 +469,7 @@ export class ShopwareHydrator extends ShopwareClient {
                 length: p.length,
                 ean: p.ean,
                 manufacturerNumber: p.manufacturerNumber,
+                ...(p.type && { type: p.type }),
             };
 
             // "New" badge: always set to current upload time so the badge

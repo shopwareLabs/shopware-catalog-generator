@@ -138,7 +138,16 @@ export interface BlueprintProduct {
      * Phase 3 resolves the actual ID via `deliveryTimeIds[deliveryTimeIndex % deliveryTimeIds.length]`.
      */
     deliveryTimeIndex?: number;
+
+    /**
+     * Shopware product type. Older blueprints and templates have no value, which means "physical".
+     * Only sent to shops that support it (see the `productType` feature).
+     */
+    type?: ProductType;
 }
+
+/** Shopware product type (`product.type`, Shopware 6.7.7+) */
+export type ProductType = "physical" | "digital";
 
 /** Product metadata for post-processors (stored in cache) */
 export interface ProductMetadata {

@@ -1,8 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { DigitalProductProcessor } from "../../../src/post-processors/digital-product-processor.js";
+import { ShopwareCapabilities } from "../../../src/shopware/version.js";
+import { logger } from "../../../src/utils/index.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
 
 describe("DigitalProductProcessor", () => {
@@ -153,6 +155,61 @@ describe("DigitalProductProcessor", () => {
                 .getCallsByEndpoint("_action/sync")
                 .find((call) => JSON.stringify(call.body).includes('"private":true'));
             expect(JSON.stringify(mediaCall?.body)).toContain('"mediaFolderId":"download-folder"');
+        });
+    });
+
+    describe("product type", () => {
+        function findCreateProductPayload(
+            mockApi: ReturnType<typeof createTestContext>["mockApi"]
+        ): string | undefined {
+            const call = mockApi
+                .getCallsByEndpoint("_action/sync")
+                .find((c) => JSON.stringify(c.body).includes('"GIFT-CARD-50"'));
+            return call ? JSON.stringify(call.body) : undefined;
+        }
+
+        function mockNewGiftCard(mockApi: ReturnType<typeof createTestContext>["mockApi"]): void {
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+        }
+
+        test("creates the gift card as a digital product when the shop supports it", async () => {
+            const { context, mockApi } = createTestContext();
+            mockNewGiftCard(mockApi);
+
+            await DigitalProductProcessor.process(context);
+
+            expect(findCreateProductPayload(mockApi)).toContain('"type":"digital"');
+        });
+
+        test("leaves the type out for shops older than 6.7.7", async () => {
+            const { context, mockApi } = createTestContext({
+                shopware: ShopwareCapabilities.fromVersion("6.6.10.0"),
+            });
+            mockNewGiftCard(mockApi);
+
+            await DigitalProductProcessor.process(context);
+
+            const payload = findCreateProductPayload(mockApi);
+            expect(payload).toBeDefined();
+            expect(payload).not.toContain('"type":');
+        });
+
+        test("warns when an existing gift card is physical", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", {
+                data: [{ id: "existing-card", type: "physical" }],
+            });
+            const warn = spyOn(logger, "warn").mockImplementation(() => {});
+
+            try {
+                await DigitalProductProcessor.process(context);
+                const warnings = warn.mock.calls.map(([message]) => message);
+                expect(warnings.some((w) => w.includes('product type "physical"'))).toBe(true);
+            } finally {
+                warn.mockRestore();
+            }
         });
     });
 
