@@ -48,11 +48,13 @@ export type {
     HydrationScope,
     ImageCostItem,
     ImageModelPrice,
+    LocaleTranslationCost,
     ModelSelection,
     PendingImageCounts,
     TextCostItem,
     TextModelPrice,
     TokenUsage,
+    TranslationCostEstimate,
 } from "./cost-estimate.js";
 
 // Export types
@@ -112,3 +114,20 @@ export {
     PropertyGroupDefinition,
     PropertyOptionDefinition,
 } from "./shopware.js";
+
+// Translation types (multi-language catalogs)
+export type {
+    CategoryTranslation,
+    CmsPageTranslation,
+    Formality,
+    LanguageSelection,
+    ProductReviewsTranslation,
+    ProductTranslation,
+    PropertyGroupTranslation,
+    ReviewTranslation,
+    ShopLanguage,
+    ShopLanguages,
+    TranslationFile,
+    TranslationSource,
+} from "./translation.js";
+export { FormalitySchema, SOURCE_LOCALE, TranslationFileSchema } from "./translation.js";

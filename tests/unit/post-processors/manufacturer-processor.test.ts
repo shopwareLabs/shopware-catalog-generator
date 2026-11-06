@@ -270,3 +270,51 @@ describe("ManufacturerProcessor", () => {
         });
     });
 });
+
+describe("ManufacturerProcessor with a stale cache", () => {
+    const blueprint = createTestBlueprint({
+        products: [
+            createTestProduct({ id: "p1", metadata: { manufacturerName: "Existing Corp" } }),
+            createTestProduct({ id: "p2", metadata: { manufacturerName: "Missing Corp" } }),
+        ],
+    });
+
+    function setup() {
+        const { context, mockApi, mockCache } = createTestContext({ blueprint, dryRun: false });
+        // Cached IDs from another shop: neither ID exists in this one
+        mockCache.saveManufacturers("test-store", [
+            { id: "stale-existing", name: "Existing Corp", description: "cached text" },
+            { id: "stale-missing", name: "Missing Corp", description: "cached text" },
+        ]);
+        mockCache.saveManufacturersMock.mockClear();
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            total: 1,
+            data: [{ id: "shop-existing", name: "Existing Corp" }],
+        });
+        mockApi.mockPostResponse("search/product", { data: [] });
+        mockApi.setDefaultPostResponse({ success: true });
+        return { context, mockApi, mockCache };
+    }
+
+    test("creates a cached manufacturer that does not exist in Shopware", async () => {
+        const { context, mockApi } = setup();
+        await ManufacturerProcessor.process(context);
+
+        const createCall = mockApi
+            .getCallsByEndpoint("_action/sync")
+            .find((c) => (c.body as Record<string, unknown>).createManufacturers !== undefined);
+        const body = createCall?.body as Record<string, { payload: Array<{ name: string }> }>;
+        expect(body.createManufacturers?.payload.map((m) => m.name)).toEqual(["Missing Corp"]);
+    });
+
+    test("saves the Shopware IDs instead of the stale cached ones", async () => {
+        const { context, mockCache } = setup();
+        await ManufacturerProcessor.process(context);
+
+        const saved = mockCache.saveManufacturersMock.mock.calls.at(-1)?.[1] ?? [];
+        const ids = new Map(saved.map((m) => [m.name, m.id]));
+        expect(ids.get("Existing Corp")).toBe("shop-existing");
+        expect(ids.get("Missing Corp")).not.toBe("stale-missing");
+        expect(saved.find((m) => m.name === "Existing Corp")?.description).toBe("cached text");
+    });
+});

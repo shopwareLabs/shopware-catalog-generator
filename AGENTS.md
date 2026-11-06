@@ -23,6 +23,7 @@ src/
 │   ├── shopware.ts           # Shopware entities + Zod schemas
 │   ├── blueprint.ts          # Blueprint types
 │   ├── cost-estimate.ts      # Cost forecast types (ModelSelection, TokenUsage, CostEstimate)
+│   ├── translation.ts        # Translation file + source types (TranslationFile, LanguageSelection)
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
@@ -41,6 +42,8 @@ src/
 │   ├── export.ts             # Export/sync existing data + getExistingPropertyGroups
 │   ├── storefront-check.ts   # Storefront domain checks (expects HTTP 200, injectable fetch)
 │   ├── version.ts            # Shopware version + feature flag detection, supports(feature)
+│   ├── languages.ts          # SalesChannel languages, locale → translation file matching
+│   ├── translation-payload.ts # Sync payloads that write translations per language
 │   └── cleanup.ts            # Delete operations (SalesChannel-centric)
 │
 ├── providers/                # AI provider implementations
@@ -53,7 +56,8 @@ src/
 │
 ├── cli/                      # CLI command modules (main.ts delegates here)
 │   ├── AGENTS.md             # CLI reference (all commands, flags, options)
-│   ├── blueprint.ts          # blueprint create, hydrate, fix (thin wrappers)
+│   ├── blueprint.ts          # blueprint create, hydrate, translate, fix (thin wrappers)
+│   ├── languages.ts          # --languages / TRANSLATION_LANGUAGES / interactive language prompt
 │   ├── generate.ts           # generate (full pipeline), process (thin wrappers)
 │   ├── image-fix.ts          # image fix - thin wrapper
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
@@ -77,6 +81,7 @@ src/
 │       ├── product.ts        # Product content via AI (parallel branches)
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
 │       ├── image.ts          # Product/category/CMS/theme image pre-generation
+│       ├── translation.ts    # AI translation pass (native-sounding, per locale, reuses unchanged)
 │       └── theme.ts          # AI brand color generation
 │
 ├── post-processors/          # Post-processors (parallel execution)
@@ -104,7 +109,8 @@ src/
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── promotion-processor.ts # Demo promotion codes (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── variant-processor.ts  # Variant product creation
-│   ├── review-processor.ts   # Variable review counts
+│   ├── review-processor.ts   # Variable review counts, spread across SalesChannel languages
+│   ├── translation-processor.ts # Writes cached translations (no AI)
 │   └── theme-processor.ts    # Child theme with brand colors + media
 │
 ├── fixtures/                 # Reusable data configurations
@@ -126,12 +132,14 @@ src/
 │   ├── custom-fields.ts      # Product custom field set (catalog_generator)
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+│   ├── locale-currencies.ts  # Locale → currency, DEFAULT_DOMAIN_LOCALES (de-DE)
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── packaging-units.ts    # Units + packaging options (reference prices)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── property-groups.ts    # Universal property groups (Color with hex codes)
-│   ├── review-data.ts        # Reviewer names and review templates
-│   └── shopware-features.ts  # Feature → first Shopware version (version gating)
+│   ├── review-data.ts        # Reviewer names, review templates, buildProductReviews (seeded)
+│   ├── shopware-features.ts  # Feature → first Shopware version (version gating)
+│   └── translatable-texts.ts # Fixture texts that are translated with the catalog
 │
 ├── templates/                # Pre-generated catalog templates
 │   ├── AGENTS.md             # Templates documentation
@@ -149,7 +157,8 @@ src/
 │   ├── property-collector.ts # Collect, deduplicate, merge properties
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
-│   ├── uuid.ts               # UUID generation
+│   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
+│   ├── seeded-random.ts      # Deterministic PRNG (stable reviews across runs)
 │   ├── arrays.ts             # Array utilities (randomPick, etc.)
 │   ├── shopware-request.ts   # Shopware API request helpers
 │   ├── clone.ts              # cloneDeep - typed structuredClone wrapper
@@ -160,6 +169,7 @@ src/
 │   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
 │   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
 │   ├── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
+│   ├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, translateBlueprint
 │   └── shopware-context.ts   # createProcessorDeps (API helpers + providers bootstrap)
 │
 ├── server/                   # HTTP server infrastructure
@@ -182,7 +192,7 @@ src/
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
-│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
+│       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_translate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
@@ -374,7 +384,9 @@ await runProcessors(context, ["images", "manufacturers", "reviews"]);
 
 ### Multi-Domain SalesChannels
 
-Every SalesChannel is created with two domains automatically:
+Every SalesChannel is created with an English domain plus one domain per non-English locale
+(`DEFAULT_DOMAIN_LOCALES`, currently `de-DE`, plus any locale requested with `--languages`).
+The default setup looks like this:
 
 | Domain             | Language                  | Currency | Snippet Set      |
 | ------------------ | ------------------------- | -------- | ---------------- |
@@ -404,6 +416,39 @@ New lookup methods on `ShopwareClient`:
 
 - `getLanguageId(localeCode: string): Promise<string | null>` — searches `language` by `locale.code`
 - `getSnippetSetId(iso: string): Promise<string | null>` — searches `snippet_set` by `iso`
+
+The subdomain suffix is the language (`-de`), or the full locale (`-de-ch`) when two locales
+share a language. The currency per locale comes from `src/fixtures/locale-currencies.ts`.
+
+### Translations (multi-language catalogs)
+
+English is always generated first. A separate AI pass then translates the hydrated catalog
+per locale, with a prompt that asks for copy a native speaker would write, not a 1:1
+translation. Product names are localized where that is natural (generic descriptive names)
+and kept where they work as brand or model names. Formality (du/Sie, tu/vous) is picked once
+per locale by the AI and can be overridden with `--formality`.
+
+```
+hydrated-blueprint.json ──▶ blueprint translate ──▶ translations/{locale}.json
+                                                          │
+generate / process ──▶ translations + reviews processors ◀┘ (no AI)
+```
+
+- **What is translated:** products (name, description, SEO/OG fields), categories, property
+  groups and options, manufacturers, AI CMS texts, fixture texts and reviews.
+- **Target locales:** `--languages=de-DE,fr-FR`, `all` (every non-English language of the
+  existing SalesChannel, or `DEFAULT_DOMAIN_LOCALES` for a new one) or `none`.
+  `TRANSLATION_LANGUAGES` sets the default. Without either, `generate` shows the forecast
+  and asks in a terminal; outside a terminal it stays English only.
+- **Re-runs are cheap:** every entry stores a hash of its English source. Unchanged entries
+  are reused, only new or changed texts are sent to the AI (`--force` re-translates all).
+- **Cost:** `blueprint estimate --languages=...` and the translate command print a
+  forecast first, like hydration.
+- **Upload:** the `translations` processor writes entity translations for each SalesChannel
+  language that has a translation file. English languages get the English source.
+- **Reviews:** a `product_review` has exactly one language, so review _i_ is written in
+  language _i % n_. Review IDs are deterministic, so re-runs upsert the same rows. Products
+  with reviews from older runs (random IDs) are skipped with a cleanup hint.
 
 ### Shopware Version Gating
 
@@ -482,6 +527,7 @@ interface PostProcessorOptions {
 | `reviews`          | Variable review counts (0-10 per product)        | none                                       |
 | `theme`            | Child theme with brand colors, logo, favicon     | none                                       |
 | `variants`         | Variant product creation                         | `manufacturers`                            |
+| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-testing` |
 | `digital-product`  | Digital product with download                    | none                                       |
 | `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product                    |
 
@@ -631,6 +677,8 @@ generated/
         ├── blueprint.json          # Phase 1 output
         ├── hydrated-blueprint.json # Phase 2 output
         ├── inspiration.json        # Crawled website data (blueprint inspire)
+        ├── translations/           # blueprint translate output
+        │   └── {locale}.json       # e.g. de-DE.json (texts + source hashes + style)
         ├── cms-blueprint.json      # AI-hydrated CMS text (used by CMS processors)
         ├── categories.json         # Category tree
         ├── property-groups.json    # Property groups synced from Shopware
@@ -1108,6 +1156,7 @@ AI_API_KEY=pk_your_pollinations_key    # pk_ = free/sequential, sk_ = parallel
 
 # Optional overrides
 AI_MODEL=gpt-6-luna   # OpenAI default; or gpt-5.4-mini, gpt-4.1-2025-04-14
+TRANSLATION_LANGUAGES=de-DE  # Default for --languages: list, "all" or "none"
 IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
 IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
 IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-2.5-flare, flux, klein, zimage
@@ -1148,6 +1197,9 @@ bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
 bun run blueprint fix --name=music
+
+# Phase 2d (optional): Translate the catalog (separate AI pass per locale)
+bun run blueprint translate --name=music --languages=de-DE
 
 # Phase 3: Upload to Shopware
 bun run generate --name=music
@@ -1222,6 +1274,7 @@ Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prev
 bun run blueprint estimate \
   --name=NAME              # Required: SalesChannel name (blueprint must exist)
   --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms")
+  --languages=LIST         # Optional: also forecast translation ("de-DE,fr-FR", "all", "none")
 ```
 
 Forecasts text tokens, image count and USD cost for the next hydration run without calling any AI.
@@ -1240,7 +1293,22 @@ Forecasts text tokens, image count and USD cost for the next hydration run witho
 bun run generate \
   --name=NAME              # Required: SalesChannel name
   --description=TEXT       # Description (default: "{name} webshop")
+  --languages=LIST         # Translate before upload: "de-DE,fr-FR", "all" or "none"
+                           # (default: TRANSLATION_LANGUAGES, else ask in a terminal)
 ```
+
+### Translate Options
+
+```bash
+bun run blueprint translate \
+  --name=NAME              # Required: SalesChannel name (hydrated blueprint must exist)
+  --languages=LIST         # "de-DE,fr-FR", "all" (SalesChannel languages) or "none"
+  --formality=STYLE        # Optional: "formal" or "informal" (default: AI picks per locale)
+  --force                  # Re-translate everything instead of reusing unchanged entries
+```
+
+Writes `generated/sales-channels/{name}/translations/{locale}.json`. Upload happens in
+`generate` / `process --only=translations,reviews`. See [Translations](#translations-multi-language-catalogs).
 
 ### Process Options
 
@@ -1288,6 +1356,7 @@ Available processors with cleanup: `cms`, `customers`.
 ./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload
 ./test-e2e.sh --cleanup=music             # Only cleanup specific SalesChannel
 ./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate  # Run against a local sw-dev lane
+./test-e2e.sh --reuse=music --languages=none  # Skip the translation step (default: de-DE)
 bun run test:verify --name=music          # Verify Shopware data
 ```
 
@@ -1387,6 +1456,7 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 | `blueprint_create`     | Generate blueprint.json (no AI)                        |
 | `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
 | `blueprint_estimate`   | Forecast AI tokens, images and USD cost (no AI calls)  |
+| `blueprint_translate`  | Translate the hydrated catalog into other locales      |
 | `blueprint_fix`        | Fix placeholder names                                  |
 | `image_fix`            | Regenerate images (product/category/cms by type)       |
 | `generate`             | Full pipeline: create + hydrate + upload               |

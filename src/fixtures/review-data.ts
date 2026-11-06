@@ -2,7 +2,9 @@
  * Review Data Fixtures - Names and templates for review generation
  */
 
-import type { ReviewerNames, ReviewTemplates } from "./types.js";
+import type { GeneratedReview, ReviewerNames, ReviewTemplates } from "./types.js";
+
+import { createSeededRandom, seededPick } from "../utils/seeded-random.js";
 
 // =============================================================================
 // Reviewer Names
@@ -146,22 +148,63 @@ export const REVIEW_CONTENT_TEMPLATES = {
     ],
 } as const;
 
+/** Rating weights: 5 stars 40%, 4 stars 30%, 3 stars 15%, 2 stars 10%, 1 star 5% */
+const RATING_THRESHOLDS: ReadonlyArray<{ below: number; rating: number }> = [
+    { below: 0.4, rating: 5 },
+    { below: 0.7, rating: 4 },
+    { below: 0.85, rating: 3 },
+    { below: 0.95, rating: 2 },
+];
+
+function pickRating(roll: number): number {
+    return RATING_THRESHOLDS.find((t) => roll < t.below)?.rating ?? 1;
+}
+
+function sentimentOf(rating: number): "positive" | "neutral" | "negative" {
+    if (rating >= 4) return "positive";
+    if (rating === 3) return "neutral";
+    return "negative";
+}
+
+const TITLES_BY_SENTIMENT = {
+    positive: REVIEW_TEMPLATES.positiveTitles,
+    neutral: REVIEW_TEMPLATES.neutralTitles,
+    negative: REVIEW_TEMPLATES.negativeTitles,
+} as const;
+
 /**
- * Get a random review content template for a rating
- * @param rating - Star rating (1-5)
- * @param productType - Product type name to insert
+ * Build the English reviews for a product.
+ *
+ * Deterministic: the same product always gets the same reviewers, ratings and texts.
+ * The translate pass (Phase 2) and the review processor (Phase 3) both call this, so
+ * translated review texts line up with the uploaded reviews by index.
+ *
+ * @param productId - Seed for all choices
+ * @param productName - Used in the review text ("{productType}")
+ * @param count - Number of reviews
  */
-export function getReviewContent(rating: number, productType: string): string {
-    let templates: readonly string[];
+export function buildProductReviews(
+    productId: string,
+    productName: string,
+    count: number
+): GeneratedReview[] {
+    const random = createSeededRandom(`reviews:${productId}`);
+    const productType = productName.split(" - ")[0] || productName;
 
-    if (rating >= 4) {
-        templates = REVIEW_CONTENT_TEMPLATES.positive;
-    } else if (rating === 3) {
-        templates = REVIEW_CONTENT_TEMPLATES.neutral;
-    } else {
-        templates = REVIEW_CONTENT_TEMPLATES.negative;
-    }
+    return Array.from({ length: Math.max(0, count) }, () => {
+        const rating = pickRating(random());
+        const sentiment = sentimentOf(rating);
+        const firstName = seededPick(REVIEWER_NAMES.firstNames, random);
+        const lastName = seededPick(REVIEWER_NAMES.lastNames, random);
+        const title = seededPick(TITLES_BY_SENTIMENT[sentiment], random);
+        const template = seededPick(REVIEW_CONTENT_TEMPLATES[sentiment], random);
 
-    const template = templates[Math.floor(Math.random() * templates.length)] || templates[0];
-    return (template as string).replace("{productType}", productType);
+        return {
+            user: `${firstName} ${lastName}`,
+            email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
+            title,
+            content: template.replace("{productType}", productType),
+            rating,
+        };
+    });
 }

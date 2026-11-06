@@ -89,3 +89,23 @@ export interface CostEstimate {
     totalUsd: number | null;
     notes: string[];
 }
+
+/** Translation forecast for one locale */
+export interface LocaleTranslationCost {
+    locale: string;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    /** Null when no price data exists for the model/provider */
+    usd: number | null;
+}
+
+/** Translation forecast for several locales */
+export interface TranslationCostEstimate {
+    selection: ModelSelection;
+    locales: LocaleTranslationCost[];
+    inputTokens: number;
+    outputTokens: number;
+    /** Null when any locale is unpriced */
+    usd: number | null;
+}

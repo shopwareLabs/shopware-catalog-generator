@@ -80,6 +80,7 @@ The `test-e2e.sh` script in the project root runs a full end-to-end test against
 ./test-e2e.sh --reuse=music                # Reuse existing blueprint
 ./test-e2e.sh --reuse=music --skip-hydrate # Skip AI, just upload → verify
 ./test-e2e.sh --reuse=music --skip-upload  # Just verify existing data
+./test-e2e.sh --reuse=music --languages=none # Skip translation (default E2E_LANGUAGES=de-DE)
 ./test-e2e.sh --cleanup=music              # Cleanup only
 ./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate # Local sw-dev lane, temporary credentials
 ```

@@ -62,6 +62,16 @@ export interface ReviewTemplates {
     negativeTitles: readonly string[];
 }
 
+/** A product review built from the review fixtures */
+export interface GeneratedReview {
+    user: string;
+    email: string;
+    title: string;
+    content: string;
+    /** Star rating 1-5 */
+    rating: number;
+}
+
 /** Name lists for review generation */
 export interface ReviewerNames {
     firstNames: readonly string[];

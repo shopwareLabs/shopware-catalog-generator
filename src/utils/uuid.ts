@@ -4,6 +4,8 @@
  * Provides UUID generation functions for Shopware entities.
  */
 
+import { createHash } from "node:crypto";
+
 /**
  * Generate a 32-character UUID for Shopware entities
  *
@@ -38,4 +40,16 @@ export function generateAccessKey(): string {
     const bytes = crypto.getRandomValues(new Uint8Array(SALES_CHANNEL_KEY_RANDOM_LENGTH));
     const random = Array.from(bytes, (b) => ACCESS_KEY_CHARS.charAt(b % ACCESS_KEY_CHARS.length));
     return SALES_CHANNEL_KEY_PREFIX + random.join("");
+}
+
+/**
+ * Derive a stable 32-character Shopware ID from a string.
+ *
+ * Use for entities that must keep the same ID across runs (idempotent upserts).
+ *
+ * @example
+ * deterministicUUID("review:<productId>:0") // same value on every call
+ */
+export function deterministicUUID(input: string): string {
+    return createHash("sha256").update(input).digest("hex").slice(0, 32);
 }

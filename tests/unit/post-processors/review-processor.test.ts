@@ -2,9 +2,22 @@ import { describe, expect, mock, test } from "bun:test";
 
 import type { ProductMetadata } from "../../../src/types/index.js";
 
-import { ReviewProcessor } from "../../../src/post-processors/review-processor.js";
+import { buildProductReviews } from "../../../src/fixtures/review-data.js";
+import {
+    buildReviewPayload,
+    hasForeignReviews,
+    ReviewProcessor,
+} from "../../../src/post-processors/review-processor.js";
+import { deterministicUUID } from "../../../src/utils/uuid.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
+import {
+    createTranslationFile,
+    DE,
+    EN,
+    source,
+    translation,
+} from "../../helpers/translation-factory.js";
 
 describe("ReviewProcessor", () => {
     describe("metadata", () => {
@@ -330,5 +343,93 @@ describe("ReviewProcessor", () => {
             expect(result.errors.length).toBeGreaterThan(0);
             expect(result.errors[0]).toContain("Review cleanup failed");
         });
+    });
+});
+
+describe("buildReviewPayload", () => {
+    const product = { id: "p1", name: "Desk Lamp" };
+    const english = buildProductReviews("p1", "Desk Lamp", 4);
+    const germanFile = createTranslationFile({
+        reviews: {
+            p1: {
+                reviews: english.map((_, i) => ({ title: `Titel ${i}`, content: `Inhalt ${i}` })),
+                sourceHash: "h",
+            },
+        },
+    });
+
+    test("spreads reviews across languages, translated where a file exists", () => {
+        const payload = buildReviewPayload(product, 4, "sc-1", [
+            source(EN),
+            translation(DE, germanFile),
+        ]);
+        expect(payload.map((r) => r.languageId)).toEqual([EN.id, DE.id, EN.id, DE.id]);
+        expect(payload[0]?.title).toBe(english[0]?.title);
+        expect(payload[1]).toMatchObject({ title: "Titel 1", content: "Inhalt 1" });
+        expect(payload[3]).toMatchObject({ title: "Titel 3", content: "Inhalt 3" });
+    });
+
+    test("uses stable IDs so re-runs upsert the same rows", () => {
+        const first = buildReviewPayload(product, 2, "sc-1", [source(EN)]);
+        const second = buildReviewPayload(product, 2, "sc-1", [source(EN)]);
+        expect(first.map((r) => r.id)).toEqual(second.map((r) => r.id));
+        expect(first[0]?.id).toBe(deterministicUUID("review:p1:0"));
+    });
+
+    test("without languages, no languageId is set and texts stay English", () => {
+        const [review] = buildReviewPayload(product, 1, "sc-1", []);
+        expect(review).not.toHaveProperty("languageId");
+        expect(review?.title).toBe(english[0]?.title);
+    });
+
+    test("falls back to English when a translated review is missing", () => {
+        const partial = createTranslationFile({
+            reviews: {
+                p1: { reviews: [{ title: "Nur eins", content: "Inhalt" }], sourceHash: "h" },
+            },
+        });
+        const payload = buildReviewPayload(product, 2, "sc-1", [translation(DE, partial)]);
+        expect(payload[0]?.title).toBe("Nur eins");
+        expect(payload[1]?.title).toBe(english[1]?.title);
+    });
+});
+
+describe("hasForeignReviews", () => {
+    const payload = [{ id: "a" }, { id: "b" }];
+
+    test("no existing reviews", () => {
+        expect(hasForeignReviews([], payload)).toBe(false);
+    });
+
+    test("only our own stable IDs", () => {
+        expect(hasForeignReviews(["b", "a"], payload)).toBe(false);
+    });
+
+    test("any review with another ID (older run, manual review)", () => {
+        expect(hasForeignReviews(["a", "legacy"], payload)).toBe(true);
+    });
+});
+
+describe("ReviewProcessor re-run", () => {
+    test("upserts reviews it created before, so language and text follow the translations", async () => {
+        const blueprint = createTestBlueprint({
+            products: [createTestProduct({ id: "p1", metadata: { reviewCount: 2 } })],
+        });
+        const metadataMap = new Map<string, Partial<ProductMetadata>>([["p1", { reviewCount: 2 }]]);
+        const { context, mockApi } = createTestContext({ blueprint, metadataMap, dryRun: false });
+        mockApi.mockPostResponse("search/product-review", {
+            total: 2,
+            data: [
+                { id: deterministicUUID("review:p1:0") },
+                { id: deterministicUUID("review:p1:1") },
+            ],
+        });
+        mockApi.mockSyncSuccess();
+
+        const result = await ReviewProcessor.process(context);
+
+        expect(result.processed).toBe(1);
+        expect(result.skipped).toBe(0);
+        expect(mockApi.syncEntitiesMock).toHaveBeenCalled();
     });
 });

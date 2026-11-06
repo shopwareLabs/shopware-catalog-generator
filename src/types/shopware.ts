@@ -87,6 +87,11 @@ export interface SalesChannelInput {
      * supports per-domain measurement units (Shopware 6.7.1+); the German domain stays metric.
      */
     imperialEnglishDomain?: boolean;
+    /**
+     * Extra storefront locales (e.g. translated locales). Each installed locale gets a
+     * `{name}-{lang}` domain. `de-DE` is always included.
+     */
+    locales?: string[];
 }
 
 /** Per-domain measurement units (`sales_channel_domain.measurementUnits`, Shopware 6.7.1+) */

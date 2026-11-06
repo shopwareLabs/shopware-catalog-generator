@@ -59,11 +59,14 @@ export {
 } from "./property-groups.js";
 // Review Data
 export {
-    getReviewContent,
+    buildProductReviews,
     REVIEW_CONTENT_TEMPLATES,
     REVIEW_TEMPLATES,
     REVIEWER_NAMES,
 } from "./review-data.js";
+// Translatable texts
+export type { TranslatableFixtureKey } from "./translatable-texts.js";
+export { fillFixtureText, TRANSLATABLE_FIXTURE_TEXTS } from "./translatable-texts.js";
 // Types
 export type {
     CmsBlockConfig,
@@ -71,6 +74,12 @@ export type {
     CmsPageFixture,
     CmsSectionConfig,
     CmsSlotConfig,
+    GeneratedReview,
     ReviewerNames,
     ReviewTemplates,
 } from "./types.js";
+export {
+    currencyForLocale,
+    DEFAULT_DOMAIN_LOCALES,
+    LOCALE_CURRENCIES,
+} from "./locale-currencies.js";

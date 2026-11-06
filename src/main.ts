@@ -20,6 +20,7 @@ import {
     blueprintEstimate,
     blueprintHydrate,
     blueprintInspire,
+    blueprintTranslate,
 } from "./cli/blueprint.js";
 import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
@@ -83,6 +84,9 @@ function parseCliArgs(): CliArgs {
         noTemplate: flags["no-template"] === true,
         rehydrate: flags.rehydrate === true,
         type: flags.type as string | undefined,
+        languages: typeof flags.languages === "string" ? flags.languages : undefined,
+        formality: typeof flags.formality === "string" ? flags.formality : undefined,
+        force: flags.force === true,
     };
 }
 
@@ -97,6 +101,7 @@ Commands:
   blueprint create   Generate blueprint.json (no AI calls)
   blueprint estimate Forecast tokens, images and cost of 'blueprint hydrate' (no AI calls)
   blueprint hydrate  Hydrate blueprint with AI -> hydrated-blueprint.json
+  blueprint translate Translate the hydrated catalog into other languages (AI)
   blueprint fix      Fix placeholder names in hydrated blueprint
   blueprint inspire  Crawl a website and save inspiration.json to guide AI generation
   generate           Full flow: create + hydrate + upload to Shopware
@@ -114,6 +119,11 @@ Options:
                         - For 'process': processor names (images, manufacturers, etc.)
                         - For 'blueprint hydrate' / 'blueprint estimate': categories, properties, or cms
   --rehydrate           [blueprint hydrate only] Force full re-hydration (overwrites existing, changes product names)
+  --languages=<list>    Languages to translate into (blueprint translate, estimate, generate):
+                        all (SalesChannel languages, de-DE for a new one), none, or de-DE,fr-FR
+                        Default: TRANSLATION_LANGUAGES env, else asks in a terminal, else none
+  --formality=<value>   [blueprint translate] formal or informal (default: AI decides per language)
+  --force               [blueprint translate] Translate everything again (ignore cached translations)
   --dry-run             Log actions without executing
   --no-template         [generate only] Skip checking for pre-generated templates
   -i, --interactive     Run interactive wizard
@@ -126,6 +136,7 @@ Examples:
   bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
   bun run src/main.ts blueprint hydrate --name=furniture --only=properties  # Properties only
   bun run src/main.ts blueprint hydrate --name=furniture --rehydrate        # Full re-hydration
+  bun run src/main.ts blueprint translate --name=furniture --languages=de-DE,fr-FR
   bun run src/main.ts blueprint fix --name=furniture
   bun run src/main.ts generate --name=furniture --description="Wood furniture store"
   bun run src/main.ts process --name=furniture --only=images,manufacturers
@@ -154,10 +165,12 @@ async function main(): Promise<void> {
                     await blueprintFix(args);
                 } else if (args.subcommand === "inspire") {
                     await blueprintInspire(args);
+                } else if (args.subcommand === "translate") {
+                    await blueprintTranslate(args);
                 } else {
                     showHelp();
                     throw new CLIError(
-                        "blueprint requires subcommand: create, estimate, hydrate, fix, or inspire",
+                        "blueprint requires subcommand: create, estimate, hydrate, translate, fix, or inspire",
                         "MISSING_SUBCOMMAND"
                     );
                 }

@@ -4,13 +4,16 @@
  * Thin wrappers that delegate to src/services/generate-service.ts and print output.
  */
 
+import type { LanguageSelection } from "../types/index.js";
 import type { CliArgs } from "./shared.js";
 
+import { createCacheFromEnv } from "../cache.js";
 import {
     generate as generateService,
     runProcessorsForSalesChannel,
 } from "../services/generate-service.js";
 import { logger } from "../utils/index.js";
+import { askForLanguages, languagesFromArgs } from "./languages.js";
 import { requireValidName, throwIfServiceError, verifyShopwareConnection } from "./shared.js";
 
 export async function generate(args: CliArgs): Promise<void> {
@@ -29,10 +32,26 @@ export async function generate(args: CliArgs): Promise<void> {
         products: args.products,
         dryRun: args.dryRun,
         noTemplate: args.noTemplate,
+        languages: await resolveGenerateLanguages(args, salesChannelName),
     });
 
     printServiceOutput(lines);
     throwIfServiceError(lines, "GENERATE_FAILED");
+}
+
+/**
+ * --languages / TRANSLATION_LANGUAGES, else ask in a terminal. Stores with cached
+ * translations are not asked again: generate keeps and uploads those.
+ */
+async function resolveGenerateLanguages(
+    args: CliArgs,
+    salesChannelName: string
+): Promise<LanguageSelection | undefined> {
+    const explicit = languagesFromArgs(args);
+    if (explicit) return explicit;
+    if (args.dryRun) return undefined;
+    if (createCacheFromEnv().listTranslationLocales(salesChannelName).length > 0) return undefined;
+    return askForLanguages(salesChannelName, args.products ?? 90);
 }
 
 export async function processCommand(args: CliArgs): Promise<void> {

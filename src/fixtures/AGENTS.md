@@ -26,11 +26,13 @@ fixtures/
 ├── custom-fields.ts      # Product custom field set (catalog_generator: cg_featured, cg_launch_year, cg_internal_note)
 ├── demo-customers.ts     # Demo customer accounts + B2B group, B2B accounts are business accounts (company, VAT ID)
 ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+├── locale-currencies.ts  # Locale → currency for extra domains, DEFAULT_DOMAIN_LOCALES (de-DE)
 ├── packaging-units.ts    # Units (pc, kg, m) and packaging options (Pair, Pack, Box, ...) for reference prices
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 ├── property-groups.ts    # Universal property groups (Color with hex codes)
-├── review-data.ts        # Reviewer names and review content templates
+├── review-data.ts        # Reviewer names, review templates, buildProductReviews (seeded, stable across runs)
 ├── shopware-features.ts  # Feature → first Shopware version, MIN_SUPPORTED_SHOPWARE_VERSION
+├── translatable-texts.ts # Fixture texts translated with the catalog (e.g. manufacturer description)
 └── color-images/         # SVG color swatch images
     ├── gradient.svg
     ├── rainbow.svg
@@ -99,4 +101,4 @@ import { PROMOTIONS, PromotionDefinition } from "../fixtures/index.js";
 
 ## Testing
 
-Fixtures are indirectly tested through post-processor tests. If a fixture has complex logic (like `getReviewContent()`), add direct unit tests.
+Fixtures are indirectly tested through post-processor tests. If a fixture has complex logic (like `buildProductReviews()`), add direct unit tests.

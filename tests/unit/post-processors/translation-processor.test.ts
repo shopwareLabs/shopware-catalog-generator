@@ -1,0 +1,97 @@
+import { describe, expect, test } from "bun:test";
+
+import { TranslationProcessor } from "../../../src/post-processors/translation-processor.js";
+import { SYSTEM_LANGUAGE_ID } from "../../../src/shopware/languages.js";
+import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
+import { createTestContext } from "../../helpers/post-processor-context.js";
+import { createTranslationFile } from "../../helpers/translation-factory.js";
+
+const blueprint = createTestBlueprint({
+    products: [createTestProduct({ id: "p1", name: "Linen Sofa", description: "A sofa" })],
+});
+
+const germanFile = createTranslationFile({
+    products: { p1: { name: "Leinensofa", description: "Ein Sofa", sourceHash: "h" } },
+});
+
+const SALES_CHANNEL_LANGUAGES = [
+    {
+        languages: [
+            { id: SYSTEM_LANGUAGE_ID, locale: { code: "en-GB" } },
+            { id: "lang-de", locale: { code: "de-DE" } },
+        ],
+    },
+];
+
+function createContext(dryRun = false) {
+    const result = createTestContext({ blueprint, dryRun });
+    result.mockApi.mockSearchResponse("sales-channel", SALES_CHANNEL_LANGUAGES);
+    result.mockApi.mockSearchResponse("language", [
+        { id: SYSTEM_LANGUAGE_ID, locale: { code: "en-GB" } },
+    ]);
+    return result;
+}
+
+describe("TranslationProcessor", () => {
+    test("runs after the processors that create translated entities", () => {
+        expect(TranslationProcessor.dependsOn).toEqual([
+            "manufacturers",
+            "variants",
+            "cms-testing",
+        ]);
+    });
+
+    test("skips without cached translations", async () => {
+        const { context, mockApi } = createContext();
+        const result = await TranslationProcessor.process(context);
+        expect(result).toMatchObject({ processed: 0, skipped: 1, errors: [] });
+        expect(mockApi.syncEntitiesMock).not.toHaveBeenCalled();
+    });
+
+    test("writes product translations for the German language", async () => {
+        const { context, mockApi, mockCache } = createContext();
+        mockCache.translations.set("de-DE", germanFile);
+
+        const result = await TranslationProcessor.process(context);
+
+        expect(result.errors).toEqual([]);
+        expect(result.processed).toBe(1);
+        const [sync] = mockApi.getCallsByEndpoint("_action/sync");
+        expect(sync?.body).toMatchObject({
+            "translate-product-0": {
+                entity: "product",
+                payload: [{ id: "p1", translations: { "lang-de": { name: "Leinensofa" } } }],
+            },
+        });
+    });
+
+    test("skips when no SalesChannel language matches", async () => {
+        const { context, mockApi, mockCache } = createContext();
+        mockCache.translations.set("fr-FR", createTranslationFile({ locale: "fr-FR" }));
+
+        const result = await TranslationProcessor.process(context);
+
+        expect(result).toMatchObject({ processed: 0, skipped: 1 });
+        expect(mockApi.syncEntitiesMock).not.toHaveBeenCalled();
+    });
+
+    test("dry run counts records without writing", async () => {
+        const { context, mockApi, mockCache } = createContext(true);
+        mockCache.translations.set("de-DE", germanFile);
+
+        const result = await TranslationProcessor.process(context);
+
+        expect(result.processed).toBe(1);
+        expect(mockApi.syncEntitiesMock).not.toHaveBeenCalled();
+    });
+
+    test("reports a failed sync as an error", async () => {
+        const { context, mockApi, mockCache } = createContext();
+        mockCache.translations.set("de-DE", germanFile);
+        mockApi.mockSyncFailure(new Error("boom"));
+
+        const result = await TranslationProcessor.process(context);
+
+        expect(result.errors).toEqual(["Failed to write translations: boom"]);
+    });
+});

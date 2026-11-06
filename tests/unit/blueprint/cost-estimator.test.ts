@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import type { CostEstimateInput } from "../../../src/blueprint/cost-estimator.js";
-import type { ModelSelection } from "../../../src/types/index.js";
+import type { ModelSelection, TranslationSource } from "../../../src/types/index.js";
 
 import {
     estimateHydrationCost,
+    estimateTranslationCost,
+    estimateTranslationSource,
     formatCostEstimate,
+    formatTranslationEstimate,
     priceTokenUsage,
 } from "../../../src/blueprint/cost-estimator.js";
 import { createTestCategory, createTestProduct } from "../../helpers/blueprint-factory.js";
@@ -231,5 +234,69 @@ describe("formatCostEstimate", () => {
         );
 
         expect(formatCostEstimate(estimate).join("\n")).toContain("unknown (no price data)");
+    });
+});
+
+describe("estimateTranslationCost", () => {
+    const source: TranslationSource = {
+        categories: { A: { name: "A", description: "Category A" } },
+        products: Object.fromEntries(
+            Array.from({ length: 25 }, (_, i) => [
+                `p${i}`,
+                { name: `Product ${i}`, description: "x".repeat(400) },
+            ])
+        ),
+        propertyGroups: { Color: { name: "Color", options: ["Red"] } },
+        reviews: { p0: [{ title: "Nice", content: "Works well" }] },
+        cms: { Page: { "0.0.content": "<p>Hi</p>" } },
+        fixtures: { "manufacturer.description": "{name} makes things." },
+    };
+
+    test("counts calls per content type and repeats them per locale", () => {
+        const estimate = estimateTranslationCost(source, ["de-DE", "fr-FR"], OPENAI_SELECTION);
+
+        // formality + terms + categories + 3 product batches + reviews + 1 CMS page + fixtures
+        expect(estimate.locales.map((l) => l.calls)).toEqual([9, 9]);
+        expect(estimate.inputTokens).toBe(2 * (estimate.locales[0]?.inputTokens ?? 0));
+        expect(estimate.outputTokens).toBeGreaterThan(0);
+        expect(estimate.usd).toBeGreaterThan(0);
+    });
+
+    test("unpriced models report unknown cost", () => {
+        const estimate = estimateTranslationCost(source, ["de-DE"], {
+            ...OPENAI_SELECTION,
+            textModel: "some-future-model",
+        });
+        expect(estimate.usd).toBeNull();
+    });
+
+    test("formatTranslationEstimate prints one line per locale plus a total", () => {
+        const lines = formatTranslationEstimate(
+            estimateTranslationCost(source, ["de-DE"], OPENAI_SELECTION)
+        );
+        expect(lines[0]).toContain("Translation forecast");
+        expect(lines.some((l) => l.includes("de-DE"))).toBe(true);
+        expect(lines.at(-1)).toContain("Total");
+        expect(
+            formatTranslationEstimate(estimateTranslationCost(source, [], OPENAI_SELECTION))
+        ).toEqual([]);
+    });
+});
+
+describe("estimateTranslationSource", () => {
+    test("builds typical texts for an unhydrated blueprint", () => {
+        const products = createProducts(10, "cat-1");
+        const source = estimateTranslationSource(
+            {
+                categories: [createTestCategory({ children: [createTestCategory({ id: "c2" })] })],
+                products,
+            },
+            { cms: {}, fixtures: {}, reviews: {} }
+        );
+
+        expect(Object.keys(source.products)).toHaveLength(10);
+        expect(Object.keys(source.categories)).toHaveLength(2);
+        expect(source.products["cat-1-p0"]?.description.length).toBe(800);
+        expect(source.propertyGroups.terms?.options).toHaveLength(7);
     });
 });

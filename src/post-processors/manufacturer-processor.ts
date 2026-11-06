@@ -7,6 +7,7 @@
  * 4. Assigns manufacturers to products
  */
 
+import type { Manufacturer } from "../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -14,8 +15,21 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
+import { fillFixtureText, TRANSLATABLE_FIXTURE_TEXTS } from "../fixtures/index.js";
 import { searchAllByFilter } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
+
+/** Default fields of a manufacturer this generator creates */
+function newManufacturer(name: string): Manufacturer {
+    return {
+        id: "",
+        name,
+        description: fillFixtureText(TRANSLATABLE_FIXTURE_TEXTS["manufacturer.description"], {
+            name,
+        }),
+        link: `https://www.${toKebabCase(name)}.com`,
+    };
+}
 
 /**
  * Manufacturer Processor implementation
@@ -47,75 +61,54 @@ class ManufacturerProcessorImpl implements PostProcessor {
             };
         }
 
-        // Check if manufacturers already cached
-        const cachedManufacturers = cache.loadManufacturers(context.salesChannelName);
-        const cachedNames = new Set(cachedManufacturers?.map((m) => m.name) || []);
-
-        const newManufacturers = Array.from(manufacturerNames).filter(
-            (name) => !cachedNames.has(name)
+        // Shopware is the source of truth: cached IDs can be stale (other shop, cleanup)
+        const cachedByName = new Map(
+            (cache.loadManufacturers(context.salesChannelName) ?? []).map((m) => [m.name, m])
         );
+        const manufacturerIdMap = await this.getExistingManufacturers(context, manufacturerNames);
+        if (manufacturerIdMap.size > 0) {
+            logger.debug("Reusing existing manufacturers", {
+                data: { count: manufacturerIdMap.size },
+            });
+        }
+
+        const manufacturersToCreate: Manufacturer[] = Array.from(manufacturerNames)
+            .filter((name) => !manufacturerIdMap.has(name))
+            .map((name) => ({
+                ...(cachedByName.get(name) ?? newManufacturer(name)),
+                id: generateUUID(),
+            }));
 
         let processed = 0;
-        const skipped = manufacturerNames.size - newManufacturers.length;
+        const skipped = manufacturerIdMap.size;
         const errors: string[] = [];
 
         if (options.dryRun) {
-            logger.info(`    [DRY RUN] Would create ${newManufacturers.length} manufacturers`, {
-                cli: true,
-            });
-            for (const name of newManufacturers) {
+            logger.info(
+                `    [DRY RUN] Would create ${manufacturersToCreate.length} manufacturers`,
+                {
+                    cli: true,
+                }
+            );
+            for (const { name } of manufacturersToCreate) {
                 logger.info(`      - ${name}`, { cli: true });
             }
             return {
                 name: this.name,
-                processed: newManufacturers.length,
+                processed: manufacturersToCreate.length,
                 skipped,
                 errors: [],
                 durationMs: 0,
             };
         }
 
-        // Create manufacturers in Shopware
-        const manufacturers = cachedManufacturers || [];
-        const manufacturerIdMap = new Map<string, string>();
-
-        // First, check which manufacturers already exist in Shopware (reuse them)
-        const existingManufacturers = await this.getExistingManufacturers(
-            context,
-            manufacturerNames
-        );
-        for (const [name, id] of existingManufacturers) {
-            manufacturerIdMap.set(name, id);
+        for (const m of manufacturersToCreate) {
+            manufacturerIdMap.set(m.name, m.id);
         }
-        if (existingManufacturers.size > 0) {
-            logger.debug("Reusing existing manufacturers", {
-                data: { count: existingManufacturers.size },
-            });
-        }
-
-        // Create only NEW manufacturers (ones that don't exist in Shopware)
-        const manufacturersToCreate: Array<{
-            id: string;
-            name: string;
-            description: string;
-            link: string;
-        }> = [];
-
-        for (const name of newManufacturers) {
-            if (manufacturerIdMap.has(name)) {
-                // Already exists in Shopware - skip (reuse existing)
-                continue;
-            }
-
-            const id = generateUUID();
-            const description = `${name} is a trusted manufacturer of quality products.`;
-            const link = `https://www.${toKebabCase(name)}.com`;
-
-            manufacturersToCreate.push({ id, name, description, link });
-            manufacturerIdMap.set(name, id);
-
-            manufacturers.push({ id, name, description, link });
-        }
+        const manufacturers: Manufacturer[] = Array.from(manufacturerNames).map((name) => ({
+            ...(cachedByName.get(name) ?? newManufacturer(name)),
+            id: manufacturerIdMap.get(name) ?? generateUUID(),
+        }));
 
         // Create in Shopware
         if (manufacturersToCreate.length > 0) {

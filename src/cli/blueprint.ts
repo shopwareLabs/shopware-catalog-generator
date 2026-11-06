@@ -1,5 +1,5 @@
 /**
- * Blueprint CLI commands: create, estimate, hydrate, fix, inspire.
+ * Blueprint CLI commands: create, estimate, hydrate, translate, fix, inspire.
  *
  * Thin wrappers that delegate to src/services/blueprint-service.ts and print output.
  */
@@ -14,7 +14,9 @@ import {
     inspireBlueprint,
     resolveCmsStoreDescription,
 } from "../services/blueprint-service.js";
+import { estimateTranslation, translateBlueprint } from "../services/translation-service.js";
 import { logger } from "../utils/index.js";
+import { formalityFromArgs, languagesFromArgs } from "./languages.js";
 
 // Re-export for backwards compatibility with tests
 export { resolveCmsStoreDescription };
@@ -52,6 +54,30 @@ export async function blueprintEstimate(args: CliArgs): Promise<void> {
     });
 
     throwIfServiceError(lines, "ESTIMATE_FAILED");
+
+    const languages = languagesFromArgs(args);
+    const translationLines = languages
+        ? ["", ...(await estimateTranslation(salesChannelName, languages))]
+        : [];
+
+    for (const line of [...lines, ...translationLines]) {
+        console.log(line);
+    }
+}
+
+export async function blueprintTranslate(args: CliArgs): Promise<void> {
+    const salesChannelName = requireValidName(args);
+    const languages = languagesFromArgs(args) ?? { mode: "all" };
+
+    console.log(`Log file: ${logger.getLogFile()}`);
+
+    const lines = await translateBlueprint(salesChannelName, {
+        languages,
+        formality: formalityFromArgs(args),
+        force: args.force === true,
+    });
+
+    throwIfServiceError(lines, "TRANSLATE_FAILED");
 
     for (const line of lines) {
         console.log(line);

@@ -29,7 +29,7 @@ export class CLIError extends Error {
 
 export interface CliArgs {
     command: "blueprint" | "generate" | "process" | "image" | "help";
-    subcommand?: "create" | "estimate" | "hydrate" | "fix" | "inspire";
+    subcommand?: "create" | "estimate" | "hydrate" | "fix" | "inspire" | "translate";
     name?: string;
     description?: string;
     url?: string;
@@ -41,6 +41,11 @@ export interface CliArgs {
     noTemplate?: boolean;
     rehydrate?: boolean;
     type?: string;
+    /** --languages: "all", "none" or comma-separated locales */
+    languages?: string;
+    /** --formality: "formal" or "informal" */
+    formality?: string;
+    force?: boolean;
 }
 
 // =============================================================================
