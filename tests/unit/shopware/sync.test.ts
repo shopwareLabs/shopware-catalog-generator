@@ -18,7 +18,11 @@ import {
     syncPropertyGroups,
     syncPropertyIdsToBlueprint,
 } from "../../../src/shopware/sync.js";
+import { ShopwareCapabilities } from "../../../src/shopware/version.js";
 import { logger } from "../../../src/utils/index.js";
+import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
+
+const SHOPWARE_67 = ShopwareCapabilities.fromVersion("6.7.16.0");
 
 // Suppress console output during tests
 
@@ -592,7 +596,14 @@ describe("syncProducts", () => {
         const categoryIdMap = new Map([["Electronics", "sw-cat-123"]]);
         const propertyOptionMap = new Map([["color::red", { id: "opt-red", name: "Red" }]]);
 
-        await syncProducts(dataHydrator, blueprint, salesChannel, categoryIdMap, propertyOptionMap);
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            categoryIdMap,
+            propertyOptionMap,
+            SHOPWARE_67
+        );
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 
@@ -665,7 +676,14 @@ describe("syncProducts", () => {
             ["Electronics > Phones", "sw-phones"],
         ]);
 
-        await syncProducts(dataHydrator, blueprint, salesChannel, categoryIdMap, new Map());
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            categoryIdMap,
+            new Map(),
+            SHOPWARE_67
+        );
 
         // Verify the product was synced with correct arguments
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
@@ -727,7 +745,14 @@ describe("syncProducts", () => {
             propertyGroups: [],
         };
 
-        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            new Map(),
+            new Map(),
+            SHOPWARE_67
+        );
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
             expect.arrayContaining([
@@ -793,7 +818,14 @@ describe("syncProducts", () => {
             propertyGroups: [],
         };
 
-        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            new Map(),
+            new Map(),
+            SHOPWARE_67
+        );
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalledWith(
             expect.arrayContaining([
@@ -865,10 +897,66 @@ describe("syncProducts", () => {
             propertyGroups: [],
         };
 
-        await syncProducts(dataHydrator, blueprint, salesChannel, new Map(), new Map());
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            salesChannel,
+            new Map(),
+            new Map(),
+            SHOPWARE_67
+        );
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 
         logger.setMcpMode(false);
+    });
+});
+
+describe("syncProducts — product type", () => {
+    const categoryIdMap = new Map<string, string>();
+
+    function syncedTypes(dataHydrator: DataHydrator): Array<string | undefined> {
+        const mockFn = dataHydrator.hydrateEnvWithProductsDirect as ReturnType<typeof mock>;
+        const products = mockFn.mock.calls[0]?.[0] as Array<{ type?: string }>;
+        return products.map((p) => p.type);
+    }
+
+    test("sends the blueprint type and defaults missing types to physical", async () => {
+        const dataHydrator = createMockDataHydrator();
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "p-digital", type: "digital" }),
+                createTestProduct({ id: "p-legacy", type: undefined }),
+            ],
+        });
+
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            createMockSalesChannel(),
+            categoryIdMap,
+            new Map(),
+            SHOPWARE_67
+        );
+
+        expect(syncedTypes(dataHydrator)).toEqual(["digital", "physical"]);
+    });
+
+    test("leaves the type out for shops older than 6.7.7", async () => {
+        const dataHydrator = createMockDataHydrator();
+        const blueprint = createTestBlueprint({
+            products: [createTestProduct({ type: "physical" })],
+        });
+
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            createMockSalesChannel(),
+            categoryIdMap,
+            new Map(),
+            ShopwareCapabilities.fromVersion("6.7.6.2")
+        );
+
+        expect(syncedTypes(dataHydrator)).toEqual([undefined]);
     });
 });

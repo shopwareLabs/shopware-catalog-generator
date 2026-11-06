@@ -5,8 +5,9 @@
  * These orchestrate the DataHydrator to sync data to Shopware.
  */
 
-import type { HydratedBlueprint, SalesChannelFull } from "../types/index.js";
+import type { HydratedBlueprint, ProductType, SalesChannelFull } from "../types/index.js";
 import type { DataHydrator } from "./index.js";
+import type { ShopwareCapabilities } from "./version.js";
 
 import {
     buildCategoryPath,
@@ -404,14 +405,18 @@ export function buildPropertyMaps(blueprint: HydratedBlueprint): PropertyMaps {
  * @param salesChannel - SalesChannel to sync to
  * @param categoryIdMap - Map of category path -> Shopware category ID
  * @param propertyOptionMap - Map of "group::option" -> { id, name }
+ * @param shopware - Capabilities of the connected shop (decides which optional fields are sent)
  */
 export async function syncProducts(
     dataHydrator: DataHydrator,
     blueprint: HydratedBlueprint,
     salesChannel: SalesChannelFull,
     categoryIdMap: Map<string, string>,
-    propertyOptionMap: Map<string, { id: string; name: string }>
+    propertyOptionMap: Map<string, { id: string; name: string }>,
+    shopware: ShopwareCapabilities
 ): Promise<void> {
+    const sendProductType = shopware.supports("productType");
+
     type ProductToCreate = {
         id: string;
         name: string;
@@ -437,6 +442,7 @@ export async function syncProducts(
         purchaseSteps?: number;
         metaTitle?: string;
         metaDescription?: string;
+        type?: ProductType;
     };
 
     const productsToCreate: ProductToCreate[] = blueprint.products.map((p) => {
@@ -482,6 +488,7 @@ export async function syncProducts(
             ...(p.metaTitle && { metaTitle: p.metaTitle }),
             ...(p.metaDescription && { metaDescription: p.metaDescription }),
             ...(p.deliveryTimeIndex !== undefined && { deliveryTimeIndex: p.deliveryTimeIndex }),
+            ...(sendProductType && { type: p.type ?? "physical" }),
         };
     });
 

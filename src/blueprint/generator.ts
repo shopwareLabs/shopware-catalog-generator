@@ -264,6 +264,7 @@ export class BlueprintGenerator {
             categoryIds: [topCategory.id],
             metadata,
             deliveryTimeIndex,
+            type: "physical",
         };
     }
 

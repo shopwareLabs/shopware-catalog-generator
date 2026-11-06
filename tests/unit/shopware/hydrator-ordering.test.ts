@@ -307,6 +307,24 @@ describe("ShopwareHydrator hydrateEnvWithProductsDirect — tiered pricing", () 
     });
 });
 
+describe("ShopwareHydrator hydrateEnvWithProductsDirect — product type", () => {
+    test("sends the product type only when given", async () => {
+        const syncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }> = [];
+        const client = buildProductMockClient({ hasAlwaysValidRule: false, capturedSyncs: syncs });
+        const hydrator = new ShopwareHydrator(client);
+
+        await hydrator.hydrateEnvWithProductsDirect(
+            [{ ...makeProduct("typed"), type: "physical" }, makeProduct("untyped")],
+            "sc-id",
+            "nav-id"
+        );
+
+        const payload = syncs.find((s) => s.entity === "product")?.payload ?? [];
+        expect(payload.map((p) => p.type)).toEqual(["physical", undefined]);
+        expect("type" in (payload[1] ?? {})).toBe(false);
+    });
+});
+
 describe("ShopwareHydrator hydrateEnvWithProductsDirect — idempotency", () => {
     test("sets releaseDate to current upload time for isNew products (always fresh)", async () => {
         const syncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }> = [];

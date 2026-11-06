@@ -50,6 +50,7 @@ types/
 
 - `BlueprintProduct` includes:
     - `deliveryTimeIndex?: number` — Round-robin index set in Phase 1; resolved to a real delivery-time ID in Phase 3 (idempotent)
+    - `type?: ProductType` — `"physical" | "digital"`, set to `"physical"` in Phase 1. Missing in older blueprints and templates, which means physical. Only uploaded when the shop `supports("productType")` (6.7.7+)
     - Note: `releaseDate` is **not** stored in the blueprint. For `isNew` products, Phase 3 sets `releaseDate = new Date().toISOString()` at upload time so the storefront "New" badge never ages out
 
 ### Provider Types (`providers.ts`)

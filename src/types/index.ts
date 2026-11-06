@@ -24,6 +24,7 @@ export type {
     Manufacturer,
     ProductMetadata,
     ProductProperty,
+    ProductType,
     ReviewCount,
     VariantConfig,
 } from "./blueprint.js";

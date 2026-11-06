@@ -213,7 +213,8 @@ export async function generate(
         blueprint,
         salesChannel,
         categoryIdMap,
-        propertyMaps.propertyOptionMap
+        propertyMaps.propertyOptionMap,
+        shopware
     );
     results.push(`  Synced ${blueprint.products.length} products`);
 
