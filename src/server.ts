@@ -17,6 +17,7 @@ import { createProcessorDeps } from "./services/shopware-context.js";
 import {
     buildPropertyMaps,
     DataHydrator,
+    detectShopwareCapabilities,
     syncCategories,
     syncProducts,
     syncPropertyGroups,
@@ -277,6 +278,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
                 textProvider: deps.textProvider,
                 imageProvider: deps.imageProvider,
                 api: deps.apiHelpers,
+                shopware: await detectShopwareCapabilities(deps.apiHelpers),
                 options: DEFAULT_PROCESSOR_OPTIONS,
             },
             processorNames

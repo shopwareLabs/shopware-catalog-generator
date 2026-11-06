@@ -15,7 +15,12 @@ import path from "node:path";
 
 import { DataCache } from "./cache.js";
 import { cleanupProcessors, registry } from "./post-processors/index.js";
-import { createApiHelpers, createShopwareAdminClient, DataHydrator } from "./shopware/index.js";
+import {
+    createApiHelpers,
+    createShopwareAdminClient,
+    DataHydrator,
+    detectShopwareCapabilities,
+} from "./shopware/index.js";
 
 interface CleanupArgs {
     salesChannel?: string;
@@ -298,6 +303,7 @@ async function main(): Promise<void> {
             blueprint,
             cache,
             api: apiHelpers,
+            shopware: await detectShopwareCapabilities(apiHelpers),
             options: {
                 batchSize: 5,
                 dryRun,

@@ -43,6 +43,7 @@ interface PostProcessorContext {
     textProvider?: TextProvider;
     imageProvider?: ImageProvider;
     api: ShopwareApiHelpers; // Required — always use this for API calls
+    shopware: ShopwareCapabilities; // Detected version + flags, use shopware.supports(feature)
     options: PostProcessorOptions;
 }
 ```
@@ -121,6 +122,14 @@ async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult
 ### Critical: SalesChannel Scoping
 
 All cleanup queries MUST filter by SalesChannel to avoid deleting entities from other SalesChannels.
+
+## Shopware Version Gating
+
+Use `context.shopware.supports("<feature>")` to leave out fields or entities an older shop
+rejects. Features and their first supporting version live in `src/fixtures/shopware-features.ts`.
+Never drop data from the blueprint; only skip it in the payload. In tests, pass
+`shopware: ShopwareCapabilities.fromVersion("6.6.10.0")` to `createTestContext()`
+(default: `TEST_SHOPWARE_VERSION`, 6.7.16.0).
 
 ## Conditional Rendering with `activeProcessors`
 

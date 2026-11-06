@@ -12,6 +12,7 @@ import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-proc
 import {
     buildPropertyMaps,
     DataHydrator,
+    detectShopwareCapabilities,
     syncCategories,
     syncProducts,
     syncPropertyGroups,
@@ -170,6 +171,15 @@ export async function generate(
         process.env.SW_CLIENT_SECRET
     );
 
+    const deps = createProcessorDeps({
+        baseURL: swEnvUrl,
+        getAccessToken: () => dataHydrator.getAccessToken(),
+        clientId: process.env.SW_CLIENT_ID,
+        clientSecret: process.env.SW_CLIENT_SECRET,
+    });
+    const shopware = await detectShopwareCapabilities(deps.apiHelpers);
+    results.push(`  Shopware: ${shopware.describe()}`);
+
     let salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
     const isNewSalesChannel = !salesChannel;
 
@@ -209,13 +219,6 @@ export async function generate(
 
     results.push(``, `=== Sync Complete ===`, ``, `Running post-processors...`);
 
-    const deps = createProcessorDeps({
-        baseURL: swEnvUrl,
-        getAccessToken: () => dataHydrator.getAccessToken(),
-        clientId: process.env.SW_CLIENT_ID,
-        clientSecret: process.env.SW_CLIENT_SECRET,
-    });
-
     const processorResults = await runProcessors(
         {
             salesChannelId: salesChannel.id,
@@ -225,6 +228,7 @@ export async function generate(
             textProvider: deps.textProvider,
             imageProvider: deps.imageProvider,
             api: deps.apiHelpers,
+            shopware,
             options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
         },
         registry.getNames()
@@ -322,6 +326,7 @@ export async function runProcessorsForSalesChannel(
             textProvider: deps.textProvider,
             imageProvider: deps.imageProvider,
             api: deps.apiHelpers,
+            shopware: await detectShopwareCapabilities(deps.apiHelpers),
             options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun },
         },
         selectedProcessors

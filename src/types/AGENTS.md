@@ -16,7 +16,8 @@ types/
 ├── providers.ts        # AI provider interfaces (TextProvider, ImageProvider)
 ├── cache.ts            # Cache configuration types
 ├── export.ts           # Export types (ExportValidation, ExportResult)
-└── property-cache.ts   # Property cache types (CachedPropertyGroup)
+├── property-cache.ts   # Property cache types (CachedPropertyGroup)
+└── shopware-version.ts # ShopwareVersion, ShopwareFeatureRequirement (version gating)
 ```
 
 ## Key Types

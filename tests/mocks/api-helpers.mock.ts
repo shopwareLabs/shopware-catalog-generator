@@ -47,6 +47,7 @@ export class MockApiHelpers implements ShopwareApi {
     private findByNameResponses: Map<string, string | null> = new Map();
     private postResponses: Map<string, unknown> = new Map();
     private postFailures: Map<string, Error> = new Map();
+    private getFailures: Map<string, Error> = new Map();
     private getResponses: Map<string, unknown> = new Map();
     private defaultSearchResponse: unknown[] = [];
     private defaultPostResponse: unknown = {};
@@ -106,6 +107,14 @@ export class MockApiHelpers implements ShopwareApi {
      */
     mockGetResponse<T>(endpoint: string, data: T): this {
         this.getResponses.set(endpoint, data);
+        return this;
+    }
+
+    /**
+     * Make GET requests to endpoints containing the pattern throw
+     */
+    mockGetFailure(endpoint: string, error: Error): this {
+        this.getFailures.set(endpoint, error);
         return this;
     }
 
@@ -192,6 +201,7 @@ export class MockApiHelpers implements ShopwareApi {
         this.findByNameResponses.clear();
         this.postResponses.clear();
         this.postFailures.clear();
+        this.getFailures.clear();
         this.getResponses.clear();
         this.syncShouldSucceed = true;
         this.syncError = null;
@@ -445,6 +455,12 @@ export class MockApiHelpers implements ShopwareApi {
     async get<T = unknown>(endpoint: string): Promise<T> {
         this.calls.push({ method: "get", endpoint });
         this.getMock();
+
+        for (const [pattern, error] of this.getFailures) {
+            if (endpoint.includes(pattern)) {
+                throw error;
+            }
+        }
 
         const response = this.getResponses.get(endpoint);
         if (response !== undefined) {

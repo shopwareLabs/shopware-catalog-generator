@@ -56,6 +56,12 @@ export {
 // Export sync utilities
 export type { PropertyMaps } from "./sync.js";
 export {
+    compareShopwareVersions,
+    detectShopwareCapabilities,
+    parseShopwareVersion,
+    ShopwareCapabilities,
+} from "./version.js";
+export {
     buildPropertyMaps,
     syncCategories,
     syncProducts,
