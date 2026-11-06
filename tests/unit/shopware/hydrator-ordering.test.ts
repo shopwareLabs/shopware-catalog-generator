@@ -198,7 +198,10 @@ describe("ShopwareHydrator createCategoryTree", () => {
 function buildProductMockClient(opts: {
     hasAlwaysValidRule: boolean;
     capturedSyncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }>;
+    /** Zero-based index of the `_action/sync` call that should be rejected */
+    rejectSyncCall?: number;
 }): AdminApiClient {
+    let syncCalls = 0;
     return createMockAdminClientWithInvoke(
         async (operation: string, params: { body?: unknown }) => {
             if (operation.includes("search/tax")) {
@@ -225,6 +228,9 @@ function buildProductMockClient(opts: {
                 return { data: { data: ruleData, total: ruleData.length } };
             }
             if (operation.includes("_action/sync")) {
+                if (syncCalls++ === opts.rejectSyncCall) {
+                    throw new Error("Shopware rejected the batch");
+                }
                 const ops = params.body as Array<{
                     entity: string;
                     action: string;
@@ -383,5 +389,34 @@ describe("ShopwareHydrator hydrateEnvWithProductsDirect — idempotency", () => 
         expect(payload[0]!.deliveryTimeId).toBe("dt-1");
         expect(payload[1]!.deliveryTimeId).toBe("dt-2");
         expect(payload[2]!.deliveryTimeId).toBe("dt-1"); // wraps around
+    });
+});
+
+describe("ShopwareHydrator hydrateEnvWithProductsDirect — rejected batches", () => {
+    const products = Array.from({ length: 60 }, (_, i) => makeProduct(`prod-${i}`));
+
+    test("returns the full count when every batch is accepted", async () => {
+        const client = buildProductMockClient({ hasAlwaysValidRule: false, capturedSyncs: [] });
+        const hydrator = new ShopwareHydrator(client);
+
+        const synced = await hydrator.hydrateEnvWithProductsDirect(products, "sc-id", "nav-id");
+
+        expect(synced).toBe(60);
+    });
+
+    test("leaves products of a rejected batch out of the count and keeps uploading", async () => {
+        const syncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }> = [];
+        const client = buildProductMockClient({
+            hasAlwaysValidRule: false,
+            capturedSyncs: syncs,
+            rejectSyncCall: 0,
+        });
+        const hydrator = new ShopwareHydrator(client);
+
+        const synced = await hydrator.hydrateEnvWithProductsDirect(products, "sc-id", "nav-id");
+
+        // First batch (50) rejected, second batch (10) still sent and accepted
+        expect(synced).toBe(10);
+        expect(syncs.filter((s) => s.entity === "product")).toHaveLength(1);
     });
 });

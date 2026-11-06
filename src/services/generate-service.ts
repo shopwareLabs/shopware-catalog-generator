@@ -6,6 +6,7 @@
  */
 
 import type { PostProcessorResult } from "../post-processors/index.js";
+import type { ProductSyncResult } from "../types/index.js";
 
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
@@ -42,6 +43,18 @@ export function formatProcessorErrorLine(results: PostProcessorResult[]): string
     const totalErrors = failed.reduce((sum, r) => sum + r.errors.length, 0);
     const summary = failed.map((r) => `${r.name} (${r.errors.length})`).join(", ");
     return `Error: ${totalErrors} post-processor error(s): ${summary}`;
+}
+
+/**
+ * Build the "Error:" line for products Shopware rejected during upload.
+ * Returns undefined when every product was accepted.
+ */
+export function formatProductSyncErrorLine(result: ProductSyncResult): string | undefined {
+    if (result.failed === 0) {
+        return undefined;
+    }
+    const total = result.synced + result.failed;
+    return `Error: ${result.failed} of ${total} products failed to upload (see log for the Shopware response)`;
 }
 
 export async function generate(
@@ -209,7 +222,9 @@ export async function generate(
     syncPropertyIdsToBlueprint(blueprint, propertyMaps);
     cache.saveHydratedBlueprint(salesChannelName, blueprint);
 
-    await syncProducts(
+    // A rejected batch does not stop the run: post-processors still finish the products that
+    // were uploaded, and the error line at the end makes the CLI exit non-zero.
+    const productSync = await syncProducts(
         dataHydrator,
         blueprint,
         salesChannel,
@@ -217,7 +232,7 @@ export async function generate(
         propertyMaps.propertyOptionMap,
         shopware
     );
-    results.push(`  Synced ${blueprint.products.length} products`);
+    results.push(`  Synced ${productSync.synced} of ${blueprint.products.length} products`);
 
     results.push(``, `=== Sync Complete ===`, ``, `Running post-processors...`);
 
@@ -246,10 +261,11 @@ export async function generate(
         `Storefront: ${blueprint.salesChannel.baseUrl}`,
         `Post-processors: ${totalProcessed} processed, ${totalErrors} errors`
     );
-    const errorLine = formatProcessorErrorLine(processorResults);
-    if (errorLine) {
-        results.push(errorLine);
-    }
+    const errorLines = [
+        formatProductSyncErrorLine(productSync),
+        formatProcessorErrorLine(processorResults),
+    ].filter((line): line is string => line !== undefined);
+    results.push(...errorLines);
     return results;
 }
 

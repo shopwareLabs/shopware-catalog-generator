@@ -36,7 +36,7 @@ function createMockDataHydrator(): DataHydrator {
         getExistingCategoryMap: mock(async () => new Map()),
         getExistingPropertyGroups: mock(async () => []),
         hydrateEnvWithPropertyGroups: mock(async () => {}),
-        hydrateEnvWithProductsDirect: mock(async () => {}),
+        hydrateEnvWithProductsDirect: mock(async (products: unknown[]) => products.length),
         ensureProductCustomFieldSet: mock(async () => "set-1"),
     } as unknown as DataHydrator;
 }
@@ -1053,5 +1053,50 @@ describe("syncProducts — version-gated product fields", () => {
 
         logger.setMcpMode(false);
         expect(product.customFields).toBeUndefined();
+    });
+});
+
+describe("syncProducts — upload result", () => {
+    test("reports every product as synced when Shopware accepts all batches", async () => {
+        const dataHydrator = createMockDataHydrator();
+        const blueprint = createTestBlueprint({
+            products: [createTestProduct({ id: "p-1" }), createTestProduct({ id: "p-2" })],
+        });
+
+        const result = await syncProducts(
+            dataHydrator,
+            blueprint,
+            createMockSalesChannel(),
+            new Map(),
+            new Map(),
+            SHOPWARE_67
+        );
+
+        expect(result).toEqual({ synced: 2, failed: 0 });
+    });
+
+    test("reports products from rejected batches as failed", async () => {
+        const dataHydrator = createMockDataHydrator();
+        (dataHydrator.hydrateEnvWithProductsDirect as ReturnType<typeof mock>).mockImplementation(
+            async () => 1
+        );
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "p-1" }),
+                createTestProduct({ id: "p-2" }),
+                createTestProduct({ id: "p-3" }),
+            ],
+        });
+
+        const result = await syncProducts(
+            dataHydrator,
+            blueprint,
+            createMockSalesChannel(),
+            new Map(),
+            new Map(),
+            SHOPWARE_67
+        );
+
+        expect(result).toEqual({ synced: 1, failed: 2 });
     });
 });

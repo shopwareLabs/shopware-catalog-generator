@@ -318,3 +318,11 @@ export interface CategoryNode {
     /** Image data (populated after generation) */
     image?: ProductImage;
 }
+
+/** Outcome of uploading blueprint products to Shopware */
+export interface ProductSyncResult {
+    /** Products in batches that Shopware accepted */
+    synced: number;
+    /** Products in batches that Shopware rejected */
+    failed: number;
+}
