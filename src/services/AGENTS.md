@@ -123,6 +123,10 @@ The `generate` function:
 7. Syncs categories, property groups, and products to Shopware
 8. Runs all registered post-processors
 
+Both `generate` and `runProcessorsForSalesChannel` append an `Error:` line via `formatProcessorErrorLine()`
+when any post-processor returns errors (`theme (2), images (1)`), even though the processor did not throw.
+The CLI wrappers print the summary first and then throw a `CLIError`, so the exit code reflects the failure.
+
 **Resilient hydration:** If a previous hydration attempt failed mid-way (e.g., API credits exhausted), leaving a 0-product `hydrated-blueprint.json` on disk, `generate` detects this via `isIncompleteHydration()` and automatically retries instead of failing with a validation error. If validation still fails after retry, actionable recovery instructions are included in the error output.
 
 ## image-fix-service.ts

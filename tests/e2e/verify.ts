@@ -12,11 +12,19 @@
  * - CMS pages and Testing category
  */
 
+import { writeFileSync } from "node:fs";
+
 import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
 import type { SearchResult } from "../../src/shopware/api-types.js";
+import type { StorefrontDomainCheck } from "../../src/shopware/index.js";
 
 import { createCacheFromEnv } from "../../src/cache.js";
-import { DataHydrator } from "../../src/shopware/index.js";
+import {
+    collectDomainUrls,
+    DataHydrator,
+    describeStorefrontFailure,
+    verifyStorefrontDomains,
+} from "../../src/shopware/index.js";
 import { countCategories, isPlaceholder } from "../../src/utils/index.js";
 
 /**
@@ -66,6 +74,8 @@ interface VerificationResult {
         childThemeExists: boolean;
         hasCustomColors: boolean;
     };
+    shopwareVersion?: string;
+    storefront: { domains: StorefrontDomainCheck[] };
     passed: boolean;
     errors: string[];
 }
@@ -107,6 +117,7 @@ async function verifyGeneration(
             childThemeExists: false,
             hasCustomColors: false,
         },
+        storefront: { domains: [] },
         passed: false,
         errors: [],
     };
@@ -131,6 +142,9 @@ async function verifyGeneration(
         );
         return result;
     }
+
+    result.shopwareVersion = await fetchShopwareVersion(hydrator.getAdminClient());
+    console.log(`Shopware version: ${result.shopwareVersion ?? "unknown"}`);
 
     // Verify SalesChannel
     console.log(`Verifying SalesChannel "${salesChannelName}"...`);
@@ -712,20 +726,74 @@ async function verifyGeneration(
         );
     }
 
+    // Verify storefront domains answer (EN + DE)
+    console.log(`Verifying storefront domains...`);
+    await verifySalesChannelStorefront(client, salesChannel.id, result);
+
     // Overall pass/fail
     result.passed = result.errors.length === 0;
 
     return result;
 }
 
+async function fetchShopwareVersion(client: AdminApiClient): Promise<string | undefined> {
+    try {
+        const { data } = await client.invoke(
+            "infoShopwareVersion get /_info/version" as never,
+            {} as never
+        );
+        const version = (data as { version?: unknown }).version;
+        return typeof version === "string" ? version : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** Fetch the SalesChannel domains and check that every storefront URL answers with 200 */
+async function verifySalesChannelStorefront(
+    client: AdminApiClient,
+    salesChannelId: string,
+    result: VerificationResult
+): Promise<void> {
+    try {
+        const domains = await search<{ url?: string }>(
+            client,
+            "searchSalesChannelDomain post /search/sales-channel-domain",
+            {
+                limit: 10,
+                filter: [{ type: "equals", field: "salesChannelId", value: salesChannelId }],
+            }
+        );
+        const verification = await verifyStorefrontDomains(collectDomainUrls(domains.data));
+        result.storefront.domains.push(...verification.checks);
+        result.errors.push(...verification.errors);
+        for (const check of verification.checks) {
+            console.log(formatStorefrontCheck(check));
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(`  ✗ Storefront domain check failed: ${message}`);
+        result.errors.push(`Storefront domain check failed: ${message}`);
+    }
+}
+
+function formatStorefrontCheck(check: StorefrontDomainCheck): string {
+    const reason = describeStorefrontFailure(check);
+    return reason ? `  ✗ ${check.url} → ${reason}` : `  ✓ ${check.url} → 200`;
+}
+
 // CLI entry point
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
     let salesChannelName: string | undefined;
+    let jsonFile: string | undefined;
 
     for (const arg of args) {
         if (arg.startsWith("--name=")) {
             salesChannelName = arg.slice("--name=".length);
+        }
+        if (arg.startsWith("--json=")) {
+            jsonFile = arg.slice("--json=".length);
         }
     }
 
@@ -759,6 +827,11 @@ async function main(): Promise<void> {
 
     const result = await verifyGeneration(salesChannelName, expected);
 
+    // Machine-readable result for the lane matrix summary
+    if (jsonFile) {
+        writeFileSync(jsonFile, JSON.stringify(result, null, 2));
+    }
+
     console.log("");
 
     if (result.passed) {
@@ -789,6 +862,9 @@ async function main(): Promise<void> {
         );
         console.log(
             `  Theme: ${result.theme.childThemeExists ? "✓" : "✗"} child theme, ${result.theme.hasCustomColors ? "✓" : "⊘"} custom colors`
+        );
+        console.log(
+            `  Storefront: ${result.storefront.domains.map((d) => `${d.url} ${d.status}`).join(", ")}`
         );
         process.exit(0);
     } else {

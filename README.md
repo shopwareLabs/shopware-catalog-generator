@@ -342,6 +342,7 @@ bun test --coverage   # With coverage report
 ./test-e2e.sh --reuse=music --skip-hydrate                            # Skip AI, just upload
 ./test-e2e.sh --cleanup=music                                         # Cleanup only
 ./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate                # Local sw-dev lane, temporary credentials
+./test-e2e-lanes.sh --lanes=65,66,67,68,trunk --reuse=music           # Same store on several sw-dev lanes + summary
 bun run test:verify --name=music                                      # Verify Shopware data
 ```
 

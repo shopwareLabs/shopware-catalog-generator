@@ -5,6 +5,8 @@
  * Never calls console.log directly.
  */
 
+import type { PostProcessorResult } from "../post-processors/index.js";
+
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
 import {
@@ -24,6 +26,21 @@ export interface GenerateOptions {
     products?: number;
     dryRun?: boolean;
     noTemplate?: boolean;
+}
+
+/**
+ * Build an "Error:" line when any post-processor reported errors without throwing,
+ * so CLI wrappers exit non-zero instead of recording a false pass.
+ * Returns undefined when every processor finished cleanly.
+ */
+export function formatProcessorErrorLine(results: PostProcessorResult[]): string | undefined {
+    const failed = results.filter((r) => r.errors.length > 0);
+    if (failed.length === 0) {
+        return undefined;
+    }
+    const totalErrors = failed.reduce((sum, r) => sum + r.errors.length, 0);
+    const summary = failed.map((r) => `${r.name} (${r.errors.length})`).join(", ");
+    return `Error: ${totalErrors} post-processor error(s): ${summary}`;
 }
 
 export async function generate(
@@ -223,6 +240,10 @@ export async function generate(
         `Storefront: ${blueprint.salesChannel.baseUrl}`,
         `Post-processors: ${totalProcessed} processed, ${totalErrors} errors`
     );
+    const errorLine = formatProcessorErrorLine(processorResults);
+    if (errorLine) {
+        results.push(errorLine);
+    }
     return results;
 }
 
@@ -314,5 +335,9 @@ export async function runProcessorsForSalesChannel(
         `Processed: ${totalProcessed}`,
         `Errors: ${totalErrors}`
     );
+    const errorLine = formatProcessorErrorLine(processorResults);
+    if (errorLine) {
+        results.push(errorLine);
+    }
     return results;
 }
