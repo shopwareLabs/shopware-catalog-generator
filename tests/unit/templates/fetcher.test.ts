@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -312,6 +313,42 @@ describe("TemplateFetcher", () => {
 
             const updated = (localFetcher as unknown as { updateRepo: () => boolean }).updateRepo();
             expect(updated).toBe(false);
+        });
+
+        test("updateRepo resets to the remote after a history rewrite (force push)", () => {
+            const git = (cwd: string, command: string): string =>
+                execSync(`git -c user.name=test -c user.email=test@example.com ${command}`, {
+                    cwd,
+                    stdio: "pipe",
+                })
+                    .toString()
+                    .trim();
+            const origin = path.resolve(TEST_BASE_DIR, "origin.git");
+            const work = path.resolve(TEST_BASE_DIR, "work");
+            const clone = path.resolve(TEST_BASE_DIR, "clone");
+            fs.mkdirSync(work, { recursive: true });
+            git(TEST_BASE_DIR, `init -q --bare -b main "${origin}"`);
+            git(work, "init -q -b main");
+            fs.writeFileSync(path.join(work, "a.txt"), "old");
+            git(work, "add -A");
+            git(work, 'commit -q -m "old"');
+            git(work, `push -q "${origin}" main`);
+            git(TEST_BASE_DIR, `clone -q "file://${origin}" "${clone}"`);
+
+            // Rewrite history: orphan commit, force push
+            git(work, "checkout -q --orphan fresh");
+            fs.writeFileSync(path.join(work, "a.txt"), "new");
+            git(work, "add -A");
+            git(work, 'commit -q -m "fresh"');
+            git(work, `push -q -f "${origin}" fresh:main`);
+            const newHead = git(work, "rev-parse HEAD");
+
+            const localFetcher = new TemplateFetcher({ cacheDir: clone, autoUpdate: false });
+            const updated = (localFetcher as unknown as { updateRepo: () => boolean }).updateRepo();
+
+            expect(updated).toBe(true);
+            expect(git(clone, "rev-parse HEAD")).toBe(newHead);
+            expect(fs.readFileSync(path.join(clone, "a.txt"), "utf-8")).toBe("new");
         });
 
         test("fetchTemplate fails gracefully when sparse-checkout cannot run", () => {

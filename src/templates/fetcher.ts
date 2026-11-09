@@ -161,9 +161,35 @@ export class TemplateFetcher {
             logger.info(`Updating template repository...`, { cli: true });
             execSync("git pull --ff-only", {
                 cwd: this.cacheDir,
-                stdio: "inherit",
+                stdio: "pipe",
                 timeout: 300000, // 5 minutes for updates
             });
+            return true;
+        } catch {
+            return this.resetToRemote();
+        }
+    }
+
+    /**
+     * Replace the local checkout with the remote state.
+     *
+     * The template repository history is reset (single orphan commit + force push)
+     * whenever all templates are regenerated, so a fast-forward pull fails afterwards.
+     * The clone is only a cache, so discarding local history is safe.
+     */
+    private resetToRemote(): boolean {
+        try {
+            logger.info(`Template repository history was rewritten, resetting to remote...`, {
+                cli: true,
+            });
+            const run = (command: string): void => {
+                execSync(command, { cwd: this.cacheDir, stdio: "pipe", timeout: 300000 });
+            };
+            run("git fetch --depth 1 origin HEAD");
+            run("git reset --hard FETCH_HEAD");
+            // Drop objects of the old history so the local clone does not keep growing
+            run("git reflog expire --expire=now --all");
+            run("git gc --prune=now --quiet");
             return true;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
