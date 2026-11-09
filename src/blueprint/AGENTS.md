@@ -17,7 +17,7 @@ blueprint/
 ├── hydrator.ts           # BlueprintHydrator - Phase 2 orchestrator
 ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
-├── cost-estimator.ts     # Hydration cost forecast (no AI): tokens, images, USD
+├── cost-estimator.ts     # Hydration + translation cost forecast (no AI): tokens, images, USD
 ├── index.ts              # Re-exports
 └── hydrators/            # Specialized hydration modules
     ├── category.ts       # Category names/descriptions via AI
@@ -25,6 +25,7 @@ blueprint/
     ├── cms.ts            # CMS blueprint generation and AI text hydration
     ├── image.ts          # Product/category/CMS/theme image pre-generation + trimAndResize
     ├── theme.ts          # AI brand color generation (primary + secondary)
+    ├── translation.ts    # translateCatalog: native-sounding translation per locale, reuses unchanged entries by source hash
     └── index.ts          # Re-exports
 ```
 

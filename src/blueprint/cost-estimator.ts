@@ -16,15 +16,19 @@ import type {
     CostEstimate,
     HydrationScope,
     ImageCostItem,
+    LocaleTranslationCost,
     ModelSelection,
     PendingImageCounts,
     TextCostItem,
     TextModelPrice,
     TokenUsage,
+    TranslationCostEstimate,
+    TranslationSource,
 } from "../types/index.js";
 
 import { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "../fixtures/index.js";
 import { countCategories } from "../utils/index.js";
+import { collectTerms, TRANSLATION_BATCH_SIZES } from "./hydrators/translation.js";
 
 /** Products per AI batch (mirrors ProductHydrator MAX_BATCH_SIZE) */
 const PRODUCT_BATCH_SIZE = 10;
@@ -126,6 +130,162 @@ export function formatCostEstimate(estimate: CostEstimate): string[] {
     lines.push(`Estimated total: ${formatUsd(estimate.totalUsd)}`);
     lines.push(...estimate.notes.map((n) => `  Note: ${n}`));
     return lines;
+}
+
+// =============================================================================
+// Translation
+// =============================================================================
+
+/**
+ * Translation call overhead: system prompt, instructions and the glossary slice.
+ * Payload tokens are counted from the English source (about 4 characters per token).
+ * Output is the payload again plus ~15% (most languages run longer than English).
+ */
+const TRANSLATION_TOKENS = {
+    callOverhead: 900,
+    charsPerToken: 4,
+    outputFactor: 1.15,
+    formalityCall: { input: 250, output: 10 },
+} as const;
+
+function tokensOf(value: unknown): number {
+    return Math.ceil(JSON.stringify(value).length / TRANSLATION_TOKENS.charsPerToken);
+}
+
+/** Calls and payload tokens of one locale (the same for every locale) */
+function translationWorkload(source: TranslationSource): { calls: number; payloadTokens: number } {
+    const batches = (count: number, size: number) => Math.ceil(count / size);
+    const reviewCount = sum(Object.values(source.reviews).map((r) => r.length));
+    const terms = collectTerms(source);
+
+    const calls =
+        1 + // formality decision
+        batches(terms.length, TRANSLATION_BATCH_SIZES.terms) +
+        batches(Object.keys(source.categories).length, TRANSLATION_BATCH_SIZES.categories) +
+        batches(Object.keys(source.products).length, TRANSLATION_BATCH_SIZES.products) +
+        batches(reviewCount, TRANSLATION_BATCH_SIZES.reviews) +
+        Object.keys(source.cms).length +
+        batches(Object.keys(source.fixtures).length, TRANSLATION_BATCH_SIZES.fixtures);
+
+    const categoryDescriptions = Object.values(source.categories).map((c) => c.description);
+    const payloadTokens =
+        tokensOf(terms) +
+        tokensOf(categoryDescriptions) +
+        tokensOf(source.products) +
+        tokensOf(source.reviews) +
+        tokensOf(source.cms) +
+        tokensOf(source.fixtures);
+
+    return { calls, payloadTokens };
+}
+
+/**
+ * Typical lengths of hydrated texts (characters), measured on cached catalogs.
+ * Used to forecast translation before hydration, when the blueprint has no texts yet.
+ */
+const TYPICAL_TEXT_LENGTH = {
+    productName: 40,
+    productDescription: 800,
+    metaTitle: 40,
+    metaDescription: 160,
+    categoryName: 18,
+    categoryDescription: 120,
+    /** Property group and option names collected per product (variants, filters) */
+    termsPerProduct: 0.7,
+    term: 12,
+} as const;
+
+/**
+ * Build a translation source with typical text lengths from an unhydrated blueprint,
+ * so `generate` can forecast translation cost before hydration.
+ */
+export function estimateTranslationSource(
+    blueprint: EstimateBlueprint,
+    base: Pick<TranslationSource, "cms" | "fixtures" | "reviews">
+): TranslationSource {
+    const filler = (length: number, seed: string) => seed.padEnd(length, "x");
+    const termCount = Math.ceil(blueprint.products.length * TYPICAL_TEXT_LENGTH.termsPerProduct);
+    const categoryNames = Array.from({ length: countCategories(blueprint.categories) }, (_, i) =>
+        filler(TYPICAL_TEXT_LENGTH.categoryName, `c${i}`)
+    );
+
+    return {
+        categories: Object.fromEntries(
+            categoryNames.map((name) => [
+                name,
+                { name, description: filler(TYPICAL_TEXT_LENGTH.categoryDescription, name) },
+            ])
+        ),
+        products: Object.fromEntries(
+            blueprint.products.map((p) => [
+                p.id,
+                {
+                    name: filler(TYPICAL_TEXT_LENGTH.productName, p.id),
+                    description: filler(TYPICAL_TEXT_LENGTH.productDescription, p.id),
+                    metaTitle: filler(TYPICAL_TEXT_LENGTH.metaTitle, p.id),
+                    metaDescription: filler(TYPICAL_TEXT_LENGTH.metaDescription, p.id),
+                },
+            ])
+        ),
+        propertyGroups: {
+            terms: {
+                name: "terms",
+                options: Array.from({ length: termCount }, (_, i) =>
+                    filler(TYPICAL_TEXT_LENGTH.term, `t${i}`)
+                ),
+            },
+        },
+        reviews: base.reviews,
+        cms: base.cms,
+        fixtures: base.fixtures,
+    };
+}
+
+/**
+ * Forecast the cost of translating the catalog into each locale.
+ */
+export function estimateTranslationCost(
+    source: TranslationSource,
+    locales: string[],
+    selection: ModelSelection
+): TranslationCostEstimate {
+    const { calls, payloadTokens } = translationWorkload(source);
+    const inputTokens = calls * TRANSLATION_TOKENS.callOverhead + payloadTokens;
+    const outputTokens = Math.ceil(payloadTokens * TRANSLATION_TOKENS.outputFactor);
+    const price = lookupTextPrice(selection);
+    const usd = price ? priceTokens(price, inputTokens, outputTokens) : null;
+
+    const perLocale: LocaleTranslationCost[] = locales.map((locale) => ({
+        locale,
+        calls,
+        inputTokens,
+        outputTokens,
+        usd,
+    }));
+
+    return {
+        selection,
+        locales: perLocale,
+        inputTokens: inputTokens * locales.length,
+        outputTokens: outputTokens * locales.length,
+        usd: usd === null ? null : usd * locales.length,
+    };
+}
+
+/**
+ * Render a translation forecast as CLI output lines.
+ */
+export function formatTranslationEstimate(estimate: TranslationCostEstimate): string[] {
+    if (estimate.locales.length === 0) return [];
+    const tokens = (i: number, o: number) => `~${formatTokens(i + o)} tokens`;
+    return [
+        `=== Translation forecast (${estimate.selection.textProvider} / ${estimate.selection.textModel}) ===`,
+        ...estimate.locales.map(
+            (l) =>
+                `  ${l.locale.padEnd(8)} ${String(l.calls).padStart(4)} calls  ${tokens(l.inputTokens, l.outputTokens).padEnd(16)} ${formatUsd(l.usd)}`
+        ),
+        `  Total${" ".repeat(18)}${tokens(estimate.inputTokens, estimate.outputTokens).padEnd(16)} ${formatUsd(estimate.usd)}`,
+    ];
 }
 
 // =============================================================================

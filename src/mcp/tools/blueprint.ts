@@ -15,7 +15,16 @@ import {
     hydrateBlueprint,
     inspireBlueprint,
 } from "../../services/blueprint-service.js";
+import {
+    estimateTranslation,
+    translateBlueprint,
+    tryParseLanguageSelection,
+} from "../../services/translation-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
+
+const LANGUAGES_DESCRIPTION =
+    `Languages: "all" (SalesChannel languages, de-DE for a new SalesChannel), "none", ` +
+    `or comma-separated locale codes like "de-DE,fr-FR"`;
 
 export function registerBlueprintTools(server: FastMCP): void {
     // blueprint_create - Generate blueprint.json (no AI)
@@ -59,13 +68,61 @@ export function registerBlueprintTools(server: FastMCP): void {
                 .enum(["categories", "properties", "cms"])
                 .optional()
                 .describe("Estimate a selective hydration (categories, properties, or cms)"),
+            languages: z
+                .string()
+                .optional()
+                .describe(`Also forecast translation. ${LANGUAGES_DESCRIPTION}`),
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
             if (!validation.valid) {
                 return `Error: Invalid name - ${validation.error}`;
             }
-            return estimateBlueprintCost(validation.sanitized, { only: args.only }).join("\n");
+            const languages = tryParseLanguageSelection(args.languages);
+            if (languages.error) return languages.error;
+
+            const lines = estimateBlueprintCost(validation.sanitized, { only: args.only });
+            const translation = languages.selection
+                ? ["", ...(await estimateTranslation(validation.sanitized, languages.selection))]
+                : [];
+            return [...lines, ...translation].join("\n");
+        },
+    });
+
+    // blueprint_translate - Translate the hydrated catalog (AI)
+    server.addTool({
+        name: "blueprint_translate",
+        description:
+            "Translate the hydrated catalog (products, categories, properties, reviews, CMS texts) into " +
+            "other languages with AI, written like a native shop instead of a 1:1 translation. " +
+            "Saves translations/{locale}.json, uploaded by generate/process (translations, reviews). " +
+            "Unchanged texts from earlier runs are reused. Use blueprint_estimate with languages for the cost.",
+        parameters: z.object({
+            name: z.string().describe("SalesChannel name"),
+            languages: z.string().default("all").describe(LANGUAGES_DESCRIPTION),
+            formality: z
+                .enum(["formal", "informal"])
+                .optional()
+                .describe("Form of address (default: the AI decides per language and store)"),
+            force: z
+                .boolean()
+                .default(false)
+                .describe("Translate everything again instead of reusing unchanged entries"),
+        }),
+        execute: async (args) => {
+            const validation = validateSubdomainName(args.name);
+            if (!validation.valid) {
+                return `Error: Invalid name - ${validation.error}`;
+            }
+            const languages = tryParseLanguageSelection(args.languages);
+            if (languages.error) return languages.error;
+
+            const lines = await translateBlueprint(validation.sanitized, {
+                languages: languages.selection ?? { mode: "all" },
+                formality: args.formality,
+                force: args.force,
+            });
+            return lines.join("\n");
         },
     });
 

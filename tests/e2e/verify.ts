@@ -10,6 +10,7 @@
  * - Product detail fields (sale prices, topseller, shipping, dimensions, EAN, SEO)
  * - Manufacturers exist (if generated)
  * - CMS pages and Testing category
+ * - Translations (cached locales): product texts and reviews per SalesChannel language
  */
 
 import { writeFileSync } from "node:fs";
@@ -76,6 +77,7 @@ interface VerificationResult {
     };
     shopwareVersion?: string;
     storefront: { domains: StorefrontDomainCheck[] };
+    translations: TranslationCheck[];
     passed: boolean;
     errors: string[];
 }
@@ -118,6 +120,7 @@ async function verifyGeneration(
             hasCustomColors: false,
         },
         storefront: { domains: [] },
+        translations: [],
         passed: false,
         errors: [],
     };
@@ -730,10 +733,130 @@ async function verifyGeneration(
     console.log(`Verifying storefront domains...`);
     await verifySalesChannelStorefront(client, salesChannel.id, result);
 
+    console.log(`Verifying translations...`);
+    await verifyTranslations(client, salesChannelName, salesChannel.id, result);
+
     // Overall pass/fail
     result.passed = result.errors.length === 0;
 
     return result;
+}
+
+interface TranslationCheck {
+    locale: string;
+    /** Products whose translation for this language matches the cached translation */
+    productsTranslated: number;
+    productsChecked: number;
+    /** Reviews written in this language */
+    reviews: number;
+}
+
+interface LanguageRow {
+    id: string;
+    locale?: { code?: string };
+}
+
+/** Number of products sampled for the translation check */
+const TRANSLATION_SAMPLE_SIZE = 10;
+
+/**
+ * For every cached translation whose locale is a SalesChannel language: sampled products
+ * carry the translated name, and some reviews are written in that language.
+ */
+async function verifyTranslations(
+    client: AdminApiClient,
+    salesChannelName: string,
+    salesChannelId: string,
+    result: VerificationResult
+): Promise<void> {
+    const cache = createCacheFromEnv();
+    const locales = cache.listTranslationLocales(salesChannelName);
+    if (locales.length === 0) {
+        console.log(`  ⊘ No cached translations`);
+        return;
+    }
+
+    try {
+        const channels = await search<{ languages?: LanguageRow[] }>(
+            client,
+            "searchSalesChannel post /search/sales-channel",
+            { ids: [salesChannelId], associations: { languages: { associations: { locale: {} } } } }
+        );
+        const languages = channels.data[0]?.languages ?? [];
+
+        for (const locale of locales) {
+            const language = languages.find((l) => l.locale?.code === locale);
+            const file = cache.loadTranslations(salesChannelName, locale);
+            if (!language || !file) {
+                console.log(`  ⊘ ${locale}: not a SalesChannel language (not installed?)`);
+                continue;
+            }
+            const check = await checkLanguage(client, salesChannelId, language.id, locale, file);
+            result.translations.push(check);
+            reportTranslationCheck(check, result);
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(`  ✗ Translation check failed: ${message}`);
+        result.errors.push(`Translation check failed: ${message}`);
+    }
+}
+
+async function checkLanguage(
+    client: AdminApiClient,
+    salesChannelId: string,
+    languageId: string,
+    locale: string,
+    file: NonNullable<ReturnType<ReturnType<typeof createCacheFromEnv>["loadTranslations"]>>
+): Promise<TranslationCheck> {
+    const sampleIds = Object.keys(file.products).slice(0, TRANSLATION_SAMPLE_SIZE);
+    const products = await search<{
+        id: string;
+        translations?: Array<{ languageId: string; name?: string | null }>;
+    }>(client, "searchProduct post /search/product", {
+        ids: sampleIds,
+        associations: { translations: {} },
+    });
+    const productsTranslated = products.data.filter((p) => {
+        const translation = p.translations?.find((t) => t.languageId === languageId);
+        return translation?.name === file.products[p.id]?.name;
+    }).length;
+
+    const reviews = await search<{ id: string }>(
+        client,
+        "searchProductReview post /search/product-review",
+        {
+            limit: 1,
+            "total-count-mode": 1,
+            filter: [
+                { type: "equals", field: "salesChannelId", value: salesChannelId },
+                { type: "equals", field: "languageId", value: languageId },
+            ],
+        }
+    );
+
+    return {
+        locale,
+        productsTranslated,
+        productsChecked: sampleIds.length,
+        reviews: reviews.total,
+    };
+}
+
+function reportTranslationCheck(check: TranslationCheck, result: VerificationResult): void {
+    const products = `${check.productsTranslated}/${check.productsChecked} sampled products translated`;
+    if (check.productsTranslated < check.productsChecked) {
+        console.log(`  ✗ ${check.locale}: ${products}`);
+        result.errors.push(`${check.locale}: only ${products}`);
+    } else {
+        console.log(`  ✓ ${check.locale}: ${products}`);
+    }
+    if (check.reviews === 0) {
+        console.log(`  ✗ ${check.locale}: no reviews in this language`);
+        result.errors.push(`${check.locale}: no reviews in this language`);
+    } else {
+        console.log(`  ✓ ${check.locale}: ${check.reviews} reviews`);
+    }
 }
 
 async function fetchShopwareVersion(client: AdminApiClient): Promise<string | undefined> {
@@ -865,6 +988,9 @@ async function main(): Promise<void> {
         );
         console.log(
             `  Storefront: ${result.storefront.domains.map((d) => `${d.url} ${d.status}`).join(", ")}`
+        );
+        console.log(
+            `  Translations: ${result.translations.map((t) => `${t.locale} (${t.productsTranslated}/${t.productsChecked} products, ${t.reviews} reviews)`).join(", ") || "none"}`
         );
         process.exit(0);
     } else {

@@ -22,7 +22,12 @@ import type {
 import type { Schemas } from "./admin-client.js";
 import type { SearchResult, SyncOperation } from "./api-types.js";
 
-import { buildCustomFieldConfig, PRODUCT_CUSTOM_FIELD_SET } from "../fixtures/index.js";
+import {
+    buildCustomFieldConfig,
+    currencyForLocale,
+    DEFAULT_DOMAIN_LOCALES,
+    PRODUCT_CUSTOM_FIELD_SET,
+} from "../fixtures/index.js";
 import { IMPERIAL_MEASUREMENT_UNITS } from "../types/index.js";
 import {
     buildCategoryPath,
@@ -34,6 +39,49 @@ import {
     validateSubdomainName,
 } from "../utils/index.js";
 import { ShopwareClient } from "./client.js";
+
+interface SalesChannelDomainPayload {
+    id: string;
+    url: string;
+    languageId: string;
+    currencyId: string;
+    snippetSetId: string | undefined;
+    measurementUnits?: DomainMeasurementUnits;
+}
+
+interface ResolvedLocaleDomain {
+    locale: string;
+    languageId: string;
+    snippetSetId: string;
+    currencyId: string;
+    urlSuffix: string;
+}
+
+/**
+ * Extra domain locales for a new SalesChannel: the defaults (de-DE) plus the requested
+ * ones. English locales are left out, the primary domain already serves English.
+ */
+export function domainLocales(requested: readonly string[] = []): string[] {
+    const isEnglish = (locale: string) => locale.toLowerCase().startsWith("en");
+    return [...new Set([...DEFAULT_DOMAIN_LOCALES, ...requested])].filter((l) => !isEnglish(l));
+}
+
+/**
+ * Subdomain suffix for a locale: the language ("de"), or the full locale ("de-ch") when
+ * another locale of the same language is in the list.
+ */
+export function domainUrlSuffix(locale: string, allLocales: readonly string[]): string {
+    const language = locale.split("-")[0]?.toLowerCase() ?? locale.toLowerCase();
+    const sameLanguage = allLocales.filter(
+        (l) => (l.split("-")[0]?.toLowerCase() ?? "") === language
+    );
+    if (sameLanguage.length <= 1 || sameLanguage[0] === locale) return language;
+    return locale.toLowerCase();
+}
+
+function uniqueIds(ids: string[]): Array<{ id: string }> {
+    return [...new Set(ids)].map((id) => ({ id }));
+}
 
 /**
  * Shopware data hydrator - creates products, categories, and property groups.
@@ -918,16 +966,12 @@ export class ShopwareHydrator extends ShopwareClient {
             return { ...existing, isNew: false };
         }
 
-        // Get Storefront config and multi-language/currency IDs in parallel
-        const [storefront, usdResult, eurResult, deLanguageResult, deSnippetResult, rootCategory] =
-            await Promise.all([
-                this.getFullSalesChannel("Storefront"),
-                this.getCurrencyId("USD").catch(() => null),
-                this.getCurrencyId("EUR").catch(() => null),
-                this.getLanguageId("de-DE"),
-                this.getSnippetSetId("de-DE"),
-                this.createRootCategory(sanitizedName),
-            ]);
+        // Get Storefront config, USD and the extra language domains in parallel
+        const [storefront, usdResult, rootCategory] = await Promise.all([
+            this.getFullSalesChannel("Storefront"),
+            this.getCurrencyId("USD").catch(() => null),
+            this.createRootCategory(sanitizedName),
+        ]);
 
         // If reusing existing root, clean up old children
         if (!rootCategory.isNew) {
@@ -937,67 +981,46 @@ export class ShopwareHydrator extends ShopwareClient {
             }
         }
 
-        // Resolve currencies: prefer USD for primary (EN domain), EUR for DE domain
+        // Primary (English) domain uses USD when available
         const usdCurrencyId = usdResult ?? storefront.currencyId;
-        const eurCurrencyId = eurResult ?? storefront.currencyId;
-        const hasGermanDomain = deLanguageResult !== null && deSnippetResult !== null;
-
         if (!usdResult) {
             logger.warn("USD currency not found in Shopware - using storefront default currency");
         }
-        if (!hasGermanDomain) {
-            logger.warn(
-                "German language (de-DE) or snippet set not found - skipping German domain"
-            );
-        }
 
-        // Generate access key
-        const accessKey = this.generateAccessKey();
-
-        // Determine URLs
         const host = this.envPath?.replace(/^https?:\/\//, "") || "localhost:8000";
         const baseUrl = input.baseUrl || generateSubdomainUrl(sanitizedName, host);
-        const germanUrl = generateSubdomainUrl(`${sanitizedName}-de`, host);
+        const localeDomains = await this.resolveLocaleDomains(
+            domainLocales(input.locales),
+            storefront.currencyId
+        );
 
-        // Create the SalesChannel
+        const accessKey = this.generateAccessKey();
         const salesChannelId = generateUUID();
 
-        const languages = [{ id: storefront.languageId }];
-        const currencies = [{ id: usdCurrencyId }];
-        const domains: Array<{
-            id: string;
-            url: string;
-            languageId: string;
-            currencyId: string;
-            snippetSetId: string | undefined;
-            measurementUnits?: DomainMeasurementUnits;
-        }> = [
+        const domains: SalesChannelDomainPayload[] = [
             {
                 id: generateUUID(),
                 url: baseUrl,
                 languageId: storefront.languageId,
                 currencyId: usdCurrencyId,
                 snippetSetId: storefront.snippetSetId,
-                // USD domain shows inches/pounds; the German domain keeps Shopware's metric default
+                // USD domain shows inches/pounds; the other domains keep Shopware's metric default
                 ...(input.imperialEnglishDomain && {
                     measurementUnits: IMPERIAL_MEASUREMENT_UNITS,
                 }),
             },
+            ...localeDomains
+                .filter((d) => d.languageId !== storefront.languageId)
+                .map((d) => ({
+                    id: generateUUID(),
+                    url: generateSubdomainUrl(`${sanitizedName}-${d.urlSuffix}`, host),
+                    languageId: d.languageId,
+                    currencyId: d.currencyId,
+                    snippetSetId: d.snippetSetId,
+                })),
         ];
-
-        if (hasGermanDomain) {
-            languages.push({ id: deLanguageResult as string });
-            if (eurCurrencyId !== usdCurrencyId) {
-                currencies.push({ id: eurCurrencyId });
-            }
-            domains.push({
-                id: generateUUID(),
-                url: germanUrl,
-                languageId: deLanguageResult as string,
-                currencyId: eurCurrencyId,
-                snippetSetId: deSnippetResult as string,
-            });
-        }
+        const languages = uniqueIds(domains.map((d) => d.languageId));
+        const currencies = uniqueIds(domains.map((d) => d.currencyId));
 
         const payload = {
             id: salesChannelId,
@@ -1058,6 +1081,41 @@ export class ShopwareHydrator extends ShopwareClient {
             snippetSetId: storefront.snippetSetId,
             isNew: true,
         };
+    }
+
+    /**
+     * Language, snippet set and currency for each extra domain locale.
+     * Locales that are not installed in Shopware are skipped with a warning.
+     */
+    private async resolveLocaleDomains(
+        locales: string[],
+        fallbackCurrencyId: string
+    ): Promise<ResolvedLocaleDomain[]> {
+        const resolved = await Promise.all(
+            locales.map(async (locale): Promise<ResolvedLocaleDomain | null> => {
+                const currencyIso = currencyForLocale(locale);
+                const [languageId, snippetSetId, currencyId] = await Promise.all([
+                    this.getLanguageId(locale),
+                    this.getSnippetSetId(locale),
+                    currencyIso ? this.getCurrencyId(currencyIso).catch(() => null) : null,
+                ]);
+                if (!languageId || !snippetSetId) {
+                    logger.warn(
+                        `Language ${locale} or its snippet set is not installed - skipping the ${locale} domain`,
+                        { cli: true }
+                    );
+                    return null;
+                }
+                return {
+                    locale,
+                    languageId,
+                    snippetSetId,
+                    currencyId: currencyId ?? fallbackCurrencyId,
+                    urlSuffix: domainUrlSuffix(locale, locales),
+                };
+            })
+        );
+        return resolved.filter((d): d is ResolvedLocaleDomain => d !== null);
     }
 
     /**

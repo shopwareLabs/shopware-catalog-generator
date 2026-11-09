@@ -2,7 +2,12 @@ import { mock } from "bun:test";
 
 import type { DataCacheApi, ImageCacheApi } from "../../src/cache.js";
 import type { MediaType } from "../../src/image-cache.js";
-import type { CmsBlueprint, Manufacturer, ProductMetadata } from "../../src/types/index.js";
+import type {
+    CmsBlueprint,
+    Manufacturer,
+    ProductMetadata,
+    TranslationFile,
+} from "../../src/types/index.js";
 
 /**
  * Mock image cache for testing.
@@ -81,6 +86,10 @@ export class MockDataCache implements DataCacheApi {
     readonly saveManufacturersMock = mock((_sc: string, _mfgs: Manufacturer[]) => undefined);
     readonly loadManufacturersMock = mock((_sc: string) => null as Manufacturer[] | null);
     readonly loadCmsBlueprintMock = mock((_sc: string) => null as CmsBlueprint | null);
+    /** Translation files returned by loadTranslations, keyed by locale */
+    readonly translations = new Map<string, TranslationFile>();
+    /** CMS blueprint returned by loadCmsBlueprint */
+    cmsBlueprint: CmsBlueprint | null = null;
 
     constructor(
         options: {
@@ -103,7 +112,15 @@ export class MockDataCache implements DataCacheApi {
 
     loadCmsBlueprint(_salesChannel: string): CmsBlueprint | null {
         this.loadCmsBlueprintMock(_salesChannel);
-        return null;
+        return this.cmsBlueprint;
+    }
+
+    loadTranslations(_salesChannel: string, locale: string): TranslationFile | null {
+        return this.translations.get(locale) ?? null;
+    }
+
+    listTranslationLocales(_salesChannel: string): string[] {
+        return [...this.translations.keys()].sort();
     }
 
     loadProductMetadata(_salesChannel: string, productId: string): ProductMetadata | null {

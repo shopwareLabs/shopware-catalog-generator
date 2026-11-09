@@ -16,10 +16,11 @@ import type {
     PropertyGroup,
     PropertyOption,
     SalesChannelCacheMetadata,
+    TranslationFile,
 } from "./types/index.js";
 
 import { ImageCache } from "./image-cache.js";
-import { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
+import { DEFAULT_CACHE_OPTIONS, TranslationFileSchema } from "./types/index.js";
 import { logger } from "./utils/logger.js";
 
 export { ImageCache, type ImageCacheApi, type MediaType } from "./image-cache.js";
@@ -48,6 +49,8 @@ export interface DataCacheApi {
         manufacturers: import("./types/index.js").Manufacturer[]
     ): void;
     loadManufacturers(salesChannel: string): import("./types/index.js").Manufacturer[] | null;
+    loadTranslations(salesChannel: string, locale: string): TranslationFile | null;
+    listTranslationLocales(salesChannel: string): string[];
 }
 
 /**
@@ -398,6 +401,46 @@ export class DataCache implements DataCacheApi {
     hasCmsBlueprint(salesChannel: string): boolean {
         const file = path.join(this.getSalesChannelDir(salesChannel), "cms-blueprint.json");
         return this.hasCachedFile(file);
+    }
+
+    // =========================================================================
+    // Translations (translations/{locale}.json)
+    // =========================================================================
+
+    private getTranslationFile(salesChannel: string, locale: string): string {
+        return path.join(this.getSalesChannelDir(salesChannel), "translations", `${locale}.json`);
+    }
+
+    saveTranslations(salesChannel: string, translations: TranslationFile): void {
+        this.saveJsonFile(this.getTranslationFile(salesChannel, translations.locale), translations);
+    }
+
+    /**
+     * Load and validate the translations of one locale.
+     * Returns null when the file is missing or does not match the schema.
+     */
+    loadTranslations(salesChannel: string, locale: string): TranslationFile | null {
+        const raw = this.loadJsonFile<unknown>(this.getTranslationFile(salesChannel, locale));
+        if (raw === null) return null;
+        const parsed = TranslationFileSchema.safeParse(raw);
+        if (parsed.success) return parsed.data;
+        logger.warn(`Ignoring invalid translations/${locale}.json for "${salesChannel}"`, {
+            cli: true,
+            data: { issues: parsed.error.issues.slice(0, 5) },
+        });
+        return null;
+    }
+
+    /** Locales that have a translation file, sorted */
+    listTranslationLocales(salesChannel: string): string[] {
+        if (!this.shouldUseCache) return [];
+        const dir = path.join(this.getSalesChannelDir(salesChannel), "translations");
+        if (!fs.existsSync(dir)) return [];
+        return fs
+            .readdirSync(dir)
+            .filter((f) => f.endsWith(".json"))
+            .map((f) => f.slice(0, -".json".length))
+            .sort();
     }
 
     // =========================================================================

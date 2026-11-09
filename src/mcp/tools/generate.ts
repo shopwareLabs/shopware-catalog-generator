@@ -13,6 +13,7 @@ import {
     generate as generateService,
     runProcessorsForSalesChannel,
 } from "../../services/generate-service.js";
+import { tryParseLanguageSelection } from "../../services/translation-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
 
 export function registerGenerateTools(server: FastMCP): void {
@@ -36,6 +37,14 @@ export function registerGenerateTools(server: FastMCP): void {
                 .boolean()
                 .default(false)
                 .describe("Skip checking for pre-generated templates"),
+            languages: z
+                .string()
+                .optional()
+                .describe(
+                    `Translate the catalog before upload: "all" (SalesChannel languages, de-DE for a new one), ` +
+                        `"none", or locale codes like "de-DE,fr-FR". Default: English only, cached translations ` +
+                        `are still uploaded. Forecast the cost first with blueprint_estimate.`
+                ),
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
@@ -45,10 +54,14 @@ export function registerGenerateTools(server: FastMCP): void {
             const salesChannelName = validation.sanitized;
             const description = args.description || `${salesChannelName} webshop`;
 
+            const languages = tryParseLanguageSelection(args.languages);
+            if (languages.error) return languages.error;
+
             const lines = await generateService(salesChannelName, description, {
                 products: args.products,
                 dryRun: args.dryRun,
                 noTemplate: args.noTemplate,
+                languages: languages.selection,
             });
             return lines.join("\n");
         },

@@ -18,6 +18,7 @@ services/
 ├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, estimateBlueprintCost, fixBlueprint, inspireBlueprint
 ├── generate-service.ts    # generate, runProcessorsForSalesChannel
 ├── image-fix-service.ts   # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
+├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, estimateTranslation, translateBlueprint
 └── shopware-context.ts    # createProcessorDeps (shared bootstrap for API helpers + providers)
 ```
 
