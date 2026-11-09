@@ -133,6 +133,10 @@ The fetcher uses Git's sparse checkout feature to minimize download size:
 
 3. **Updates:** `git pull --ff-only`
     - Only updates files in sparse checkout
+    - If the fast-forward fails because the history was reset
+      (`scripts/reset-templates-history.sh` + force push), the clone is reset to the
+      remote (`git fetch --depth 1` + `git reset --hard FETCH_HEAD`) and old objects are
+      pruned. The clone is only a cache, so nothing is lost.
 
 Authentication uses existing git credentials (SSH keys or credential helper).
 
