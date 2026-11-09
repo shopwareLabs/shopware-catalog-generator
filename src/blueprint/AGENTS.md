@@ -115,6 +115,8 @@ colour gets an edited copy of each parent view via `ImageProvider.editImage`:
 - Providers without `editImage` (Pollinations, none) are skipped with one warning, no fallback
 - `VARIANT_IMAGE_VIEWS=cover` limits the pass to the first view
 - `countVariantImages()` feeds the cost forecast before the colours are known (upper bound)
+- Upload: the `variant-images` post-processor puts the cached copies on the colour variants
+  (own gallery + cover, own `Color family`), see `src/post-processors/AGENTS.md`
 
 ### VariantResolver
 

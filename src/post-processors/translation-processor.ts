@@ -21,14 +21,14 @@ import type { CmsBlueprint } from "../types/index.js";
 import type { PostProcessor, PostProcessorContext, PostProcessorResult } from "./index.js";
 
 import { buildTranslationSource } from "../blueprint/hydrators/translation.js";
+import { collectVariantImageTasks } from "../blueprint/hydrators/variant-images.js";
 import {
     FOOTER_CATEGORY_NAMES,
     HOME_LISTING_PAGE,
     PACKAGING_UNITS,
-    PRODUCT_IMAGE_VIEWS,
     PROMOTIONS,
 } from "../fixtures/index.js";
-import { searchAllByFilter } from "../shopware/api-helpers.js";
+import { searchAllByEqualsAny, searchAllByFilter } from "../shopware/api-helpers.js";
 import {
     getShopLanguages,
     loadAllTranslations,
@@ -37,6 +37,8 @@ import {
 import { buildTranslationOperations } from "../shopware/translation-payload.js";
 import { buildBlueprintCategoryPathMap, logger, toStoreScopedName } from "../utils/index.js";
 import { buildHomeSlotTexts, homeFeaturesFor } from "./cms/home-processor.js";
+import { viewFromFileName } from "./image-utils.js";
+import { variantImageMediaId } from "./variant-image-processor.js";
 
 interface CmsPageRow {
     sections?: Array<{
@@ -135,12 +137,6 @@ async function loadPromotions(
     );
 }
 
-/** Image view from a product media file name ("oak-desk-front" -> "front") */
-export function viewFromFileName(fileName: string | null | undefined): string | null {
-    if (!fileName) return null;
-    return PRODUCT_IMAGE_VIEWS.find((view) => fileName.endsWith(`-${view}`)) ?? null;
-}
-
 interface ProductMediaRow {
     productId: string;
     mediaId: string;
@@ -159,10 +155,38 @@ async function loadProductMedia(
         [{ type: "equalsAny", field: "productId", value: productIds }],
         { associations: { media: {} } }
     );
-    return rows.flatMap((row) => {
+    const productMedia = rows.flatMap((row) => {
         const view = viewFromFileName(row.media?.fileName);
         return view ? [{ mediaId: row.mediaId, productId: row.productId, view }] : [];
     });
+    return [...productMedia, ...(await loadVariantMedia(context))];
+}
+
+/** Colour variant images that exist in Shopware, with the view and shade they show */
+async function loadVariantMedia(
+    context: PostProcessorContext
+): Promise<NonNullable<TranslationPayloadInput["productMedia"]>> {
+    const tasks = collectVariantImageTasks(context.blueprint, "all").map((task) => ({
+        task,
+        mediaId: variantImageMediaId(task.productId, task.view),
+    }));
+    if (tasks.length === 0) return [];
+    const existing = await searchAllByEqualsAny<{ id: string }>(
+        context,
+        "media",
+        "id",
+        tasks.map((t) => t.mediaId),
+        { includes: { media: ["id"] } }
+    );
+    const existingIds = new Set(existing.map((m) => m.id));
+    return tasks
+        .filter((t) => existingIds.has(t.mediaId))
+        .map(({ task, mediaId }) => ({
+            mediaId,
+            productId: task.productId,
+            view: task.sourceView,
+            shade: task.color.name,
+        }));
 }
 
 /** Category banner images of the blueprint categories */
@@ -225,6 +249,7 @@ class TranslationProcessorImpl implements PostProcessor {
         "cms-home",
         "cms-footer-pages",
         "images",
+        "variant-images",
         "promotions",
     ];
 
