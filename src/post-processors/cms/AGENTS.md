@@ -20,7 +20,8 @@ Testing (testing-placeholder.ts)
 ├── Products (navigation category)
 │   ├── Simple Product (link to product)
 │   ├── Variant Product (link to product)
-│   └── Digital Product (link to product)
+│   ├── Digital Product (link to product)
+│   └── Media Product (link to the Media Showcase product, 6.6+)
 └── Cookie settings (external link to /cookie/offcanvas)
 ```
 
@@ -112,9 +113,9 @@ The orchestrator runs last and creates the full category hierarchy:
 4. Creates "CMS" sub-category
 5. Creates element sub-categories (Text, Images, etc.)
 6. Creates "Products" navigation category
-7. Creates product type links (Simple, Variant, Digital)
+7. Creates product type links (Simple, Variant, Digital, Media)
 
-Dependencies: All element processors + `digital-product`
+Dependencies: All element processors + `digital-product` + `media-product`
 
 ## Inter-Processor Communication
 

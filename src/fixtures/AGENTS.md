@@ -27,6 +27,8 @@ fixtures/
 ├── demo-customers.ts     # Demo customer accounts + B2B group, B2B accounts are business accounts (company, VAT ID)
 ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
 ├── footer-navigation.ts  # Footer category trees + legal pages (cms-footer-pages), FOOTER_CATEGORY_NAMES
+├── media-showcase.ts     # Media Showcase product + gallery files (MEDIA_SHOWCASE_FILES, feature per file)
+├── media/                # Static GLB models + MP4 videos, LICENSES.md with sources and attribution
 ├── locale-currencies.ts  # Locale → currency for extra domains, DEFAULT_DOMAIN_LOCALES (de-DE)
 ├── packaging-units.ts    # Units (pc, kg, m) and packaging options (Pair, Pack, Box, ...) for reference prices
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
@@ -114,6 +116,18 @@ upload time with `localizedFixtureText(key, texts, values)`, which falls back to
 Units and footer categories are looked up by short code / name, so their system-language
 row stays English. Units are global: a German translation also applies to other
 SalesChannels that use the same unit.
+
+## media-showcase.ts
+
+The `media-product` processor uploads these files into the gallery of one shared
+"Media Showcase" product, linked under Testing > Products.
+
+- Each file names the Shopware feature it needs (`spatialMedia` for `.glb`, 6.6.0;
+  `productVideo` for `.mp4`, 6.6.1). Unsupported files are left out at upload time.
+- Only add files that are CC0 or CC BY. Record source, author and licence in
+  `media/LICENSES.md`, and put the credit into `title` (CC BY needs attribution).
+- No brand logos or trademarks. Keep files small (a few MB at most), they are in git.
+- Videos must be H.264 MP4 (`-movflags +faststart`) so every browser plays them.
 
 ## Adding a New Fixture
 

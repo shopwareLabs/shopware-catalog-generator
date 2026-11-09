@@ -33,6 +33,13 @@ export { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "./demo-custom
 export type { CustomerGroupKey, DemoAddress, DemoCustomer } from "./demo-customers.js";
 // Digital Products
 export { GIFT_CARD_50 } from "./digital-products.js";
+// Media showcase (3D models + videos)
+export {
+    MEDIA_FIXTURE_DIR,
+    MEDIA_SHOWCASE_FILES,
+    MEDIA_SHOWCASE_PRODUCT,
+} from "./media-showcase.js";
+export type { MediaShowcaseFile } from "./media-showcase.js";
 // Shopware feature list (version gating)
 export { MIN_SUPPORTED_SHOPWARE_VERSION, SHOPWARE_FEATURES } from "./shopware-features.js";
 export type { ShopwareFeature } from "./shopware-features.js";
