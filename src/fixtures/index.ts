@@ -65,8 +65,25 @@ export {
     REVIEWER_NAMES,
 } from "./review-data.js";
 // Translatable texts
-export type { TranslatableFixtureKey } from "./translatable-texts.js";
-export { fillFixtureText, TRANSLATABLE_FIXTURE_TEXTS } from "./translatable-texts.js";
+export {
+    fillFixtureText,
+    footerTextKey,
+    localizedFixtureText,
+    packagingTextKey,
+    PRODUCT_IMAGE_VIEWS,
+    productImageTextKey,
+    productMediaTexts,
+    TRANSLATABLE_FIXTURE_TEXTS,
+} from "./translatable-texts.js";
+// Footer navigation
+export type { LegalCategoryConfig } from "./footer-navigation.js";
+export {
+    CUSTOMER_SERVICES_CATEGORY,
+    FOOTER_CATEGORY_NAMES,
+    FOOTER_NAVIGATION_ROOT,
+    FOOTER_SERVICE_NAVIGATION_ROOT,
+    LEGAL_CATEGORIES,
+} from "./footer-navigation.js";
 // Types
 export type {
     CmsBlockConfig,

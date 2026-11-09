@@ -132,6 +132,7 @@ src/
 │   ├── custom-fields.ts      # Product custom field set (catalog_generator)
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
+│   ├── footer-navigation.ts  # Footer category trees + legal pages (cms-footer-pages)
 │   ├── locale-currencies.ts  # Locale → currency, DEFAULT_DOMAIN_LOCALES (de-DE)
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── packaging-units.ts    # Units + packaging options (reference prices)
@@ -434,8 +435,10 @@ hydrated-blueprint.json ──▶ blueprint translate ──▶ translations/{lo
 generate / process ──▶ translations + reviews processors ◀┘ (no AI)
 ```
 
-- **What is translated:** products (name, description, SEO/OG fields), categories, property
-  groups and options, manufacturers, AI CMS texts, fixture texts and reviews.
+- **What is translated:** products (name, description, SEO/OG fields, pack units), categories,
+  property groups and options, manufacturers, AI CMS texts, the homepage, promotion names,
+  units, footer categories, image alt texts (products, category banners), other fixture texts
+  and reviews. Testing navigation category names stay English.
 - **Target locales:** `--languages=de-DE,fr-FR`, `all` (every non-English language of the
   existing SalesChannel, or `DEFAULT_DOMAIN_LOCALES` for a new one) or `none`.
   `TRANSLATION_LANGUAGES` sets the default. Without either, `generate` shows the forecast
@@ -509,27 +512,27 @@ interface PostProcessorOptions {
 
 **Available processors:**
 
-| Processor          | Description                                      | Dependencies                               |
-| ------------------ | ------------------------------------------------ | ------------------------------------------ |
-| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling` |
-| `cms-text`         | Text elements demo page                          | none                                       |
-| `cms-images`       | Image elements demo page                         | none                                       |
-| `cms-video`        | Video elements demo page                         | none                                       |
-| `cms-text-images`  | Text & Images demo page                          | none                                       |
-| `cms-commerce`     | Commerce elements demo page                      | `images`                                   |
-| `cms-form`         | Form elements demo page                          | none                                       |
-| `cms-footer-pages` | Shared footer and legal pages                    | none                                       |
-| `cross-selling`    | Category-based cross-selling via product streams | none                                       |
-| `customers`        | Demo customer accounts with B2B group            | none                                       |
-| `images`           | Upload pre-generated product/category images     | none                                       |
-| `manufacturers`    | Fictional manufacturer creation                  | none                                       |
-| `promotions`       | Tiered pricing and promotion codes               | none                                       |
-| `reviews`          | Variable review counts (0-10 per product)        | none                                       |
-| `theme`            | Child theme with brand colors, logo, favicon     | none                                       |
-| `variants`         | Variant product creation                         | `manufacturers`                            |
-| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-testing` |
-| `digital-product`  | Digital product with download                    | none                                       |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product                    |
+| Processor          | Description                                      | Dependencies                                                 |
+| ------------------ | ------------------------------------------------ | ------------------------------------------------------------ |
+| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling`                   |
+| `cms-text`         | Text elements demo page                          | none                                                         |
+| `cms-images`       | Image elements demo page                         | none                                                         |
+| `cms-video`        | Video elements demo page                         | none                                                         |
+| `cms-text-images`  | Text & Images demo page                          | none                                                         |
+| `cms-commerce`     | Commerce elements demo page                      | `images`                                                     |
+| `cms-form`         | Form elements demo page                          | none                                                         |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                                                         |
+| `cross-selling`    | Category-based cross-selling via product streams | none                                                         |
+| `customers`        | Demo customer accounts with B2B group            | none                                                         |
+| `images`           | Upload pre-generated product/category images     | none                                                         |
+| `manufacturers`    | Fictional manufacturer creation                  | none                                                         |
+| `promotions`       | Tiered pricing and promotion codes               | none                                                         |
+| `reviews`          | Variable review counts (0-10 per product)        | none                                                         |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                                                         |
+| `variants`         | Variant product creation                         | `manufacturers`                                              |
+| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `promotions` |
+| `digital-product`  | Digital product with download                    | none                                                         |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product                                      |
 
 Processors run in parallel when possible, respecting dependencies:
 

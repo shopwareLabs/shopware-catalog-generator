@@ -15,6 +15,7 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
+import { productMediaTexts } from "../fixtures/index.js";
 import { getAllSalesChannelProductIds, searchAllByEqualsAny } from "../shopware/api-helpers.js";
 import { apiPost, ConcurrencyLimiter, generateUUID, logger } from "../utils/index.js";
 import { CategoryImageProcessor } from "./category-image-processor.js";
@@ -692,6 +693,5 @@ export function buildProductMediaTexts(
     productName: string,
     view: string
 ): { alt: string; title: string } {
-    const text = `${productName} (${view} view)`;
-    return { alt: text, title: text };
+    return productMediaTexts(productName, view);
 }

@@ -15,7 +15,7 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
-import { fillFixtureText, TRANSLATABLE_FIXTURE_TEXTS } from "../fixtures/index.js";
+import { localizedFixtureText } from "../fixtures/index.js";
 import { searchAllByFilter } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
 
@@ -24,9 +24,7 @@ function newManufacturer(name: string): Manufacturer {
     return {
         id: "",
         name,
-        description: fillFixtureText(TRANSLATABLE_FIXTURE_TEXTS["manufacturer.description"], {
-            name,
-        }),
+        description: localizedFixtureText("manufacturer.description", null, { name }),
         link: `https://www.${toKebabCase(name)}.com`,
     };
 }

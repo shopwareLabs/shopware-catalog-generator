@@ -7,11 +7,22 @@
  * simply gets the German texts.
  */
 
-import type { HydratedBlueprint, Manufacturer, TranslationSource } from "../types/index.js";
+import type {
+    BlueprintProduct,
+    HydratedBlueprint,
+    Manufacturer,
+    TranslationSource,
+} from "../types/index.js";
 import type { SyncOperation } from "./api-types.js";
 import type { LanguageContent } from "./languages.js";
 
-import { fillFixtureText } from "../fixtures/index.js";
+import {
+    fillFixtureText,
+    footerTextKey,
+    localizedFixtureText,
+    packagingTextKey,
+    productMediaTexts,
+} from "../fixtures/index.js";
 import { buildBlueprintCategoryPathMap, chunkArray } from "../utils/index.js";
 
 type Fields = Record<string, unknown>;
@@ -39,6 +50,49 @@ export interface TranslationPayloadInput {
     cmsPages: CmsPageStructure[];
     /** Shop supports product.ogTitle / ogDescription */
     openGraph: boolean;
+    /** Units created by the generator, matched by their English short code */
+    units?: Array<{ id: string; shortCode: string }>;
+    /** Demo promotions, matched by code */
+    promotions?: Array<{ id: string; code: string }>;
+    /** Product images with the view they show (front, side, ...) */
+    productMedia?: Array<{ mediaId: string; productId: string; view: string }>;
+    /** Category banner images */
+    categoryMedia?: Array<{ mediaId: string; categoryId: string }>;
+    /** Homepage CMS page and its slot HTML per language (built from fixture texts) */
+    home?: {
+        page: CmsPageStructure;
+        slotTexts: (texts: FixtureTexts) => Record<string, string>;
+    };
+    /** Footer categories, matched by their English name */
+    footerCategories?: Array<{ id: string; name: string }>;
+}
+
+/** Fixture texts of one language, null for the English source */
+export type FixtureTexts = Readonly<Record<string, string>> | null;
+
+function fixtureTextsOf({ content }: LanguageContent): FixtureTexts {
+    return content.kind === "source" ? null : content.file.fixtures;
+}
+
+/**
+ * Languages other than the system language.
+ *
+ * Entities the generator finds again by name or short code (units, footer categories)
+ * must keep their English root values, which live in the system language.
+ */
+function nonSystemLanguages(languages: LanguageContent[]): LanguageContent[] {
+    return languages.filter(({ language }) => !language.isSystem);
+}
+
+/** Translated product name, English when there is no translation */
+function productNameIn(
+    productId: string,
+    { content }: LanguageContent,
+    source: TranslationSource
+): string | undefined {
+    const english = source.products[productId]?.name;
+    if (content.kind === "source") return english;
+    return content.file.products[productId]?.name ?? english;
 }
 
 function withTranslations(id: string, perLanguage: Array<[string, Fields | null]>): Fields | null {
@@ -52,15 +106,32 @@ function compact(payload: Array<Fields | null>): Fields[] {
     return payload.filter((p): p is Fields => p !== null);
 }
 
+/** Packaging labels ("Pack" / "Packs") of a product in one language */
+function packagingFields(product: BlueprintProduct, texts: FixtureTexts): Fields {
+    const packaging = product.metadata.packaging;
+    if (!packaging) return {};
+    // Labels that are not fixture texts (older blueprints) stay as they are
+    const label = (value: string): string => {
+        const key = packagingTextKey(value);
+        const text = localizedFixtureText(key, texts);
+        return text === key ? value : text;
+    };
+    return {
+        packUnit: label(packaging.packUnit),
+        packUnitPlural: label(packaging.packUnitPlural),
+    };
+}
+
 /** Product texts for one language */
 function productFields(
-    productId: string,
-    { content }: LanguageContent,
+    product: BlueprintProduct,
+    languageContent: LanguageContent,
     source: TranslationSource,
     openGraph: boolean
 ): Fields | null {
-    const english = source.products[productId];
-    const texts = content.kind === "source" ? english : content.file.products[productId];
+    const { content } = languageContent;
+    const english = source.products[product.id];
+    const texts = content.kind === "source" ? english : content.file.products[product.id];
     if (!texts) return null;
 
     const metaTitle = texts.metaTitle;
@@ -74,6 +145,7 @@ function productFields(
             ogTitle: metaTitle ?? texts.name,
             ...(metaDescription && { ogDescription: metaDescription }),
         }),
+        ...packagingFields(product, fixtureTextsOf(languageContent)),
     };
 }
 
@@ -84,7 +156,7 @@ export function buildProductTranslations(input: TranslationPayloadInput): Fields
                 p.id,
                 input.languages.map((lc) => [
                     lc.language.id,
-                    productFields(p.id, lc, input.source, input.openGraph),
+                    productFields(p, lc, input.source, input.openGraph),
                 ])
             )
         )
@@ -184,29 +256,151 @@ function cmsSlotTexts(
     return content.file.cms[pageName]?.slots ?? null;
 }
 
-export function buildCmsSlotTranslations(input: TranslationPayloadInput): Fields[] {
-    return compact(
-        input.cmsPages.flatMap((page) =>
-            page.sections.flatMap((section) =>
-                section.blocks.flatMap((block) =>
-                    block.slots.map((slot) => {
-                        const key = `${section.position}.${block.position}.${slot.slot}`;
-                        return withTranslations(
-                            slot.id,
-                            input.languages.map(({ language, content }) => {
-                                const html = cmsSlotTexts(page.pageName, content, input.source)?.[
-                                    key
-                                ];
-                                if (!html) return [language.id, null];
-                                const config = {
-                                    ...(slot.config ?? {}),
-                                    content: { source: "static", value: html },
-                                };
-                                return [language.id, { config }];
-                            })
-                        );
+/** Slot translations of one page; `textsFor` returns the slot HTML of a language */
+function pageSlotTranslations(
+    page: CmsPageStructure,
+    languages: LanguageContent[],
+    textsFor: (languageContent: LanguageContent) => Record<string, string> | null
+): Array<Fields | null> {
+    const perLanguage = languages.map((lc): [string, Record<string, string> | null] => [
+        lc.language.id,
+        textsFor(lc),
+    ]);
+    return page.sections.flatMap((section) =>
+        section.blocks.flatMap((block) =>
+            block.slots.map((slot) => {
+                const key = `${section.position}.${block.position}.${slot.slot}`;
+                return withTranslations(
+                    slot.id,
+                    perLanguage.map(([languageId, texts]) => {
+                        const html = texts?.[key];
+                        if (!html) return [languageId, null];
+                        const config = {
+                            ...(slot.config ?? {}),
+                            content: { source: "static", value: html },
+                        };
+                        return [languageId, { config }];
                     })
-                )
+                );
+            })
+        )
+    );
+}
+
+export function buildCmsSlotTranslations(input: TranslationPayloadInput): Fields[] {
+    const pages = input.cmsPages.flatMap((page) =>
+        pageSlotTranslations(page, input.languages, ({ content }) =>
+            cmsSlotTexts(page.pageName, content, input.source)
+        )
+    );
+    const home = input.home;
+    const homeSlots = home
+        ? pageSlotTranslations(home.page, input.languages, (lc) =>
+              home.slotTexts(fixtureTextsOf(lc))
+          )
+        : [];
+    return compact([...pages, ...homeSlots]);
+}
+
+/** Unit name and short code; never the system language (units are found by short code) */
+export function buildUnitTranslations(input: TranslationPayloadInput): Fields[] {
+    const languages = nonSystemLanguages(input.languages);
+    return compact(
+        (input.units ?? []).map((unit) =>
+            withTranslations(
+                unit.id,
+                languages.map((lc) => {
+                    const texts = fixtureTextsOf(lc);
+                    return [
+                        lc.language.id,
+                        {
+                            name: localizedFixtureText(`unit.${unit.shortCode}.name`, texts),
+                            shortCode: localizedFixtureText(
+                                `unit.${unit.shortCode}.shortCode`,
+                                texts
+                            ),
+                        },
+                    ];
+                })
+            )
+        )
+    );
+}
+
+/** Promotion names (promotions are found by code, so the system language is fine) */
+export function buildPromotionTranslations(input: TranslationPayloadInput): Fields[] {
+    return compact(
+        (input.promotions ?? []).map((promotion) =>
+            withTranslations(
+                promotion.id,
+                input.languages.map((lc) => [
+                    lc.language.id,
+                    {
+                        name: localizedFixtureText(
+                            `promotion.${promotion.code}.name`,
+                            fixtureTextsOf(lc)
+                        ),
+                    },
+                ])
+            )
+        )
+    );
+}
+
+/** Alt text and title of product and category images */
+export function buildMediaTranslations(input: TranslationPayloadInput): Fields[] {
+    const products = (input.productMedia ?? []).map((media) =>
+        withTranslations(
+            media.mediaId,
+            input.languages.map((lc) => {
+                const name = productNameIn(media.productId, lc, input.source);
+                if (!name) return [lc.language.id, null];
+                return [lc.language.id, productMediaTexts(name, media.view, fixtureTextsOf(lc))];
+            })
+        )
+    );
+
+    const idToPath = new Map(
+        [...buildBlueprintCategoryPathMap(input.blueprint.categories)].map(([path, id]) => [
+            id,
+            path,
+        ])
+    );
+    const categories = (input.categoryMedia ?? []).map((media) => {
+        const path = idToPath.get(media.categoryId);
+        if (!path) return null;
+        return withTranslations(
+            media.mediaId,
+            input.languages.map(({ language, content }) => {
+                const texts =
+                    content.kind === "source"
+                        ? input.source.categories[path]
+                        : content.file.categories[path];
+                if (!texts) return [language.id, null];
+                return [language.id, { alt: texts.name, title: texts.name }];
+            })
+        );
+    });
+
+    return compact([...products, ...categories]);
+}
+
+/** Footer category names; never the system language (they are found by name) */
+export function buildFooterCategoryTranslations(input: TranslationPayloadInput): Fields[] {
+    const languages = nonSystemLanguages(input.languages);
+    return compact(
+        (input.footerCategories ?? []).map((category) =>
+            withTranslations(
+                category.id,
+                languages.map((lc) => [
+                    lc.language.id,
+                    {
+                        name: localizedFixtureText(
+                            footerTextKey(category.name),
+                            fixtureTextsOf(lc)
+                        ),
+                    },
+                ])
             )
         )
     );
@@ -249,5 +443,13 @@ export function buildTranslationOperations(
             buildManufacturerTranslations(input)
         ),
         ...chunkedOperations("translate-cms-slot", "cms_slot", buildCmsSlotTranslations(input)),
+        ...chunkedOperations("translate-unit", "unit", buildUnitTranslations(input)),
+        ...chunkedOperations("translate-promotion", "promotion", buildPromotionTranslations(input)),
+        ...chunkedOperations("translate-media", "media", buildMediaTranslations(input)),
+        ...chunkedOperations(
+            "translate-footer-category",
+            "category",
+            buildFooterCategoryTranslations(input)
+        ),
     };
 }

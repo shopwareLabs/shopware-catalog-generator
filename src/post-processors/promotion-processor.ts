@@ -7,7 +7,8 @@
  * - Cart and delivery scopes
  * - SalesChannel association
  *
- * Promotions are idempotent -- existing promotions (matched by name) are skipped.
+ * Promotions are idempotent -- existing promotions (matched by code) are skipped.
+ * Names are translated, so lookups never use the name.
  */
 
 import type { PromotionDiscountPayload } from "../types/index.js";
@@ -104,11 +105,11 @@ class PromotionProcessorImpl implements PostProcessor {
         }
 
         try {
-            const promotionNames = PROMOTIONS.map((p) => p.name);
-            const promotions = await context.api.searchEntities<{ id: string; name: string }>(
+            const codes = PROMOTIONS.map((p) => p.code);
+            const promotions = await context.api.searchEntities<{ id: string; code: string }>(
                 "promotion",
-                [{ type: "equalsAny", field: "name", value: promotionNames.join("|") }],
-                { includes: { promotion: ["id", "name"] }, limit: 50 }
+                [{ type: "equalsAny", field: "code", value: codes }],
+                { includes: { promotion: ["id", "code"] }, limit: 50 }
             );
 
             if (promotions.length === 0) {

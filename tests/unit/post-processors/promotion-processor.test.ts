@@ -250,8 +250,8 @@ describe("PromotionProcessor", () => {
         test("deletes existing promotions", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSearchResponse("promotion", [
-                { id: "promo-1", name: "Welcome Discount" },
-                { id: "promo-2", name: "Summer Sale" },
+                { id: "promo-1", code: "WELCOME10" },
+                { id: "promo-2", code: "SUMMER20" },
             ]);
 
             const result = await PromotionProcessor.cleanup!(context);
@@ -265,6 +265,16 @@ describe("PromotionProcessor", () => {
                 return Object.values(body).some((op) => op.action === "delete");
             });
             expect(deleteCall).toBeDefined();
+        });
+
+        test("finds promotions by code, so translated names do not matter", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("promotion", []);
+
+            await PromotionProcessor.cleanup!(context);
+
+            const [search] = mockApi.getCallsByEndpoint("search/promotion");
+            expect(JSON.stringify(search?.body)).toContain('"field":"code"');
         });
 
         test("handles no promotions found", async () => {
