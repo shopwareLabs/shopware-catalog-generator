@@ -10,6 +10,7 @@
  * - generate           - Full flow: create + hydrate + upload to Shopware
  * - process            - Run post-processors on existing SalesChannel
  * - image fix          - Regenerate images for a specific product
+ * - template metadata  - Write template.json (generator, models, languages, tested lanes)
  */
 
 import type { CliArgs } from "./cli/shared.js";
@@ -25,6 +26,7 @@ import {
 import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
 import { CLIError } from "./cli/shared.js";
+import { templateMetadataCommand } from "./cli/template.js";
 
 export { CLIError, parseCliArgs };
 
@@ -65,7 +67,10 @@ function parseCliArgs(): CliArgs {
             if (key) {
                 flags[key] = true;
             }
-        } else if ((command === "blueprint" || command === "image") && !flags.subcommand) {
+        } else if (
+            (command === "blueprint" || command === "image" || command === "template") &&
+            !flags.subcommand
+        ) {
             flags.subcommand = arg;
         }
     }
@@ -87,6 +92,7 @@ function parseCliArgs(): CliArgs {
         languages: typeof flags.languages === "string" ? flags.languages : undefined,
         formality: typeof flags.formality === "string" ? flags.formality : undefined,
         force: flags.force === true,
+        e2e: typeof flags.e2e === "string" ? flags.e2e : undefined,
     };
 }
 
@@ -107,6 +113,7 @@ Commands:
   generate           Full flow: create + hydrate + upload to Shopware
   process            Run post-processors on existing SalesChannel
   image fix          Regenerate images (product, category, cms, or theme)
+  template metadata  Write template.json (generator, models, languages, tested Shopware versions)
 
 Options:
   --name=<name>         SalesChannel name (required for most commands)
@@ -126,6 +133,7 @@ Options:
   --force               [blueprint translate] Translate everything again (ignore cached translations)
   --dry-run             Log actions without executing
   --no-template         [generate only] Skip checking for pre-generated templates
+  --e2e=<dir>           [template metadata] e2e-results/<timestamp> of a test-e2e-lanes.sh run
   -i, --interactive     Run interactive wizard
 
 Examples:
@@ -142,6 +150,7 @@ Examples:
   bun run src/main.ts process --name=furniture --only=images,manufacturers
   bun run src/main.ts image fix --name=beauty --target="Eyelash Curler - Silver"
   bun run src/main.ts image fix --name=beauty --type=theme --target=logo
+  bun run src/main.ts template metadata --name=beauty --e2e=e2e-results/20261109-123512
 `);
 }
 
@@ -190,6 +199,18 @@ async function main(): Promise<void> {
                 } else {
                     showHelp();
                     throw new CLIError("image requires subcommand: fix", "MISSING_SUBCOMMAND");
+                }
+                break;
+
+            case "template":
+                if (args.subcommand === "metadata") {
+                    templateMetadataCommand(args);
+                } else {
+                    showHelp();
+                    throw new CLIError(
+                        "template requires subcommand: metadata",
+                        "MISSING_SUBCOMMAND"
+                    );
                 }
                 break;
 

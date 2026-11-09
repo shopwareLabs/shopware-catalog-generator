@@ -18,6 +18,7 @@ import {
     registerCleanupTools,
     registerGenerateTools,
     registerImageFixTools,
+    registerTemplateTools,
 } from "./tools/index.js";
 
 // Enable MCP mode to suppress console output (prevents stdout pollution)
@@ -39,6 +40,7 @@ export function createMcpServer(): FastMCP {
     registerImageFixTools(server);
     registerCacheTools(server);
     registerCleanupTools(server);
+    registerTemplateTools(server);
 
     return server;
 }

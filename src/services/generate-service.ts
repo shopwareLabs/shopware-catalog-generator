@@ -23,6 +23,7 @@ import { createTemplateFetcherFromEnv } from "../templates/index.js";
 import { isIncompleteHydration, logger, validateBlueprint } from "../utils/index.js";
 import { createBlueprint, hydrateBlueprint } from "./blueprint-service.js";
 import { createProcessorDeps } from "./shopware-context.js";
+import { summarizeTemplateInfo } from "./template-service.js";
 import {
     formatTranslationForecast,
     resolveTargetLocales,
@@ -99,6 +100,8 @@ export async function generate(
         usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
         if (usedTemplate) {
             results.push(`Using pre-generated template for "${salesChannelName}"`);
+            const templateInfo = cache.loadTemplateInfo(salesChannelName);
+            if (templateInfo) results.push(`  Template: ${summarizeTemplateInfo(templateInfo)}`);
         } else {
             results.push(`No template found, will generate from scratch`);
         }

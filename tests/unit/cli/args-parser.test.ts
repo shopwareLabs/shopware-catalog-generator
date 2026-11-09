@@ -92,6 +92,17 @@ describe("parseCliArgs", () => {
             expect(parse("blueprint", "inspire", "--name=x", "--url=y").subcommand).toBe("inspire");
         });
 
+        test("extracts template subcommand and --e2e directory", () => {
+            const args = parse(
+                "template",
+                "metadata",
+                "--name=beauty",
+                "--e2e=e2e-results/20261109"
+            );
+            expect(args.subcommand).toBe("metadata");
+            expect(args.e2e).toBe("e2e-results/20261109");
+        });
+
         test("command without subcommand", () => {
             expect(parse("generate", "--name=shop").subcommand).toBeUndefined();
         });

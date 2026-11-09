@@ -19,6 +19,7 @@ services/
 ├── generate-service.ts    # generate, runProcessorsForSalesChannel
 ├── image-fix-service.ts   # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 ├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, estimateTranslation, translateBlueprint
+├── template-service.ts    # buildGenerationStep, readLaneResults, writeTemplateMetadata (template.json)
 └── shopware-context.ts    # createProcessorDeps (shared bootstrap for API helpers + providers)
 ```
 
@@ -166,6 +167,15 @@ Internal helpers (exported for testing):
 
 - `flattenCategories(categories)` — recursively flattens the category tree
 - `resolveCmsProcessors(searchTerm)` — maps a search term to CMS processor names
+
+## template-service.ts
+
+Template metadata for the templates repo. `hydrateBlueprint` and `translateBlueprint` call
+`cache.recordGenerationStep(name, key, buildGenerationStep(selection, withImages))` after
+saving, which writes `generation.json`. `writeTemplateMetadata(name, { e2eDir })` builds
+`template.json` from it, the hydrated blueprint, the translation locales and the lane
+results of a `test-e2e-lanes.sh` run. `summarizeTemplateInfo` is the one-line summary
+`generate` prints when it uses a template. Details: [src/templates/AGENTS.md](../templates/AGENTS.md).
 
 ## shopware-context.ts
 

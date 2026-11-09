@@ -38,6 +38,52 @@ Each template contains:
 - `images/` - Product and category images (webp + json metadata)
 - `metadata/` - Individual product metadata files
 - `manufacturers.json` - Manufacturer data
+- `generation.json` - Generator version and models of each hydration/translation step
+- `template.json` - Template metadata (see below)
+
+## Template Metadata (`template.json`)
+
+Every hydration and translation records its run in `generation.json` (key per step:
+`hydrate`, `hydrate:categories`, `hydrate:properties`, `hydrate:cms`, `translate:<locale>`;
+the last run of a step wins). A translation run that only reused cached entries is not
+recorded. `bun run template metadata` combines it with the catalog and the lane results
+into `template.json`:
+
+```json
+{
+    "schemaVersion": 1,
+    "name": "beauty",
+    "description": "...",
+    "createdAt": "2026-11-09T10:00:00.000Z",
+    "generator": { "version": "2.0.0", "commit": "9dce378" },
+    "content": { "products": 90, "categories": 25, "languages": ["en", "de-DE"] },
+    "models": {
+        "text": { "provider": "openai", "model": "gpt-6-luna" },
+        "image": { "provider": "openai", "model": "gpt-image-2.5-flare", "quality": "medium" }
+    },
+    "steps": { "hydrate": { "at": "...", "generator": {}, "text": {}, "image": {} } },
+    "testedOn": [
+        {
+            "lane": "67",
+            "shopwareVersion": "6.7.9999999.9999999-dev",
+            "passed": true,
+            "testedAt": "2026-11-09"
+        }
+    ]
+}
+```
+
+```bash
+./test-e2e-lanes.sh --reuse=beauty --skip-hydrate
+bun run template metadata --name=beauty --e2e=e2e-results/<timestamp>
+```
+
+- `--e2e` reads `<lane>/steps.tsv` and `version.txt` (fallback `verify.json`) of a lane run.
+  A lane passes when no step failed and `verify` passed. Results of the same lane replace
+  older ones, other lanes are kept. A run of another store (`summary.md` heading) is rejected.
+- `models` is missing when the template was hydrated before `generation.json` existed.
+- `generate` prints a one-line summary when it uses a template that has `template.json`.
+- Types and zod schemas: `src/types/template.ts`. Logic: `src/services/template-service.ts`.
 
 ## TemplateFetcher Class
 
@@ -153,7 +199,9 @@ Errors are logged as warnings, never thrown.
 ## Adding New Templates
 
 1. Generate a SalesChannel using the normal flow
-2. Copy `generated/sales-channels/<name>/` to the template repository
-3. Commit and push to the repository
+2. Import it on every lane: `./test-e2e-lanes.sh --reuse=<name> --skip-hydrate`
+3. Write the metadata: `bun run template metadata --name=<name> --e2e=e2e-results/<timestamp>`
+4. Copy `generated/sales-channels/<name>/` to the template repository
+5. Commit and push to the repository
 
 Templates are automatically available after the next `git pull`.

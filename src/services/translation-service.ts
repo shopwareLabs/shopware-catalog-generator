@@ -36,6 +36,7 @@ import { DataHydrator, getShopLanguages, languageOf } from "../shopware/index.js
 import { logger } from "../utils/index.js";
 import { formatActualUsage } from "./blueprint-service.js";
 import { createProcessorDeps } from "./shopware-context.js";
+import { buildGenerationStep } from "./template-service.js";
 
 /** Locale codes as Shopware stores them: "de-DE", "fr-CH" */
 const LOCALE_PATTERN = /^([a-z]{2,3})-([a-z]{2})$/i;
@@ -268,6 +269,7 @@ export async function runTranslation(
     }
 
     const { text: textProvider } = createProvidersFromEnv();
+    const selection = resolveModelSelection(providerConfigFromEnv());
     const source = buildTranslationSource(blueprint, cache.loadCmsBlueprint(salesChannelName));
     const storeDescription = blueprint.salesChannel.description || `${salesChannelName} webshop`;
     const lines: string[] = [];
@@ -286,6 +288,14 @@ export async function runTranslation(
             force: options.force,
         });
         cache.saveTranslations(salesChannelName, result.file);
+        // Only a run that translated something changes which model wrote the file
+        if (result.translated > 0) {
+            cache.recordGenerationStep(
+                salesChannelName,
+                `translate:${locale}`,
+                buildGenerationStep(selection, false)
+            );
+        }
         lines.push(
             `  ${locale}: ${result.translated} translated, ${result.reused} reused, ` +
                 `formality ${result.file.style.formality}`,
@@ -293,7 +303,6 @@ export async function runTranslation(
         );
     }
 
-    const selection = resolveModelSelection(providerConfigFromEnv());
     return {
         lines: [
             ...lines,

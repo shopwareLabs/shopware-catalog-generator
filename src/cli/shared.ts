@@ -28,8 +28,8 @@ export class CLIError extends Error {
 }
 
 export interface CliArgs {
-    command: "blueprint" | "generate" | "process" | "image" | "help";
-    subcommand?: "create" | "estimate" | "hydrate" | "fix" | "inspire" | "translate";
+    command: "blueprint" | "generate" | "process" | "image" | "template" | "help";
+    subcommand?: "create" | "estimate" | "hydrate" | "fix" | "inspire" | "translate" | "metadata";
     name?: string;
     description?: string;
     url?: string;
@@ -46,6 +46,8 @@ export interface CliArgs {
     /** --formality: "formal" or "informal" */
     formality?: string;
     force?: boolean;
+    /** --e2e: e2e-results/<timestamp> directory of a lane matrix run (template metadata) */
+    e2e?: string;
 }
 
 // =============================================================================

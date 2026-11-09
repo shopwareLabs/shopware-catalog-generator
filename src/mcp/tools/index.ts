@@ -9,3 +9,4 @@ export { registerCacheTools } from "./cache.js";
 export { registerCleanupTools } from "./cleanup.js";
 export { registerGenerateTools } from "./generate.js";
 export { registerImageFixTools } from "./image-fix.js";
+export { registerTemplateTools } from "./template.js";

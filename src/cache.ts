@@ -8,6 +8,8 @@ import type {
     CategoryNode,
     CategoryTreeCache,
     CmsBlueprint,
+    GenerationLog,
+    GenerationStep,
     HydratedBlueprint,
     Manufacturer,
     ProductCacheMetadata,
@@ -16,12 +18,29 @@ import type {
     PropertyGroup,
     PropertyOption,
     SalesChannelCacheMetadata,
+    TemplateInfo,
     TranslationFile,
 } from "./types/index.js";
 
 import { ImageCache } from "./image-cache.js";
-import { DEFAULT_CACHE_OPTIONS, TranslationFileSchema } from "./types/index.js";
+import {
+    DEFAULT_CACHE_OPTIONS,
+    GenerationLogSchema,
+    TemplateInfoSchema,
+    TranslationFileSchema,
+} from "./types/index.js";
 import { logger } from "./utils/logger.js";
+
+/** Read and validate a template.json file. Returns null when missing or invalid. */
+export function readTemplateInfoFile(file: string): TemplateInfo | null {
+    if (!fs.existsSync(file)) return null;
+    try {
+        const parsed = TemplateInfoSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf-8")));
+        return parsed.success ? parsed.data : null;
+    } catch {
+        return null;
+    }
+}
 
 export { ImageCache, type ImageCacheApi, type MediaType } from "./image-cache.js";
 
@@ -547,6 +566,36 @@ export class DataCache implements DataCacheApi {
     hasInspiration(salesChannel: string): boolean {
         const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
         return this.hasCachedFile(file);
+    }
+
+    // =========================================================================
+    // Template Metadata (generation.json, template.json)
+    // =========================================================================
+
+    /** Record the last run of a generation step ("hydrate", "translate:de-DE", ...) */
+    recordGenerationStep(salesChannel: string, key: string, step: GenerationStep): void {
+        const log = this.loadGenerationLog(salesChannel) ?? { steps: {} };
+        log.steps[key] = step;
+        this.saveJsonFile(path.join(this.getSalesChannelDir(salesChannel), "generation.json"), log);
+    }
+
+    loadGenerationLog(salesChannel: string): GenerationLog | null {
+        const raw = this.loadJsonFile<unknown>(
+            path.join(this.getSalesChannelDir(salesChannel), "generation.json")
+        );
+        if (raw === null) return null;
+        const parsed = GenerationLogSchema.safeParse(raw);
+        return parsed.success ? parsed.data : null;
+    }
+
+    saveTemplateInfo(salesChannel: string, info: TemplateInfo): void {
+        this.saveJsonFile(path.join(this.getSalesChannelDir(salesChannel), "template.json"), info);
+    }
+
+    loadTemplateInfo(salesChannel: string): TemplateInfo | null {
+        return readTemplateInfoFile(
+            path.join(this.getSalesChannelDir(salesChannel), "template.json")
+        );
     }
 
     /**
