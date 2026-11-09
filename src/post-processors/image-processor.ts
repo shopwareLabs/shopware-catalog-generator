@@ -17,9 +17,15 @@ import type {
 
 import { productMediaTexts } from "../fixtures/index.js";
 import { getAllSalesChannelProductIds, searchAllByEqualsAny } from "../shopware/api-helpers.js";
-import { apiPost, ConcurrencyLimiter, generateUUID, logger } from "../utils/index.js";
+import {
+    apiPost,
+    ConcurrencyLimiter,
+    detectImageFormat,
+    generateUUID,
+    logger,
+} from "../utils/index.js";
 import { CategoryImageProcessor } from "./category-image-processor.js";
-import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
+import { uploadImageWithRetry } from "./image-utils.js";
 
 /**
  * Image Processor implementation

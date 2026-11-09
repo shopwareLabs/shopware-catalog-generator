@@ -12,7 +12,7 @@ import type {
 } from "../types/index.js";
 
 import { PROVIDER_DEFAULTS } from "../types/index.js";
-import { logger } from "../utils/index.js";
+import { detectImageFormat, logger } from "../utils/index.js";
 
 /**
  * OpenAI text generation provider
@@ -149,8 +149,10 @@ export class OpenAIImageProvider implements ImageProvider {
     ): Promise<string | null> {
         try {
             const buffer = Buffer.from(sourceBase64, "base64");
-            const type = detectImageMimeType(buffer);
-            const image = await toFile(buffer, `source.${type.split("/")[1]}`, { type });
+            const format = detectImageFormat(buffer);
+            const image = await toFile(buffer, `source.${format.extension}`, {
+                type: format.mimeType,
+            });
             const response = await this.client.images.edit(
                 {
                     model: this.model,
@@ -206,16 +208,4 @@ export class OpenAIImageProvider implements ImageProvider {
         if (ratio < 0.8) return "1024x1536";
         return "1024x1024";
     }
-}
-
-/** WebP ("RIFF....WEBP"), JPEG or PNG from the file signature; PNG when unknown */
-export function detectImageMimeType(buffer: Buffer): "image/webp" | "image/jpeg" | "image/png" {
-    if (
-        buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
-        buffer.subarray(8, 12).toString("ascii") === "WEBP"
-    ) {
-        return "image/webp";
-    }
-    if (buffer[0] === 0xff && buffer[1] === 0xd8) return "image/jpeg";
-    return "image/png";
 }

@@ -16,7 +16,6 @@ import {
     OpenAIImageProvider,
     OpenAITextProvider,
 } from "../../../src/providers/index.js";
-import { detectImageMimeType } from "../../../src/providers/openai-provider.js";
 
 describe("OpenAI SDK compatibility", () => {
     const requests: Request[] = [];
@@ -267,16 +266,6 @@ describe("OpenAI SDK compatibility", () => {
         responseBody = { error: { message: "Bad edit", type: "invalid_request_error" } };
 
         expect(await new OpenAIImageProvider("test-key").editImage("Recolour", "aW1n")).toBeNull();
-    });
-});
-
-describe("detectImageMimeType", () => {
-    test.each([
-        [Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP")]), "image/webp"],
-        [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
-        [Buffer.from([0x89, 0x50, 0x4e, 0x47]), "image/png"],
-    ])("detects %#", (buffer, type) => {
-        expect<string>(detectImageMimeType(buffer)).toBe(type);
     });
 });
 

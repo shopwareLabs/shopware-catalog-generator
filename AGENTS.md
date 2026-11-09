@@ -171,6 +171,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
+│   ├── image-format.ts       # detectImageFormat (magic bytes → extension + mime type)
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
