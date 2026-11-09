@@ -64,7 +64,7 @@ Providers may ignore `width`/`height` if they use fixed sizes or prefer their ow
 **OpenAI Image Notes:**
 
 - Default model: `gpt-image-1-mini` (cost-efficient, fast)
-- Available models include `gpt-image-1-mini`, `gpt-image-1`, `gpt-image-1.5`, `gpt-image-2.5-flare` (override via `IMAGE_MODEL`)
+- Available models include `gpt-image-1-mini`, `gpt-image-1.5`, `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.6-flare`, `gpt-image-2.6-sunburst` (`gpt-image-1` was shut down on 2026-10-23) (override via `IMAGE_MODEL`)
 - Quality levels: `low` (default, cheapest), `medium`, `high`, `auto` (override via `IMAGE_QUALITY`)
 - Supported sizes: `1024x1024`, `1536x1024` (landscape), `1024x1536` (portrait)
 - Requests `output_format: "webp"` for smaller payloads (matches cache format)
