@@ -116,6 +116,27 @@ describe("estimateHydrationCost", () => {
         expect(estimate.images.unitUsd).toBe(0.015);
     });
 
+    test("prices gpt-image-2.6 above 2.5 at medium quality (more output tokens)", () => {
+        const priceFor = (imageModel: string): number | null =>
+            estimateHydrationCost(
+                createInput({
+                    selection: { ...OPENAI_SELECTION, imageModel, imageQuality: "medium" },
+                })
+            ).images.unitUsd;
+
+        expect(priceFor("gpt-image-2.5-flare")).toBe(0.0103);
+        expect(priceFor("gpt-image-2.6-flare")).toBe(0.034);
+        expect(priceFor("gpt-image-2.6-sunburst")).toBe(0.034);
+    });
+
+    test("has no price for the shut down gpt-image-1", () => {
+        const estimate = estimateHydrationCost(
+            createInput({ selection: { ...OPENAI_SELECTION, imageModel: "gpt-image-1" } })
+        );
+
+        expect(estimate.images.unitUsd).toBeNull();
+    });
+
     test("total is the sum of text and image cost", () => {
         const estimate = estimateHydrationCost(createInput());
 

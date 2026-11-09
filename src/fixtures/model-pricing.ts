@@ -22,11 +22,20 @@ export const OPENAI_TEXT_PRICES: Record<string, TextModelPrice> = {
 };
 
 /**
- * OpenAI image models, USD per image at 1536x1024 (the provider's default size).
- * Square images are slightly cheaper, so these act as an upper bound.
+ * OpenAI image models, USD image output cost per image at 1536x1024 (the provider's
+ * default size), standard tier. Prompt text tokens are not included (a few cents per store).
+ *
+ * gpt-image-1-mini / 1.5: legacy per-image table in the image generation guide.
+ * gpt-image-2 / 2.5 / 2.6: output tokens from the guide's token calculator at $30 per 1M.
+ * gpt-image-2.6 uses more tokens than 2.5 at low and medium quality, so it costs more there.
+ * Square images cost more than landscape for gpt-image-2+, and less for older models.
  */
 export const OPENAI_IMAGE_PRICES: Record<string, ImageModelPrice> = {
     "gpt-image-1-mini": { low: 0.006, medium: 0.015, high: 0.052 },
-    "gpt-image-1.5": { low: 0.011, medium: 0.019, high: 0.065 },
-    "gpt-image-1": { low: 0.016, medium: 0.063, high: 0.25 },
+    "gpt-image-1.5": { low: 0.013, medium: 0.05, high: 0.2 },
+    "gpt-image-2": { low: 0.0047, medium: 0.0412, high: 0.1646 },
+    "gpt-image-2.5-flare": { low: 0.0047, medium: 0.0103, high: 0.0412 },
+    "gpt-image-2.5-sunburst": { low: 0.0047, medium: 0.0103, high: 0.0412 },
+    "gpt-image-2.6-flare": { low: 0.0199, medium: 0.034, high: 0.0412 },
+    "gpt-image-2.6-sunburst": { low: 0.0199, medium: 0.034, high: 0.0412 },
 };
