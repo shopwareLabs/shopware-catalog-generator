@@ -118,6 +118,7 @@ src/
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── promotion-processor.ts # Demo promotion codes (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── variant-processor.ts  # Variant product creation
+│   ├── variant-image-processor.ts # Colour images + gallery per colour variant
 │   ├── review-processor.ts   # Variable review counts, spread across SalesChannel languages
 │   ├── translation-processor.ts # Writes cached translations (no AI)
 │   └── theme-processor.ts    # Child theme with brand colors + media
@@ -249,6 +250,7 @@ tests/
 │   │   ├── review-processor.test.ts
 │   │   ├── theme-processor.test.ts
 │   │   ├── variant-processor.test.ts
+│   │   ├── variant-image-processor.test.ts
 │   │   ├── digital-product-processor.test.ts
 │   │   ├── media-product-processor.test.ts
 │   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
@@ -537,28 +539,29 @@ interface PostProcessorOptions {
 
 **Available processors:**
 
-| Processor          | Description                                      | Dependencies                                                 |
-| ------------------ | ------------------------------------------------ | ------------------------------------------------------------ |
-| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling`                   |
-| `cms-text`         | Text elements demo page                          | none                                                         |
-| `cms-images`       | Image elements demo page                         | none                                                         |
-| `cms-video`        | Video elements demo page                         | none                                                         |
-| `cms-text-images`  | Text & Images demo page                          | none                                                         |
-| `cms-commerce`     | Commerce elements demo page                      | `images`                                                     |
-| `cms-form`         | Form elements demo page                          | none                                                         |
-| `cms-footer-pages` | Shared footer and legal pages                    | none                                                         |
-| `cross-selling`    | Category-based cross-selling via product streams | none                                                         |
-| `customers`        | Demo customer accounts with B2B group            | none                                                         |
-| `images`           | Upload pre-generated product/category images     | none                                                         |
-| `manufacturers`    | Fictional manufacturer creation                  | none                                                         |
-| `promotions`       | Tiered pricing and promotion codes               | none                                                         |
-| `reviews`          | Variable review counts (0-10 per product)        | none                                                         |
-| `theme`            | Child theme with brand colors, logo, favicon     | none                                                         |
-| `variants`         | Variant product creation                         | `manufacturers`                                              |
-| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `promotions` |
-| `digital-product`  | Digital product with download                    | none                                                         |
-| `media-product`    | Product with 3D models + videos (6.6+)           | none                                                         |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product, media-product                       |
+| Processor          | Description                                      | Dependencies                                                                   |
+| ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling`                                     |
+| `cms-text`         | Text elements demo page                          | none                                                                           |
+| `cms-images`       | Image elements demo page                         | none                                                                           |
+| `cms-video`        | Video elements demo page                         | none                                                                           |
+| `cms-text-images`  | Text & Images demo page                          | none                                                                           |
+| `cms-commerce`     | Commerce elements demo page                      | `images`                                                                       |
+| `cms-form`         | Form elements demo page                          | none                                                                           |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                                                                           |
+| `cross-selling`    | Category-based cross-selling via product streams | none                                                                           |
+| `customers`        | Demo customer accounts with B2B group            | none                                                                           |
+| `images`           | Upload pre-generated product/category images     | none                                                                           |
+| `manufacturers`    | Fictional manufacturer creation                  | none                                                                           |
+| `promotions`       | Tiered pricing and promotion codes               | none                                                                           |
+| `reviews`          | Variable review counts (0-10 per product)        | none                                                                           |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                                                                           |
+| `variants`         | Variant product creation                         | `manufacturers`                                                                |
+| `variant-images`   | Colour images and gallery per colour variant     | `variants`, `images`                                                           |
+| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `variant-images`, `promotions` |
+| `digital-product`  | Digital product with download                    | none                                                                           |
+| `media-product`    | Product with 3D models + videos (6.6+)           | none                                                                           |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product, media-product                                         |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -1324,7 +1327,8 @@ Hydration modes:
   except the default one, which the parent images already show). Needs image editing (OpenAI
   `images.edit`); other providers are skipped with a warning and variants keep the parent images.
   Cached images are reused; a changed parent image makes its colour copies stale (source hash).
-  `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too
+  `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too.
+  The `variant-images` processor uploads them in `generate` / `process`
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.

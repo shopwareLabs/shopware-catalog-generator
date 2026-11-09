@@ -8,6 +8,7 @@ import {
     PROMOTIONS,
     productMediaTexts,
     TRANSLATABLE_FIXTURE_TEXTS,
+    variantMediaTexts,
 } from "../../../src/fixtures/index.js";
 
 describe("TRANSLATABLE_FIXTURE_TEXTS", () => {
@@ -54,5 +55,19 @@ describe("productMediaTexts", () => {
 
     test("uses the English pattern for views without a template", () => {
         expect(productMediaTexts("Chair", "top").alt).toBe("Chair (top view)");
+    });
+});
+
+describe("variantMediaTexts", () => {
+    test("adds the shade to the product name of the view text", () => {
+        expect(variantMediaTexts("Chair", "side", "Burgundy")).toEqual({
+            alt: "Chair, Burgundy (side view)",
+            title: "Chair, Burgundy (side view)",
+        });
+        expect(
+            variantMediaTexts("Stuhl", "side", "Weinrot", {
+                "media.productImage.side": "{name} (Seitenansicht)",
+            }).alt
+        ).toBe("Stuhl, Weinrot (Seitenansicht)");
     });
 });

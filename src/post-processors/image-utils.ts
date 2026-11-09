@@ -4,7 +4,14 @@
 
 import type { ShopwareRequestContext } from "../utils/shopware-request.js";
 
+import { PRODUCT_IMAGE_VIEWS } from "../fixtures/index.js";
 import { apiUpload, executeWithRetry } from "../utils/index.js";
+
+/** Image view from a product media file name ("oak-desk-front" -> "front") */
+export function viewFromFileName(fileName: string | null | undefined): string | null {
+    if (!fileName) return null;
+    return PRODUCT_IMAGE_VIEWS.find((view) => fileName.endsWith(`-${view}`)) ?? null;
+}
 
 /**
  * Upload image with retry logic for transient failures

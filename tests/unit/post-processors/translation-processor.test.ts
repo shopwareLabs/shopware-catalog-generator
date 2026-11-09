@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-    TranslationProcessor,
-    viewFromFileName,
-} from "../../../src/post-processors/translation-processor.js";
+import { TranslationProcessor } from "../../../src/post-processors/translation-processor.js";
 import { SYSTEM_LANGUAGE_ID } from "../../../src/shopware/languages.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
@@ -44,6 +41,7 @@ describe("TranslationProcessor", () => {
             "cms-home",
             "cms-footer-pages",
             "images",
+            "variant-images",
             "promotions",
         ]);
     });
@@ -154,17 +152,5 @@ describe("TranslationProcessor", () => {
                 ],
             },
         });
-    });
-});
-
-describe("viewFromFileName", () => {
-    test("reads the view from the file name suffix", () => {
-        expect(viewFromFileName("oak-desk-front")).toBe("front");
-        expect(viewFromFileName("oak-desk-lifestyle")).toBe("lifestyle");
-    });
-
-    test("returns null for unknown or missing names", () => {
-        expect(viewFromFileName("oak-desk")).toBeNull();
-        expect(viewFromFileName(null)).toBeNull();
     });
 });
