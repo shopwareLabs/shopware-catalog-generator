@@ -401,12 +401,12 @@ elif [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.js
 else
     echo "[4/5] Running post-processors..."
 
-    # Order matters: cms-testing links the CMS pages and the digital product
+    # Order matters: cms-testing links the CMS pages, the digital and the media product
     PROCESSOR_STEPS=(
         "cms-home"
         "cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form"
         "images"
-        "digital-product"
+        "digital-product,media-product"
         "cms-testing"
         "theme"
     )

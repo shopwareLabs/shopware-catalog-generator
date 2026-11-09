@@ -6,13 +6,13 @@
  * 2. CMS sub-category with showcase landing page
  * 3. CMS element sub-categories (Text, Images, Video, etc.)
  * 4. Products sub-category (navigation)
- * 5. Product type sub-categories (Simple, Variant, Digital)
+ * 5. Product type sub-categories (Simple, Variant, Digital, Media)
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { CmsPageFixture, ShopwareFeature } from "../../fixtures/index.js";
 import type { CategorySyncPayload } from "../../types/index.js";
 import type {
     PostProcessor,
@@ -34,6 +34,7 @@ import {
     toFixtureUrlSlug,
     toStoreScopedName,
 } from "../../utils/index.js";
+import { MEDIA_SHOWCASE_PRODUCT_ID } from "../media-product-processor.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
 /** CMS element category configuration matching Shopware admin block categories */
@@ -47,10 +48,16 @@ const CMS_CATEGORIES = [
 ];
 
 /** Product type categories linking to specific products */
-const PRODUCT_CATEGORIES = [
+const PRODUCT_CATEGORIES: ReadonlyArray<{
+    name: string;
+    type: string;
+    /** Only created when the shop supports this feature */
+    requires?: ShopwareFeature;
+}> = [
     { name: "Simple Product", type: "simple" },
     { name: "Variant Product", type: "variant" },
     { name: "Digital Product", type: "digital" },
+    { name: "Media Product", type: "media", requires: "spatialMedia" },
 ];
 
 /** Cache file for digital product info */
@@ -64,8 +71,12 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     readonly description = "Create Testing category hierarchy with CMS and Products sub-sections";
     readonly pageFixture = TESTING_PLACEHOLDER_PAGE;
 
-    /** Dependencies - all element processors and digital product must run first */
-    override readonly dependsOn = [...CMS_CATEGORIES.map((c) => c.processor), "digital-product"];
+    /** Dependencies - all element processors and the demo products must run first */
+    override readonly dependsOn = [
+        ...CMS_CATEGORIES.map((c) => c.processor),
+        "digital-product",
+        "media-product",
+    ];
 
     /**
      * Override process to create full hierarchy
@@ -497,7 +508,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         }
 
         const missingProducts: string[] = [];
-        for (const cat of PRODUCT_CATEGORIES) {
+        for (const cat of this.getSupportedProductCategories(context)) {
             const id = await findCategoryIdByName(context, cat.name, productsCategoryId);
             if (!id) missingProducts.push(cat.name);
         }
@@ -511,7 +522,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (missingCms.length === 0 && missingProducts.length === 0) {
             logger.info(
-                `    ✓ Validated: ${CMS_CATEGORIES.length} CMS + ${PRODUCT_CATEGORIES.length} Product categories`,
+                `    ✓ Validated: ${CMS_CATEGORIES.length} CMS + ${this.getSupportedProductCategories(context).length} Product categories`,
                 { cli: true }
             );
         }
@@ -525,7 +536,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         productsCategoryId: string,
         errors: string[]
     ): Promise<void> {
-        for (const cat of PRODUCT_CATEGORIES) {
+        for (const cat of this.getSupportedProductCategories(context)) {
             const productId = await this.getProductByType(context, cat.type);
             if (!productId) {
                 logger.warn(`    ⚠ No ${cat.type} product found for "${cat.name}"`, {
@@ -551,6 +562,15 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 logger.info(`    ⊘ "${cat.name}" product link already exists`, { cli: true });
             }
         }
+    }
+
+    /** Product categories the connected shop can show (e.g. no 3D/video gallery before 6.6) */
+    private getSupportedProductCategories(
+        context: PostProcessorContext
+    ): typeof PRODUCT_CATEGORIES {
+        return PRODUCT_CATEGORIES.filter(
+            (cat) => !cat.requires || context.shopware.supports(cat.requires)
+        );
     }
 
     private async getRootCategoryId(context: PostProcessorContext): Promise<string | null> {
@@ -949,7 +969,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     }
 
     /**
-     * Get a product by type (simple, variant, digital)
+     * Get a product by type (simple, variant, digital, media)
      */
     private async getProductByType(
         context: PostProcessorContext,
@@ -960,6 +980,10 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             return this.getDigitalProductId(context);
         }
 
+        if (type === "media") {
+            return this.getMediaProductId(context);
+        }
+
         // For variant products, find a parent product with children
         if (type === "variant") {
             return Promise.resolve(this.getVariantProductId(context));
@@ -967,6 +991,15 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         // For simple products, find a product without children and not a child
         return this.getSimpleProductId(context);
+    }
+
+    /** Media showcase product (deterministic ID), if the media-product processor created it */
+    private async getMediaProductId(context: PostProcessorContext): Promise<string | null> {
+        const found = await context.api.searchEntities<{ id: string }>("product", [], {
+            ids: [MEDIA_SHOWCASE_PRODUCT_ID],
+            limit: 1,
+        });
+        return found.length > 0 ? MEDIA_SHOWCASE_PRODUCT_ID : null;
     }
 
     /**

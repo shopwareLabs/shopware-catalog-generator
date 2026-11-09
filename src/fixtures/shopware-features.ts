@@ -34,6 +34,14 @@ export const SHOPWARE_FEATURES = {
         description: "custom_field.includeInSearch (custom field values in product search)",
         since: "6.7.7.0",
     },
+    spatialMedia: {
+        description: "3D models (.glb) in the product gallery with the 3D viewer",
+        since: "6.6.0.0",
+    },
+    productVideo: {
+        description: "Videos (.mp4/.webm) in the product gallery",
+        since: "6.6.1.0",
+    },
     productOpenGraph: {
         description: "product.ogTitle / ogDescription / openGraphMediaId (social sharing)",
         since: "6.7.10.0",

@@ -227,26 +227,27 @@ bun run cache:restore -- --all        # Restore from trash
 
 Post-processors run after upload for resource-intensive tasks (images, reviews, CMS pages, etc.).
 
-| Processor          | Description                                      | Dependencies            |
-| ------------------ | ------------------------------------------------ | ----------------------- |
-| `cms-home`         | Homepage layout with product listing             | none                    |
-| `cms-text`         | Text elements demo page                          | none                    |
-| `cms-images`       | Image elements demo page                         | none                    |
-| `cms-video`        | Video elements demo page                         | none                    |
-| `cms-text-images`  | Text & Images demo page                          | none                    |
-| `cms-commerce`     | Commerce elements demo page                      | images                  |
-| `cms-form`         | Form elements demo page                          | none                    |
-| `cms-footer-pages` | Shared footer and legal pages                    | none                    |
-| `cross-selling`    | Category-based cross-selling via product streams | none                    |
-| `customers`        | Demo customer accounts with B2B group            | none                    |
-| `images`           | Upload pre-generated product/category images     | none                    |
-| `manufacturers`    | Fictional manufacturer creation                  | none                    |
-| `promotions`       | Tiered pricing and promotion codes               | none                    |
-| `reviews`          | Product reviews (0-10 per product)               | none                    |
-| `theme`            | Child theme with brand colors, logo, favicon     | none                    |
-| `variants`         | Variant product creation                         | manufacturers           |
-| `digital-product`  | Digital product (Gift Card)                      | none                    |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product |
+| Processor          | Description                                      | Dependencies          |
+| ------------------ | ------------------------------------------------ | --------------------- |
+| `cms-home`         | Homepage layout with product listing             | none                  |
+| `cms-text`         | Text elements demo page                          | none                  |
+| `cms-images`       | Image elements demo page                         | none                  |
+| `cms-video`        | Video elements demo page                         | none                  |
+| `cms-text-images`  | Text & Images demo page                          | none                  |
+| `cms-commerce`     | Commerce elements demo page                      | images                |
+| `cms-form`         | Form elements demo page                          | none                  |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                  |
+| `cross-selling`    | Category-based cross-selling via product streams | none                  |
+| `customers`        | Demo customer accounts with B2B group            | none                  |
+| `images`           | Upload pre-generated product/category images     | none                  |
+| `manufacturers`    | Fictional manufacturer creation                  | none                  |
+| `promotions`       | Tiered pricing and promotion codes               | none                  |
+| `reviews`          | Product reviews (0-10 per product)               | none                  |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                  |
+| `variants`         | Variant product creation                         | manufacturers         |
+| `digital-product`  | Digital product (Gift Card)                      | none                  |
+| `media-product`    | Product with 3D models and videos (6.6+)         | none                  |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, demo products |
 
 Processors run in parallel when possible, respecting dependency order. See [CONCEPTS.md](CONCEPTS.md#post-processor-system) for the execution diagram.
 

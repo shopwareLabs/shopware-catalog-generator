@@ -80,11 +80,23 @@ describe("ShopwareCapabilities.supports", () => {
         expect(at("6.7.1.0").supports("measurementUnits")).toBe(true);
     });
 
-    test("6.5 and 6.6 support none of the listed features", () => {
-        for (const raw of ["6.5.9999999.9999999-dev", "6.6.9999999.9999999-dev"]) {
-            const capabilities = ShopwareCapabilities.fromVersion(raw);
-            expect(allFeatures.filter((feature) => capabilities.supports(feature))).toEqual([]);
-        }
+    test("6.5 supports none of the listed features", () => {
+        const capabilities = ShopwareCapabilities.fromVersion("6.5.9999999.9999999-dev");
+        expect(allFeatures.filter((feature) => capabilities.supports(feature))).toEqual([]);
+    });
+
+    test("6.6 supports only the 3D and video gallery", () => {
+        const capabilities = ShopwareCapabilities.fromVersion("6.6.9999999.9999999-dev");
+        expect(allFeatures.filter((feature) => capabilities.supports(feature))).toEqual([
+            "spatialMedia",
+            "productVideo",
+        ]);
+    });
+
+    test("6.6.0 has the 3D viewer but no gallery videos yet", () => {
+        const capabilities = ShopwareCapabilities.fromVersion("6.6.0.0");
+        expect(capabilities.supports("spatialMedia")).toBe(true);
+        expect(capabilities.supports("productVideo")).toBe(false);
     });
 
     test("a 6.7 dev build supports all 6.7 features but not 6.8 ones without the flag", () => {

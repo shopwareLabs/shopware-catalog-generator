@@ -470,6 +470,7 @@ import { CustomerProcessor } from "./customer-processor.js";
 import { DigitalProductProcessor } from "./digital-product-processor.js";
 import { ImageProcessor } from "./image-processor.js";
 import { ManufacturerProcessor } from "./manufacturer-processor.js";
+import { MediaProductProcessor } from "./media-product-processor.js";
 import { PromotionProcessor } from "./promotion-processor.js";
 import { ReviewProcessor } from "./review-processor.js";
 import { ThemeProcessor } from "./theme-processor.js";
@@ -493,6 +494,7 @@ export { CustomerProcessor } from "./customer-processor.js";
 export { DigitalProductProcessor } from "./digital-product-processor.js";
 export { ImageProcessor } from "./image-processor.js";
 export { ManufacturerProcessor } from "./manufacturer-processor.js";
+export { MediaProductProcessor } from "./media-product-processor.js";
 export { PromotionProcessor } from "./promotion-processor.js";
 export { ReviewProcessor } from "./review-processor.js";
 export { ThemeProcessor } from "./theme-processor.js";
@@ -512,6 +514,7 @@ registry.register(HomeProcessor);
 // Shared footer legal pages for all SalesChannels
 registry.register(FooterPagesProcessor);
 registry.register(DigitalProductProcessor);
+registry.register(MediaProductProcessor);
 // CMS orchestrator (creates Testing category hierarchy, runs last)
 registry.register(TestingProcessor);
 // Other processors

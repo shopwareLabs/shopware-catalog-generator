@@ -114,6 +114,17 @@ export interface ShopwareApi {
     patch<T = unknown>(endpoint: string, body?: unknown): Promise<T>;
 }
 
+/** Content-Type header per upload extension (Shopware detects 3D models by `glb`) */
+const MEDIA_CONTENT_TYPES: Record<string, string> = {
+    webp: "image/webp",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    glb: "model/gltf-binary",
+    mp4: "video/mp4",
+    webm: "video/webm",
+};
+
 /**
  * Shopware API Helpers class
  *
@@ -276,14 +287,7 @@ export class ShopwareApiHelpers implements ShopwareApi {
     ): Promise<void> {
         const endpoint = `_action/media/${mediaId}/upload?extension=${extension}&fileName=${encodeURIComponent(fileName)}`;
 
-        const contentType =
-            extension === "webp"
-                ? "image/webp"
-                : extension === "jpg" || extension === "jpeg"
-                  ? "image/jpeg"
-                  : extension === "png"
-                    ? "image/png"
-                    : "application/octet-stream";
+        const contentType = MEDIA_CONTENT_TYPES[extension] ?? "application/octet-stream";
 
         await this.postRaw(endpoint, file, { "Content-Type": contentType });
     }

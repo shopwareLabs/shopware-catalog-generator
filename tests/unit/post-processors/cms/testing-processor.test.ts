@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { TestingProcessor } from "../../../../src/post-processors/cms/testing-processor.js";
+import { ShopwareCapabilities } from "../../../../src/shopware/version.js";
 import { createTestContext } from "../../../helpers/post-processor-context.js";
 import { createMockApiHelpers } from "../../../mocks/index.js";
 
@@ -15,7 +16,7 @@ describe("TestingProcessor", () => {
             expect(TestingProcessor.description.length).toBeGreaterThan(0);
         });
 
-        test("depends on all CMS element processors and digital-product", () => {
+        test("depends on all CMS element processors and the demo products", () => {
             expect(TestingProcessor.dependsOn).toContain("cms-text");
             expect(TestingProcessor.dependsOn).toContain("cms-images");
             expect(TestingProcessor.dependsOn).toContain("cms-video");
@@ -23,7 +24,8 @@ describe("TestingProcessor", () => {
             expect(TestingProcessor.dependsOn).toContain("cms-commerce");
             expect(TestingProcessor.dependsOn).toContain("cms-form");
             expect(TestingProcessor.dependsOn).toContain("digital-product");
-            expect(TestingProcessor.dependsOn.length).toBe(7);
+            expect(TestingProcessor.dependsOn).toContain("media-product");
+            expect(TestingProcessor.dependsOn.length).toBe(8);
         });
 
         test("has page fixture with correct name", () => {
@@ -139,6 +141,18 @@ describe("TestingProcessor", () => {
             expect(missingErrors.length).toBeGreaterThan(0);
             expect(result.processed).toBe(0);
         });
+
+        test("expects a Media Product link on shops with a 3D gallery", async () => {
+            const missing = await missingProductCategories("6.7.16.0");
+            expect(missing).toContain("Media Product");
+            expect(missing).toContain("Digital Product");
+        });
+
+        test("does not expect a Media Product link on shops without a 3D gallery", async () => {
+            const missing = await missingProductCategories("6.5.8.0");
+            expect(missing).not.toContain("Media Product");
+            expect(missing).toContain("Digital Product");
+        });
     });
 
     describe("cleanup", () => {
@@ -208,3 +222,19 @@ describe("TestingProcessor", () => {
         });
     });
 });
+
+/** Runs the processor against an empty shop and returns the reported missing product links */
+async function missingProductCategories(version: string): Promise<string> {
+    const mockApi = createMockApiHelpers();
+    mockApi.mockPostResponse("search/sales-channel", {
+        data: [{ id: "sc-123", navigationCategoryId: "root-cat-id" }],
+    });
+
+    const { context } = createTestContext({
+        mockApi,
+        shopware: ShopwareCapabilities.fromVersion(version),
+    });
+    const result = await TestingProcessor.process(context);
+
+    return result.errors.find((e) => e.startsWith("Missing Product sub-categories")) ?? "";
+}

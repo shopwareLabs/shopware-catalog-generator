@@ -103,6 +103,7 @@ src/
 │   ├── cross-selling-processor.ts # Category-based cross-selling
 │   ├── customer-processor.ts     # Demo customer accounts with B2B group
 │   ├── digital-product-processor.ts # Digital product with download
+│   ├── media-product-processor.ts # Media Showcase product (3D models + videos)
 │   ├── image-processor.ts    # Multi-view product image generation
 │   ├── category-image-processor.ts # Category banner images
 │   ├── image-utils.ts        # Shared image utilities
@@ -133,6 +134,8 @@ src/
 │   ├── demo-customers.ts     # Demo customer accounts + B2B group
 │   ├── digital-products.ts   # Gift card fixture (GIFT_CARD_50)
 │   ├── footer-navigation.ts  # Footer category trees + legal pages (cms-footer-pages)
+│   ├── media-showcase.ts     # Media Showcase product + gallery files (GLB, MP4)
+│   ├── media/                # Licence-safe 3D models and videos (see LICENSES.md)
 │   ├── locale-currencies.ts  # Locale → currency, DEFAULT_DOMAIN_LOCALES (de-DE)
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── packaging-units.ts    # Units + packaging options (reference prices)
@@ -229,6 +232,7 @@ tests/
 │   │   ├── theme-processor.test.ts
 │   │   ├── variant-processor.test.ts
 │   │   ├── digital-product-processor.test.ts
+│   │   ├── media-product-processor.test.ts
 │   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
 │   │   └── cms/              # CMS processor tests
 │   │       ├── base-processor.test.ts
@@ -532,7 +536,8 @@ interface PostProcessorOptions {
 | `variants`         | Variant product creation                         | `manufacturers`                                              |
 | `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `promotions` |
 | `digital-product`  | Digital product with download                    | none                                                         |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product                                      |
+| `media-product`    | Product with 3D models + videos (6.6+)           | none                                                         |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product, media-product                       |
 
 Processors run in parallel when possible, respecting dependencies:
 
