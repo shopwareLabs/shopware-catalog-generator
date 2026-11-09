@@ -98,6 +98,66 @@ describe("ThemeProcessor", () => {
     });
 });
 
+describe("ThemeProcessor theme media upload", () => {
+    // MockImageCache returns a 4-byte image for every key in cachedImages
+    const CACHED_LOGO_SIZE = 4;
+    const LOGO_MEDIA_ID = "logo-media-id";
+
+    function setup(existingLogo: { fileSize: number } | null) {
+        const { context, mockApi } = createTestContext({
+            blueprint: createTestBlueprint({
+                brandColors: { primary: "#FF0000", secondary: "#0000FF" },
+            }),
+            cachedImages: new Set(["store-logo"]),
+        });
+        mockApi.mockPostResponse("search/theme", {
+            data: [{ id: "storefront-theme-id", technicalName: "Storefront", name: "Storefront" }],
+            total: 1,
+        });
+        mockApi.mockPostResponse("search/theme", {
+            data: [{ id: "child-theme-id", name: "Test-store Theme" }],
+            total: 1,
+        });
+        mockApi.mockPostResponse("search/media", {
+            data: existingLogo ? [{ id: LOGO_MEDIA_ID, fileSize: existingLogo.fileSize }] : [],
+            total: existingLogo ? 1 : 0,
+        });
+        return { context, mockApi };
+    }
+
+    const uploads = (mockApi: ReturnType<typeof setup>["mockApi"]) =>
+        mockApi.getCallsByMethod("postRaw").map((c) => c.endpoint);
+
+    test("keeps an unchanged logo without uploading it again", async () => {
+        const { context, mockApi } = setup({ fileSize: CACHED_LOGO_SIZE });
+
+        await ThemeProcessor.process(context);
+
+        expect(uploads(mockApi)).toEqual([]);
+    });
+
+    test("replaces the file of the existing media when the cached logo changed", async () => {
+        const { context, mockApi } = setup({ fileSize: 123_456 });
+
+        await ThemeProcessor.process(context);
+
+        expect(uploads(mockApi)).toHaveLength(1);
+        expect(uploads(mockApi)[0]).toStartWith(`_action/media/${LOGO_MEDIA_ID}/upload`);
+        expect(mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body)).not.toContainEqual(
+            expect.objectContaining({ createMedia: expect.anything() })
+        );
+    });
+
+    test("creates media and uploads the logo on the first run", async () => {
+        const { context, mockApi } = setup(null);
+
+        await ThemeProcessor.process(context);
+
+        expect(uploads(mockApi)).toHaveLength(1);
+        expect(uploads(mockApi)[0]).not.toContain(LOGO_MEDIA_ID);
+    });
+});
+
 describe("buildThemeConfig", () => {
     test("derives all 5 color keys from primary + secondary", () => {
         const colors: BrandColors = {

@@ -42,7 +42,7 @@ class ThemeProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = [];
 
     private themeMediaFolderId: string | null | undefined = undefined;
-    private mediaFileNameCache = new Map<string, string>();
+    private mediaFileNameCache = new Map<string, ThemeMediaFile>();
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         this.resetCaches();
@@ -314,16 +314,36 @@ class ThemeProcessorImpl implements PostProcessor {
             );
             if (!base64Data) continue;
 
-            const fileName = `${context.salesChannelName}-${item.field}`;
+            const mediaId = await this.uploadThemeMediaFile(
+                context,
+                `${context.salesChannelName}-${item.field}`,
+                Buffer.from(base64Data, "base64"),
+                folderId
+            );
+            if (mediaId) mediaIds[item.field] = mediaId;
+        }
 
-            const existingMediaId = await this.findMediaByFileName(context, fileName);
-            if (existingMediaId) {
-                mediaIds[item.field] = existingMediaId;
-                continue;
-            }
+        return mediaIds;
+    }
 
-            const mediaId = generateUUID();
-            try {
+    /**
+     * Upload one theme image. The media entity is reused across runs (the theme config
+     * points at its ID), but its file is replaced when the cached image changed, e.g.
+     * after `image fix --type=theme`. Returns the media ID, or null when the upload failed.
+     */
+    private async uploadThemeMediaFile(
+        context: PostProcessorContext,
+        fileName: string,
+        imageBuffer: Buffer,
+        folderId: string | null
+    ): Promise<string | null> {
+        const existing = await this.findThemeMedia(context, fileName);
+        if (existing && existing.fileSize === imageBuffer.length) return existing.id;
+
+        const mediaId = existing?.id ?? generateUUID();
+        const field = fileName.slice(context.salesChannelName.length + 1);
+        try {
+            if (!existing) {
                 await apiPost(context, "_action/sync", {
                     createMedia: {
                         entity: "media",
@@ -337,27 +357,38 @@ class ThemeProcessorImpl implements PostProcessor {
                         ],
                     },
                 });
-
-                const imageBuffer = Buffer.from(base64Data, "base64");
-                const format = detectImageFormat(imageBuffer);
-                await uploadImageWithRetry(context, mediaId, fileName, imageBuffer, format);
-                mediaIds[item.field] = mediaId;
-                logger.info(`  ✓ Uploaded theme ${item.field}`, { cli: true });
-            } catch (error) {
-                logger.warn(`  Failed to upload theme ${item.field}: ${error}`, { cli: true });
             }
+            const format = detectImageFormat(imageBuffer);
+            const response = await uploadImageWithRetry(
+                context,
+                mediaId,
+                fileName,
+                imageBuffer,
+                format
+            );
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            this.mediaFileNameCache.set(fileName, { id: mediaId, fileSize: imageBuffer.length });
+            logger.info(`  ✓ ${existing ? "Replaced" : "Uploaded"} theme ${field}`, { cli: true });
+            return mediaId;
+        } catch (error) {
+            logger.warn(`  Failed to upload theme ${field}: ${error}`, { cli: true });
+            return null;
         }
-
-        return mediaIds;
     }
 
     private async findMediaByFileName(
         context: PostProcessorContext,
         fileName: string
     ): Promise<string | null> {
-        if (this.mediaFileNameCache.has(fileName)) {
-            return this.mediaFileNameCache.get(fileName) ?? null;
-        }
+        return (await this.findThemeMedia(context, fileName))?.id ?? null;
+    }
+
+    private async findThemeMedia(
+        context: PostProcessorContext,
+        fileName: string
+    ): Promise<ThemeMediaFile | null> {
+        const cached = this.mediaFileNameCache.get(fileName);
+        if (cached) return cached;
 
         try {
             const response = await apiPost(context, "search/media", {
@@ -366,12 +397,15 @@ class ThemeProcessorImpl implements PostProcessor {
             });
 
             if (!response.ok) return null;
-            const data = (await response.json()) as SearchResult<{ id: string }>;
-            const mediaId = data.data?.[0]?.id ?? null;
-            if (mediaId) {
-                this.mediaFileNameCache.set(fileName, mediaId);
-            }
-            return mediaId;
+            const data = (await response.json()) as SearchResult<{
+                id: string;
+                fileSize?: number | null;
+            }>;
+            const media = data.data?.[0];
+            if (!media) return null;
+            const file: ThemeMediaFile = { id: media.id, fileSize: media.fileSize ?? null };
+            this.mediaFileNameCache.set(fileName, file);
+            return file;
         } catch {
             return null;
         }
@@ -430,6 +464,11 @@ class ThemeProcessorImpl implements PostProcessor {
 
         return deleted;
     }
+}
+
+interface ThemeMediaFile {
+    id: string;
+    fileSize: number | null;
 }
 
 function buildThemeName(salesChannelName: string): string {
