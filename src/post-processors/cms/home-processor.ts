@@ -9,7 +9,8 @@
  * via preGenerateHomeHeroImage(). The post-processor reads from cache and only uploads.
  */
 
-import type { CmsPageFixture } from "../../fixtures/index.js";
+import type { CmsPageFixture, PromotionDefinition } from "../../fixtures/index.js";
+import type { HydratedBlueprint } from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -21,6 +22,7 @@ import {
     DEMO_CUSTOMERS,
     DEMO_PASSWORD,
     HOME_LISTING_PAGE,
+    localizedFixtureText,
     PROMOTIONS,
 } from "../../fixtures/index.js";
 import { getSalesChannelNavigationCategoryId } from "../../shopware/api-helpers.js";
@@ -33,21 +35,12 @@ import {
 } from "../../utils/index.js";
 import { BaseCmsProcessor } from "./base-processor.js";
 
-function buildIntroHtml(
-    displayName: string,
-    description: string,
-    productCount: number,
-    categoryCount: number
-): string {
-    return [
-        `<h2>Welcome to the ${displayName} Demo-Store!</h2>`,
-        `<p>This store was generated with the&nbsp;`,
-        `<a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-generator" rel="noopener">shopware-catalog-generator</a>.`,
-        `<br>The prompt to <b>generate</b> this store was:</p>`,
-        `<blockquote>${description}</blockquote>`,
-        `<p>It includes ${productCount} Products and ${categoryCount} Categories.</p>`,
-    ].join("");
-}
+/** Fixture texts of one language (English when null) */
+type Texts = Readonly<Record<string, string>> | null;
+
+const GENERATOR_URL = "https://github.com/shopwareLabs/shopware-catalog-generator";
+const TEMPLATES_URL = "https://github.com/shopwareLabs/shopware-catalog-templates";
+const README_URL = "https://github.com/shopwareLabs/shopware-catalog-generator#readme";
 
 export interface HomeFeatures {
     includeCredentials: boolean;
@@ -55,73 +48,115 @@ export interface HomeFeatures {
     includeCrossSelling: boolean;
 }
 
-function buildFeaturesHtml(features: HomeFeatures): string {
-    const items = [
-        `<li>Simple Products,&nbsp;Variant Products and&nbsp;Digital Product</li>`,
-        ...(features.includeCrossSelling
-            ? [`<li>Products have Properties, Images and Cross-Selling</li>`]
-            : [`<li>Products have Properties and Images</li>`]),
-        ...(features.includeCredentials
-            ? [`<li>Demo Customer Accounts with B2B Customer Group</li>`]
-            : []),
-        ...(features.includePromotions
-            ? [`<li>Promotion Codes and Tiered Quantity Pricing</li>`]
-            : []),
-        `<li>CMS-Pages and all CMS-Elements for Testing</li>`,
-        `<li>Both default Category-Layouts with Pagination</li>`,
+const ALL_FEATURES: HomeFeatures = {
+    includeCredentials: true,
+    includePromotions: true,
+    includeCrossSelling: true,
+};
+
+const CELL_STYLE = `style="padding: 4px 16px 4px 0"`;
+const HEADER_STYLE = `style="padding: 4px 16px 4px 0; text-align: left"`;
+
+/** Slot keys ("<section>.<block>.<slot>") of the two homepage text slots, see HOME_LISTING_PAGE */
+const HOME_HERO_SLOT_KEY = "0.0.right";
+const HOME_REFERENCE_SLOT_KEY = "1.0.content";
+
+function buildIntroHtml(
+    displayName: string,
+    description: string,
+    productCount: number,
+    categoryCount: number,
+    texts: Texts
+): string {
+    const counts = localizedFixtureText("home.counts", texts, {
+        productCount: String(productCount),
+        categoryCount: String(categoryCount),
+    });
+    return [
+        `<h2>${localizedFixtureText("home.welcome", texts, { name: displayName })}</h2>`,
+        `<p>${localizedFixtureText("home.generatedWith", texts, { generatorUrl: GENERATOR_URL })}</p>`,
+        `<blockquote>${description}</blockquote>`,
+        `<p>${counts}</p>`,
+    ].join("");
+}
+
+function buildFeaturesHtml(features: HomeFeatures, texts: Texts): string {
+    const featureKeys = [
+        "home.feature.productTypes",
+        features.includeCrossSelling ? "home.feature.crossSelling" : "home.feature.properties",
+        ...(features.includeCredentials ? ["home.feature.customers"] : []),
+        ...(features.includePromotions ? ["home.feature.promotions"] : []),
+        "home.feature.cms",
+        "home.feature.layouts",
     ];
+    const links = localizedFixtureText("home.links", texts, {
+        templatesUrl: TEMPLATES_URL,
+        readmeUrl: README_URL,
+    });
     return [
-        `<h4>Supported Features:</h4>`,
+        `<h4>${localizedFixtureText("home.featuresHeading", texts)}</h4>`,
         `<ul>`,
-        ...items,
+        ...featureKeys.map((key) => `<li>${localizedFixtureText(key, texts)}</li>`),
         `</ul>`,
-        `<p>The linked <a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-templates" rel="noopener">catalog templates</a> provide reusable setups for different store types. `,
-        `See the <a target="_blank" href="https://github.com/shopwareLabs/shopware-catalog-generator#readme" rel="noopener">README</a> for technical details.</p>`,
+        `<p>${links}</p>`,
     ].join("");
 }
 
-function buildCredentialsHtml(): string {
-    const cellStyle = `style="padding: 4px 16px 4px 0"`;
-    const headerStyle = `style="padding: 4px 16px 4px 0; text-align: left"`;
-
-    const rows = DEMO_CUSTOMERS.map((c) => {
-        const groupLabel = c.group === "b2b" ? "B2B (net prices)" : "Standard";
-        return `<tr><td ${cellStyle}>${c.email}</td><td ${cellStyle}>${DEMO_PASSWORD}</td><td ${cellStyle}>${groupLabel}</td></tr>`;
-    });
-
+function buildTable(heading: string, columns: string[], rows: string[][]): string {
+    const headerCells = columns.map((c) => `<th ${HEADER_STYLE}>${c}</th>`).join("");
+    const bodyRows = rows.map(
+        (cells) => `<tr>${cells.map((c) => `<td ${CELL_STYLE}>${c}</td>`).join("")}</tr>`
+    );
     return [
-        `<h4>Demo Accounts</h4>`,
+        `<h4>${heading}</h4>`,
         `<table style="border-collapse: collapse; margin-bottom: 1em"><thead>`,
-        `<tr><th ${headerStyle}>Email</th><th ${headerStyle}>Password</th><th ${headerStyle}>Group</th></tr>`,
+        `<tr>${headerCells}</tr>`,
         `</thead><tbody>`,
-        ...rows,
+        ...bodyRows,
         `</tbody></table>`,
     ].join("");
 }
 
-function buildPromotionCodesHtml(): string {
-    const cellStyle = `style="padding: 4px 16px 4px 0"`;
-    const headerStyle = `style="padding: 4px 16px 4px 0; text-align: left"`;
+function buildCredentialsHtml(texts: Texts): string {
+    const t = (key: string): string => localizedFixtureText(key, texts);
+    return buildTable(
+        t("home.accountsHeading"),
+        [t("home.column.email"), t("home.column.password"), t("home.column.group")],
+        DEMO_CUSTOMERS.map((c) => [
+            c.email,
+            DEMO_PASSWORD,
+            t(c.group === "b2b" ? "home.group.b2b" : "home.group.standard"),
+        ])
+    );
+}
 
-    const rows = PROMOTIONS.map((p) => {
-        const description =
-            p.scope === "delivery"
-                ? "Free Shipping"
-                : p.discountType === "percentage"
-                  ? `${p.discountValue}% off${p.maxValue ? ` (max $${p.maxValue})` : ""}`
-                  : `$${p.discountValue} off`;
-
-        return `<tr><td ${cellStyle}><code>${p.code}</code></td><td ${cellStyle}>${description}</td></tr>`;
+/** Discount label of a promotion, e.g. "20% off (max $50)" */
+function describeDiscount(promo: PromotionDefinition, texts: Texts): string {
+    if (promo.scope === "delivery") {
+        return localizedFixtureText("home.discount.freeShipping", texts);
+    }
+    if (promo.discountType === "absolute") {
+        return localizedFixtureText("home.discount.absolute", texts, {
+            amount: `$${promo.discountValue}`,
+        });
+    }
+    const value = String(promo.discountValue);
+    if (!promo.maxValue) {
+        return localizedFixtureText("home.discount.percentage", texts, { value });
+    }
+    return localizedFixtureText("home.discount.percentageMax", texts, {
+        value,
+        max: `$${promo.maxValue}`,
     });
+}
 
-    return [
-        `<h4>Promotion Codes</h4>`,
-        `<table style="border-collapse: collapse; margin-bottom: 1em"><thead>`,
-        `<tr><th ${headerStyle}>Code</th><th ${headerStyle}>Discount</th></tr>`,
-        `</thead><tbody>`,
-        ...rows,
-        `</tbody></table>`,
-    ].join("");
+function buildPromotionCodesHtml(texts: Texts): string {
+    const t = (key: string): string => localizedFixtureText(key, texts);
+    return buildTable(
+        t("home.promotionsHeading"),
+        [t("home.column.code"), t("home.column.discount")],
+        PROMOTIONS.map((p) => [`<code>${p.code}</code>`, describeDiscount(p, texts)])
+    );
 }
 
 /**
@@ -134,16 +169,13 @@ export function buildHeroText(
     description: string,
     productCount: number,
     categoryCount: number,
-    features: HomeFeatures = {
-        includeCredentials: true,
-        includePromotions: true,
-        includeCrossSelling: true,
-    }
+    features: HomeFeatures = ALL_FEATURES,
+    texts: Texts = null
 ): string {
     const displayName = capitalizeString(storeName);
     return [
-        buildIntroHtml(displayName, description, productCount, categoryCount),
-        buildFeaturesHtml(features),
+        buildIntroHtml(displayName, description, productCount, categoryCount, texts),
+        buildFeaturesHtml(features, texts),
     ].join("");
 }
 
@@ -155,29 +187,56 @@ export function buildHeroText(
  */
 export function buildReferenceText(
     storeName: string,
-    features: HomeFeatures = {
-        includeCredentials: true,
-        includePromotions: true,
-        includeCrossSelling: true,
-    }
+    features: HomeFeatures = ALL_FEATURES,
+    texts: Texts = null
 ): string {
-    const parts: string[] = [];
+    const credentials = `<td style="vertical-align: top; padding-right: 3em">${buildCredentialsHtml(texts)}</td>`;
+    const promotions = `<td style="vertical-align: top">${buildPromotionCodesHtml(texts)}</td>`;
+    const cells = [
+        ...(features.includeCredentials ? [credentials] : []),
+        ...(features.includePromotions ? [promotions] : []),
+    ];
+    const table =
+        cells.length > 0
+            ? [`<table style="border-collapse: collapse"><tr>${cells.join("")}</tr></table>`]
+            : [];
+    const closing = localizedFixtureText("home.enjoy", texts, { name: storeName.toLowerCase() });
+    return [...table, `<p>${closing}</p>`].join("");
+}
 
-    if (features.includeCredentials || features.includePromotions) {
-        const cells: string[] = [];
-        if (features.includeCredentials) {
-            cells.push(
-                `<td style="vertical-align: top; padding-right: 3em">${buildCredentialsHtml()}</td>`
-            );
-        }
-        if (features.includePromotions) {
-            cells.push(`<td style="vertical-align: top">${buildPromotionCodesHtml()}</td>`);
-        }
-        parts.push(`<table style="border-collapse: collapse"><tr>${cells.join("")}</tr></table>`);
-    }
+/**
+ * Which optional homepage sections to show, based on the processors of this run.
+ *
+ * Runs that do not include cms-home (e.g. `process --only=translations`) assume the
+ * page was created by a full generate, which shows every section.
+ */
+export function homeFeaturesFor(activeProcessors: readonly string[] | undefined): HomeFeatures {
+    if (!activeProcessors?.includes("cms-home")) return ALL_FEATURES;
+    return {
+        includeCredentials: activeProcessors.includes("customers"),
+        includePromotions: activeProcessors.includes("promotions"),
+        includeCrossSelling: activeProcessors.includes("cross-selling"),
+    };
+}
 
-    parts.push(`<p>Enjoy this <b>${storeName.toLowerCase()}</b> demo-store.&nbsp;\u{1F607}</p>`);
-    return parts.join("");
+/** Homepage text slots ("<section>.<block>.<slot>" -> HTML) in one language */
+export function buildHomeSlotTexts(
+    blueprint: HydratedBlueprint,
+    features: HomeFeatures,
+    texts: Texts
+): Record<string, string> {
+    const { salesChannel } = blueprint;
+    return {
+        [HOME_HERO_SLOT_KEY]: buildHeroText(
+            salesChannel.name,
+            salesChannel.description,
+            blueprint.products.length,
+            countCategories(blueprint.categories),
+            features,
+            texts
+        ),
+        [HOME_REFERENCE_SLOT_KEY]: buildReferenceText(salesChannel.name, features, texts),
+    };
 }
 
 const HOME_HERO_IMAGE_KEY = "home-hero";

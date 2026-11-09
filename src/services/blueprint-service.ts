@@ -33,7 +33,7 @@ import {
     hydrateThemeMedia,
     priceTokenUsage,
 } from "../blueprint/index.js";
-import { createCacheFromEnv } from "../cache.js";
+import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
 import {
     createProvidersFromEnv,
     providerConfigFromEnv,
@@ -72,7 +72,7 @@ export async function createBlueprint(
         `Blueprint created:`,
         `  Categories: ${categoryCount}`,
         `  Products: ${blueprint.products.length}`,
-        `  Saved to: generated/sales-channels/${salesChannelName}/blueprint.json`,
+        `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "blueprint.json")}`,
     ];
 }
 
@@ -244,7 +244,7 @@ export async function hydrateBlueprint(
             ``,
             `CMS blueprint hydrated:`,
             `  Pages: ${hydratedCms.pages.length}`,
-            `  Saved to: generated/sales-channels/${salesChannelName}/cms-blueprint.json`,
+            `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "cms-blueprint.json")}`,
             ...formatActualUsage(textProvider, estimate.selection),
         ];
     }
@@ -325,7 +325,7 @@ export async function hydrateBlueprint(
     }
 
     results.push(
-        `  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`,
+        `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "hydrated-blueprint.json")}`,
         ...formatActualUsage(textProvider, estimate.selection)
     );
     return results;
@@ -386,7 +386,7 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
         `Fixed blueprint saved:`,
         `  Categories fixed: ${placeholderCategories.length}`,
         `  Products fixed: ${placeholderProducts.length}`,
-        `  Saved to: generated/sales-channels/${salesChannelName}/hydrated-blueprint.json`,
+        `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "hydrated-blueprint.json")}`,
     ];
 }
 
@@ -434,7 +434,7 @@ export async function inspireBlueprint(url: string, salesChannelName: string): P
 
     results.push(
         ``,
-        `  Saved to: generated/sales-channels/${salesChannelName}/inspiration.json`,
+        `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "inspiration.json")}`,
         ``,
         `Next step: bun run blueprint hydrate --name=${salesChannelName}`,
         `  (inspiration.json will be used automatically to guide AI generation)`

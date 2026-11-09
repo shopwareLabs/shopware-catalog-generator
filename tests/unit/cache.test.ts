@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { CmsBlueprint, ProductInput, PropertyGroup } from "../../src/types/index.js";
 
-import { DataCache } from "../../src/cache.js";
+import { cacheFileForDisplay, DataCache } from "../../src/cache.js";
 
 const TEST_BASE_DIR = "./test-cache-temp";
 const TEST_CACHE_DIR = `${TEST_BASE_DIR}/generated`;
@@ -451,5 +451,17 @@ describe("DataCache", () => {
         test("hasCategoryTree returns false when disabled", () => {
             expect(disabledCache.hasCategoryTree("any")).toBe(false);
         });
+    });
+});
+
+describe("cacheFileForDisplay", () => {
+    test("shows the file relative to the working directory, honouring the cache dir", () => {
+        const cache = {
+            getSalesChannelDir: (name: string) =>
+                path.join(process.cwd(), "generated-lanes", "trunk", "sales-channels", name),
+        };
+        expect(cacheFileForDisplay(cache, "music", "translations")).toBe(
+            path.join("generated-lanes", "trunk", "sales-channels", "music", "translations")
+        );
     });
 });

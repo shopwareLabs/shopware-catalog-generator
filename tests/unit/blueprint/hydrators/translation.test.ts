@@ -7,6 +7,7 @@ import {
     buildTranslationSystemPrompt,
     cmsSlotKey,
     collectTerms,
+    isStaleFixture,
     sourceHashOf,
     translateCatalog,
     validateTranslatedItem,
@@ -265,5 +266,58 @@ describe("translateCatalog", () => {
         expect(result.failed).toEqual(["products:p2"]);
         expect(result.file.products.p2).toBeUndefined();
         expect(result.file.products.p1).toBeDefined();
+    });
+});
+
+describe("fixture texts", () => {
+    const changedFixture = (text: string): TranslationSource => ({
+        ...SOURCE,
+        fixtures: { "manufacturer.description": text },
+    });
+
+    test("isStaleFixture decides by hash, missing text and force", () => {
+        const previous = {
+            fixtures: { a: "DE a" },
+            fixtureHashes: { a: "hash-a" },
+        };
+        expect(isStaleFixture("a", "hash-a", previous, false)).toBe(false);
+        expect(isStaleFixture("a", "hash-b", previous, false)).toBe(true);
+        expect(isStaleFixture("b", "hash-b", previous, false)).toBe(true);
+        expect(isStaleFixture("a", "hash-a", previous, true)).toBe(true);
+        expect(isStaleFixture("a", "hash-a", null, false)).toBe(true);
+        // Files from before fixture hashes existed keep their texts
+        expect(isStaleFixture("a", "other", { fixtures: { a: "DE a" } }, false)).toBe(false);
+    });
+
+    test("stores a source hash for every translated fixture text", async () => {
+        const { file } = await translate(createTranslatingProvider());
+        expect(file.fixtureHashes?.["manufacturer.description"]).toBe(
+            sourceHashOf("{name} makes products.")
+        );
+    });
+
+    test("re-translates a fixture text whose English source changed", async () => {
+        const first = await translate(createTranslatingProvider());
+
+        const second = await translate(createTranslatingProvider(), {
+            source: changedFixture("{name} builds things."),
+            previous: first.file,
+        });
+
+        expect(second.translated).toBe(1);
+        expect(second.file.fixtures["manufacturer.description"]).toBe("DE {name} builds things.");
+    });
+
+    test("a failed fixture keeps its old text without a hash, so the next run retries", async () => {
+        const first = await translate(createTranslatingProvider());
+
+        const second = await translate(createTranslatingProvider(["manufacturer.description"]), {
+            source: changedFixture("{name} builds things."),
+            previous: first.file,
+        });
+
+        expect(second.failed).toEqual(["fixtures:manufacturer.description"]);
+        expect(second.file.fixtures["manufacturer.description"]).toBe("DE {name} makes products.");
+        expect(second.file.fixtureHashes?.["manufacturer.description"]).toBeUndefined();
     });
 });

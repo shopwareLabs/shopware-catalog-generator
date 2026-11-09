@@ -496,6 +496,21 @@ export function collectTerms(source: TranslationSource): string[] {
 }
 
 /** Entries of `source` whose hash matches the previous translation */
+/**
+ * A fixture text needs translating when it is new, changed since the last run or forced.
+ * Files from before fixture hashes existed reuse every entry that has a text.
+ */
+export function isStaleFixture(
+    key: string,
+    hash: string,
+    previous: Pick<TranslationFile, "fixtures" | "fixtureHashes"> | null | undefined,
+    force: boolean | undefined
+): boolean {
+    if (force || !previous?.fixtures[key]) return true;
+    if (!previous.fixtureHashes) return false;
+    return previous.fixtureHashes[key] !== hash;
+}
+
 function splitStale<T extends { sourceHash: string }>(
     keys: string[],
     hashes: Map<string, string>,
@@ -721,7 +736,12 @@ export async function translateCatalog(
     // 6. Fixture texts
     const previousFixtures = previous?.fixtures ?? {};
     const fixtureKeys = Object.keys(source.fixtures);
-    const staleFixtures = fixtureKeys.filter((k) => force || !previousFixtures[k]);
+    const currentHashes = new Map(
+        fixtureKeys.map((k) => [k, sourceHashOf(source.fixtures[k] ?? "")])
+    );
+    const staleFixtures = fixtureKeys.filter((k) =>
+        isStaleFixture(k, currentHashes.get(k) ?? "", previous, force)
+    );
     const fixtureResult = await translateItems(
         ctx,
         limiter,
@@ -736,6 +756,11 @@ export async function translateCatalog(
                 fixtureResult.translated.get(k)?.text ?? previousFixtures[k],
             ])
             .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    );
+    // A failed entry keeps its old text without hash, so the next run retries it
+    const failedFixtures = new Set(fixtureResult.failed);
+    const fixtureHashes: Record<string, string> = Object.fromEntries(
+        [...currentHashes].filter(([k]) => fixtures[k] !== undefined && !failedFixtures.has(k))
     );
     failed.push(...fixtureResult.failed.map((k) => `fixtures:${k}`));
     translatedCount += fixtureResult.translated.size;
@@ -764,6 +789,7 @@ export async function translateCatalog(
             reviews,
             cms,
             fixtures,
+            fixtureHashes,
         },
         translated: translatedCount,
         reused: reusedCount,

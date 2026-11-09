@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { TranslationProcessor } from "../../../src/post-processors/translation-processor.js";
+import {
+    TranslationProcessor,
+    viewFromFileName,
+} from "../../../src/post-processors/translation-processor.js";
 import { SYSTEM_LANGUAGE_ID } from "../../../src/shopware/languages.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
@@ -38,6 +41,10 @@ describe("TranslationProcessor", () => {
             "manufacturers",
             "variants",
             "cms-testing",
+            "cms-home",
+            "cms-footer-pages",
+            "images",
+            "promotions",
         ]);
     });
 
@@ -93,5 +100,71 @@ describe("TranslationProcessor", () => {
         const result = await TranslationProcessor.process(context);
 
         expect(result.errors).toEqual(["Failed to write translations: boom"]);
+    });
+
+    test("translates units, promotions, product images and footer categories", async () => {
+        const { context, mockApi, mockCache } = createContext();
+        mockCache.translations.set(
+            "de-DE",
+            createTranslationFile({
+                ...germanFile,
+                fixtures: {
+                    "unit.pc.name": "Stück",
+                    "promotion.WELCOME10.name": "Willkommensrabatt",
+                    "media.productImage.front": "{name} (Vorderansicht)",
+                    "footer.category.Imprint": "Impressum",
+                },
+            })
+        );
+        mockApi.mockSearchResponse("sales-channel", [
+            { ...SALES_CHANNEL_LANGUAGES[0], footerCategoryId: "footer-root" },
+        ]);
+        mockApi.mockSearchResponse("unit", [{ id: "unit-pc", shortCode: "pc" }]);
+        mockApi.mockSearchResponse("promotion", [{ id: "promo-1", code: "WELCOME10" }]);
+        mockApi.mockSearchResponse("product-media", [
+            { productId: "p1", mediaId: "media-1", media: { fileName: "linen-sofa-front" } },
+            { productId: "p1", mediaId: "media-2", media: { fileName: "unrelated" } },
+        ]);
+        mockApi.mockSearchResponse("category", [{ id: "cat-imprint", name: "Imprint" }]);
+
+        const result = await TranslationProcessor.process(context);
+
+        expect(result.errors).toEqual([]);
+        const [sync] = mockApi.getCallsByEndpoint("_action/sync");
+        expect(sync?.body).toMatchObject({
+            "translate-unit-0": {
+                payload: [{ id: "unit-pc", translations: { "lang-de": { name: "Stück" } } }],
+            },
+            "translate-promotion-0": {
+                payload: [
+                    { id: "promo-1", translations: { "lang-de": { name: "Willkommensrabatt" } } },
+                ],
+            },
+            "translate-media-0": {
+                payload: [
+                    {
+                        id: "media-1",
+                        translations: { "lang-de": { alt: "Leinensofa (Vorderansicht)" } },
+                    },
+                ],
+            },
+            "translate-footer-category-0": {
+                payload: [
+                    { id: "cat-imprint", translations: { "lang-de": { name: "Impressum" } } },
+                ],
+            },
+        });
+    });
+});
+
+describe("viewFromFileName", () => {
+    test("reads the view from the file name suffix", () => {
+        expect(viewFromFileName("oak-desk-front")).toBe("front");
+        expect(viewFromFileName("oak-desk-lifestyle")).toBe("lifestyle");
+    });
+
+    test("returns null for unknown or missing names", () => {
+        expect(viewFromFileName("oak-desk")).toBeNull();
+        expect(viewFromFileName(null)).toBeNull();
     });
 });

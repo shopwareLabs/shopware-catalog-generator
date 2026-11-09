@@ -11,8 +11,10 @@ import type { PostProcessorContext } from "../../../../src/post-processors/index
 import { HOME_LISTING_PAGE } from "../../../../src/fixtures/index.js";
 import {
     buildHeroText,
+    buildHomeSlotTexts,
     buildReferenceText,
     HomeProcessor,
+    homeFeaturesFor,
 } from "../../../../src/post-processors/cms/home-processor.js";
 import {
     createTestBlueprint,
@@ -348,5 +350,46 @@ describe("buildReferenceText", () => {
     test("includes bold lowercase store name in closing", () => {
         const html = buildReferenceText("Music");
         expect(html).toContain("<b>music</b> demo-store");
+    });
+});
+
+describe("homeFeaturesFor", () => {
+    test("shows every section when cms-home is not part of the run", () => {
+        expect(homeFeaturesFor(undefined)).toEqual({
+            includeCredentials: true,
+            includePromotions: true,
+            includeCrossSelling: true,
+        });
+        expect(homeFeaturesFor(["translations"]).includePromotions).toBe(true);
+    });
+
+    test("follows the active processors when cms-home runs", () => {
+        expect(homeFeaturesFor(["cms-home", "customers"])).toEqual({
+            includeCredentials: true,
+            includePromotions: false,
+            includeCrossSelling: false,
+        });
+    });
+});
+
+describe("buildHomeSlotTexts", () => {
+    const blueprint = createTestBlueprint({ products: [createTestProduct({ id: "p1" })] });
+    const features = homeFeaturesFor(undefined);
+
+    test("returns the hero and reference slot HTML", () => {
+        const slots = buildHomeSlotTexts(blueprint, features, null);
+        expect(Object.keys(slots)).toEqual(["0.0.right", "1.0.content"]);
+        expect(slots["0.0.right"]).toContain("Supported Features:");
+        expect(slots["1.0.content"]).toContain("Demo Accounts");
+    });
+
+    test("uses translated fixture texts and keeps URLs", () => {
+        const slots = buildHomeSlotTexts(blueprint, features, {
+            "home.featuresHeading": "Unterstützte Funktionen:",
+            "home.accountsHeading": "Demo-Konten",
+        });
+        expect(slots["0.0.right"]).toContain("Unterstützte Funktionen:");
+        expect(slots["0.0.right"]).toContain("github.com/shopwareLabs/shopware-catalog-generator");
+        expect(slots["1.0.content"]).toContain("Demo-Konten");
     });
 });

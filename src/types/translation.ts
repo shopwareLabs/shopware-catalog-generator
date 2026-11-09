@@ -78,6 +78,8 @@ export const TranslationFileSchema = z.object({
     cms: z.record(z.string(), CmsPageTranslationSchema),
     /** Fixture texts (e.g. "manufacturer.description"), English key -> translated text */
     fixtures: z.record(z.string(), z.string()),
+    /** Hash of the English text per fixture key, so changed texts are translated again */
+    fixtureHashes: z.record(z.string(), z.string()).optional(),
 });
 export type TranslationFile = z.infer<typeof TranslationFileSchema>;
 
