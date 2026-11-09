@@ -24,6 +24,7 @@
         "blueprint": "bun run src/main.ts blueprint",
         "generate": "bun run src/main.ts generate",
         "process": "bun run src/main.ts process",
+        "template": "bun run src/main.ts template",
         "server": "bun run src/server.ts",
         "cache:list": "bun run src/cache-cli.ts list",
         "cache:clear": "bun run src/cache-cli.ts clear",

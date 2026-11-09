@@ -131,3 +131,18 @@ export type {
     TranslationSource,
 } from "./translation.js";
 export { FormalitySchema, SOURCE_LOCALE, TranslationFileSchema } from "./translation.js";
+
+// Template metadata (generation.json, template.json)
+export type {
+    GenerationLog,
+    GenerationStep,
+    GeneratorInfo,
+    LaneResult,
+    ModelInfo,
+    TemplateInfo,
+} from "./template.js";
+export {
+    GenerationLogSchema,
+    TEMPLATE_INFO_SCHEMA_VERSION,
+    TemplateInfoSchema,
+} from "./template.js";

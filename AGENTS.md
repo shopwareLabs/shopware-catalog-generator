@@ -28,6 +28,7 @@ src/
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
 │   ├── property-cache.ts     # Property cache types
+│   ├── template.ts           # Template metadata (generation.json, template.json) + Zod schemas
 │   └── shopware-version.ts   # ShopwareVersion, ShopwareFeatureRequirement
 │
 ├── shopware/                 # Shopware API operations
@@ -60,6 +61,7 @@ src/
 │   ├── languages.ts          # --languages / TRANSLATION_LANGUAGES / interactive language prompt
 │   ├── generate.ts           # generate (full pipeline), process (thin wrappers)
 │   ├── image-fix.ts          # image fix - thin wrapper
+│   ├── template.ts           # template metadata - thin wrapper
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
 │
 ├── services/                 # Shared application logic (used by both CLI and MCP)
@@ -162,6 +164,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
+│   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
 │   ├── seeded-random.ts      # Deterministic PRNG (stable reviews across runs)
 │   ├── arrays.ts             # Array utilities (randomPick, etc.)
@@ -175,6 +178,7 @@ src/
 │   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
 │   ├── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 │   ├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, translateBlueprint
+│   ├── template-service.ts   # template.json: generation log, lane results, template metadata
 │   └── shopware-context.ts   # createProcessorDeps (API helpers + providers bootstrap)
 │
 ├── server/                   # HTTP server infrastructure
@@ -200,6 +204,7 @@ src/
 │       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_translate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
+│       ├── template.ts       # template_metadata
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
 │       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
 │
@@ -689,6 +694,8 @@ generated/
         ├── translations/           # blueprint translate output
         │   └── {locale}.json       # e.g. de-DE.json (texts + source hashes + style)
         ├── cms-blueprint.json      # AI-hydrated CMS text (used by CMS processors)
+        ├── generation.json         # Generator version + models per hydrate/translate step
+        ├── template.json           # Template metadata (bun run template metadata)
         ├── categories.json         # Category tree
         ├── property-groups.json    # Property groups synced from Shopware
         ├── properties/             # Store-specific AI-generated properties
@@ -1216,6 +1223,9 @@ bun run generate --name=music
 # Run post-processors separately
 bun run process --name=music --only=images,manufacturers
 
+# Template metadata (before copying a store to the templates repo)
+bun run template metadata --name=music --e2e=e2e-results/<timestamp>
+
 # Full pipeline (creates blueprint, hydrates, and uploads if needed)
 bun run generate --name=music --description="Musical instruments and accessories for musicians of all levels"
 ```
@@ -1468,6 +1478,7 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 | `blueprint_translate`  | Translate the hydrated catalog into other locales      |
 | `blueprint_fix`        | Fix placeholder names                                  |
 | `image_fix`            | Regenerate images (product/category/cms by type)       |
+| `template_metadata`    | Write template.json (models, languages, tested lanes)  |
 | `generate`             | Full pipeline: create + hydrate + upload               |
 | `process`              | Run post-processors                                    |
 | `cache_list`           | List cached SalesChannels                              |

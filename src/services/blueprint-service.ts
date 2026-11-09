@@ -41,6 +41,7 @@ import {
 } from "../providers/index.js";
 import { DataHydrator } from "../shopware/index.js";
 import { countCategories, logger, PropertyCollector } from "../utils/index.js";
+import { buildGenerationStep } from "./template-service.js";
 
 export async function createBlueprint(
     salesChannelName: string,
@@ -237,6 +238,11 @@ export async function hydrateBlueprint(
         cache.saveCmsBlueprint(salesChannelName, hydratedCms);
 
         await hydrateCmsImages(imageProvider, cache, salesChannelName, description);
+        cache.recordGenerationStep(
+            salesChannelName,
+            "hydrate:cms",
+            buildGenerationStep(estimate.selection, imageProvider.name !== "noop")
+        );
 
         return [
             `=== Blueprint Hydrate (cms only) ===`,
@@ -301,6 +307,11 @@ export async function hydrateBlueprint(
     hydratedBlueprint.propertyGroups = propertyGroups;
 
     cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
+    cache.recordGenerationStep(
+        salesChannelName,
+        hydrateOnly ? `hydrate:${hydrateOnly}` : "hydrate",
+        buildGenerationStep(estimate.selection, !hydrateOnly && imageProvider.name !== "noop")
+    );
 
     const results = [
         `=== Blueprint Hydrate ===`,

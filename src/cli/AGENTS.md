@@ -9,6 +9,7 @@ The CLI is a thin router in `main.ts` that parses args and delegates to focused 
 - `blueprint.ts` — `blueprint create`, `blueprint hydrate`, `blueprint fix`, `blueprint inspire`
 - `generate.ts` — `generate`, `process`
 - `image-fix.ts` — `image fix`
+- `template.ts` — `template metadata`
 - `shared.ts` — `CLIError`, validation helpers, `executePostProcessors`
 
 **Important:** All application logic lives in `src/services/`, not in the CLI modules. CLI handlers are thin wrappers that call service functions and print their `string[]` output. This keeps the CLI and MCP tools in sync — both call the same service functions.
@@ -18,6 +19,7 @@ The CLI is a thin router in `main.ts` that parses args and delegates to focused 
 | `src/services/blueprint-service.ts` | `cli/blueprint.ts` | Blueprint create / hydrate / fix / inspire logic |
 | `src/services/generate-service.ts`  | `cli/generate.ts`  | Full generation pipeline + post-processors       |
 | `src/services/image-fix-service.ts` | `cli/image-fix.ts` | Image regeneration (product/category/cms/theme)  |
+| `src/services/template-service.ts`  | `cli/template.ts`  | Template metadata (`template.json`)              |
 
 Separate CLI entry points (not routed through `main.ts`):
 
@@ -196,6 +198,23 @@ bun run image fix --name=music --type=theme              # regenerates all theme
 | `--dry-run` | flag   | `false`      | Preview without regenerating                                   |
 
 For `--type=theme`, `--target` is optional (defaults to "all"). Valid targets: `logo`, `favicon`, `share`, or `all`.
+
+### Template Metadata
+
+Write `template.json` (generator version, date, models, languages, tested Shopware versions)
+for a cached SalesChannel before it is copied to the templates repo. No AI, no Shopware.
+
+```bash
+bun run template metadata --name=beauty
+bun run template metadata --name=beauty --e2e=e2e-results/20261109-123512
+```
+
+| Flag     | Type   | Default      | Description                                                   |
+| -------- | ------ | ------------ | ------------------------------------------------------------- |
+| `--name` | string | _(required)_ | SalesChannel name (hydrated blueprint must exist)             |
+| `--e2e`  | string | -            | `e2e-results/<timestamp>` of a `test-e2e-lanes.sh` run to add |
+
+See [src/templates/AGENTS.md](../templates/AGENTS.md#template-metadata-templatejson).
 
 ### Cleanup
 

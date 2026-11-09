@@ -16,6 +16,7 @@ mcp/
     ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
     ├── generate.ts       # generate, process
     ├── image-fix.ts      # image_fix
+    ├── template.ts       # template_metadata
     ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore, cache_empty_trash
     └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
 ```
@@ -33,6 +34,7 @@ mcp/
 | `blueprint_translate`  | `bun run blueprint translate ...` |
 | `blueprint_fix`        | `bun run blueprint fix ...`       |
 | `image_fix`            | `bun run image fix ...`           |
+| `template_metadata`    | `bun run template metadata ...`   |
 | `cleanup`              | `bun run cleanup -- ...`          |
 | `cleanup_media`        | `bun run cleanup:media`           |
 | `cleanup_unused_props` | `bun run cleanup:props`           |
