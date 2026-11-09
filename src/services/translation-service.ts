@@ -21,7 +21,7 @@ import {
     generateCmsBlueprint,
     translateCatalog,
 } from "../blueprint/index.js";
-import { createCacheFromEnv } from "../cache.js";
+import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
 import {
     buildProductReviews,
     DEFAULT_DOMAIN_LOCALES,
@@ -297,7 +297,7 @@ export async function runTranslation(
     return {
         lines: [
             ...lines,
-            `  Saved to: generated/sales-channels/${salesChannelName}/translations/`,
+            `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "translations")}`,
             ...formatActualUsage(textProvider, selection),
         ],
         locales: cache.listTranslationLocales(salesChannelName),

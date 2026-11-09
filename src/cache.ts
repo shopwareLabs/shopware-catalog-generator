@@ -35,6 +35,15 @@ export { DEFAULT_CACHE_OPTIONS } from "./types/index.js";
  * Typed against by PostProcessorContext so that both DataCache (production)
  * and MockDataCache (tests) satisfy it without casts.
  */
+/** Path of a SalesChannel cache file relative to the working directory, for CLI output */
+export function cacheFileForDisplay(
+    cache: Pick<DataCacheApi, "getSalesChannelDir">,
+    salesChannel: string,
+    file: string
+): string {
+    return path.relative(process.cwd(), path.join(cache.getSalesChannelDir(salesChannel), file));
+}
+
 export interface DataCacheApi {
     /** Image cache for product and category images */
     readonly images: import("./image-cache.js").ImageCacheApi;
