@@ -9,6 +9,8 @@
 
 import { z } from "zod";
 
+import { VariantSettingsSchema } from "./variant-settings.js";
+
 export const ModelInfoSchema = z.object({
     provider: z.string(),
     model: z.string(),
@@ -69,6 +71,10 @@ export const TemplateInfoSchema = z.object({
         categories: z.number(),
         /** "en" plus every translated locale */
         languages: z.array(z.string()),
+        /** Products with variants */
+        variantProducts: z.number().optional(),
+        /** Variant settings of the blueprint (missing for blueprints without stored settings) */
+        variants: VariantSettingsSchema.optional(),
     }),
     /** Models of the full hydration run, when it was recorded */
     models: z

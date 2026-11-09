@@ -73,11 +73,17 @@ const lines = await fixBlueprint("music");
 before creating providers, and appends the actual token usage and cost to its output lines. Actual usage is
 only available for providers that implement `TextProvider.getUsage()` (currently OpenAI).
 
-`hydrateBlueprint` supports three selective modes via the `only` option:
+`hydrateBlueprint` supports four selective modes via the `only` option:
 
 - `"categories"` — re-hydrate category names/descriptions only
 - `"properties"` — re-hydrate product properties only (preserves product names)
 - `"cms"` — re-hydrate CMS blueprint text and CMS images only
+- `"variants"` — re-pick variant options with `options.variants` overrides and save them to `blueprint.json`
+
+Variant overrides (`VariantSettingOverrides`, raw flag strings or MCP numbers) are passed to
+`createBlueprint`, `estimateBlueprintCost`, `hydrateBlueprint` and `generate`. Invalid values,
+overrides without `only: "variants"` and a share change with `only: "variants"` return an
+`"Error: ..."` line; the CLI turns it into a `CLIError`.
 
 Safety: if a hydrated blueprint already exists and neither `only` nor `force` is set, returns an error message (prevents accidental name changes that invalidate cached images).
 

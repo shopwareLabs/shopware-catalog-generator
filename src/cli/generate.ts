@@ -33,6 +33,7 @@ export async function generate(args: CliArgs): Promise<void> {
         dryRun: args.dryRun,
         noTemplate: args.noTemplate,
         languages: await resolveGenerateLanguages(args, salesChannelName),
+        variants: args.variants,
     });
 
     printServiceOutput(lines);

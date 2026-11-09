@@ -6,6 +6,9 @@
  */
 
 import type { ColorFamily } from "./color.js";
+import type { VariantSettings } from "./variant-settings.js";
+
+import { DEFAULT_VARIANT_SETTINGS } from "./variant-settings.js";
 
 // =============================================================================
 // Blueprint Core Types
@@ -30,6 +33,9 @@ export interface Blueprint {
 
     /** Timestamp when blueprint was created */
     createdAt: string;
+
+    /** Variant settings (missing in older blueprints, which use the defaults) */
+    variants?: VariantSettings;
 }
 
 /** AI-generated brand colors for theme customization (other colors derived via Material Design rules) */
@@ -170,6 +176,12 @@ export interface ProductMetadata {
     /** Variant configuration for 1-3 property groups with partial options */
     variantConfigs?: VariantConfig[];
 
+    /** Shade of the main product image; the first colour variant (colour variants only) */
+    defaultColor?: string;
+
+    /** Colour variants with hex and family, set by the colour system (colour variants only) */
+    variantColors?: VariantColor[];
+
     // Properties (filled by AI based on category context)
     /** Product properties (e.g., [{ group: "Color", value: "Oak" }]) */
     properties: ProductProperty[];
@@ -270,12 +282,22 @@ export interface ProductCustomFieldValues {
     cg_internal_note: string;
 }
 
+/** One colour variant of a product */
+export interface VariantColor {
+    /** Shade name, matches the option in the "Color" group */
+    name: string;
+    /** Hex code of the shade (missing for image colours like "Multicolor") */
+    hex?: string;
+    /** Colour family of the shade */
+    family: ColorFamily;
+}
+
 /** Variant configuration for a single property group */
 export interface VariantConfig {
     /** Property group name (e.g., "Size", "Color", "Material") */
     group: string;
 
-    /** Selected options for this property (40-60% of available options) */
+    /** Selected options, exact count from the variant settings (default colour first) */
     selectedOptions: string[];
 
     /** Price modifiers per option (e.g., { "XL": 1.2, "S": 0.9 }) */
@@ -376,8 +398,8 @@ export interface BlueprintConfig {
     /** Percentage of categories with images (default: 0.4) */
     categoryImagePercentage: number;
 
-    /** Percentage of products that are variants (default: 0.3) */
-    variantPercentage: number;
+    /** Variant settings (share of variant products, colours, options, cap) */
+    variants: VariantSettings;
 
     /** Percentage of products with sale prices (default: 0.2) */
     salePercentage: number;
@@ -391,7 +413,7 @@ export const DEFAULT_BLUEPRINT_CONFIG: BlueprintConfig = {
     totalProducts: 90,
     productsPerBranch: 30,
     categoryImagePercentage: 0.4,
-    variantPercentage: 0.3,
+    variants: DEFAULT_VARIANT_SETTINGS,
     salePercentage: 0.2,
 };
 

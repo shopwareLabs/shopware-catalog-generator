@@ -18,7 +18,7 @@ mcp/
     ├── image-fix.ts      # image_fix
     ├── template.ts       # template_metadata
     ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore, cache_empty_trash
-    └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
+    ├── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
 ```
 
 ## Available Tools
@@ -45,6 +45,11 @@ mcp/
 | `cache_empty_trash`    | `bun run cache:empty-trash`       |
 | `list_saleschannels`   | (lookup only)                     |
 | `list_processors`      | (lookup only)                     |
+
+`blueprint_create`, `blueprint_estimate`, `blueprint_hydrate` and `generate` spread
+`variantSettingParams` from `tools/variant-params.ts`. The ranges come from `VARIANT_SETTING_LIMITS`,
+so they match the CLI flags (`--variant-colors`, `--variant-options`, `--max-variants`,
+`--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"`.
 
 ## Architecture: Shared Services Layer
 

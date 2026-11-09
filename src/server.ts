@@ -7,7 +7,12 @@
 
 import type { ProcessContext } from "./server/index.js";
 
-import { applyColorSystem, BlueprintGenerator, BlueprintHydrator } from "./blueprint/index.js";
+import {
+    applyColorSystem,
+    BlueprintGenerator,
+    BlueprintHydrator,
+    resolveVariantSettings,
+} from "./blueprint/index.js";
 import { DataCache } from "./cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
@@ -156,6 +161,7 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         const generator = new BlueprintGenerator({
             totalProducts: productCount,
             productsPerBranch: Math.ceil(productCount / 3),
+            variants: resolveVariantSettings(),
         });
         const blueprint = generator.generateBlueprint(salesChannel, effectiveDescription);
         cache.saveBlueprint(salesChannel, blueprint);

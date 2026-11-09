@@ -28,9 +28,19 @@ export type {
     ProductProperty,
     ProductType,
     ReviewCount,
+    VariantColor,
     VariantConfig,
 } from "./blueprint.js";
 export { DEFAULT_BLUEPRINT_CONFIG } from "./blueprint.js";
+
+// Variant settings
+export type { VariantSettingLimit, VariantSettings } from "./variant-settings.js";
+export {
+    DEFAULT_VARIANT_SETTINGS,
+    VARIANT_SETTING_LIMITS,
+    VariantSettingSchemas,
+    VariantSettingsSchema,
+} from "./variant-settings.js";
 
 // Colour types
 export type { ColorFamily, ColorShade, LearnedColorShades } from "./color.js";

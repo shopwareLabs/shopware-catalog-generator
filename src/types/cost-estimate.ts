@@ -5,7 +5,7 @@
 import type { AIProviderType, ImageProviderType } from "./providers.js";
 
 /** Hydration scope the estimate covers (mirrors `blueprint hydrate --only`) */
-export type HydrationScope = "full" | "categories" | "properties" | "cms";
+export type HydrationScope = "full" | "categories" | "properties" | "cms" | "variants";
 
 /** Resolved provider/model selection (what the factory will actually use) */
 export interface ModelSelection {

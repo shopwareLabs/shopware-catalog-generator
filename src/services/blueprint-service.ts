@@ -5,7 +5,7 @@
  * Never calls console.log directly.
  */
 
-import type { EstimateBlueprint } from "../blueprint/index.js";
+import type { EstimateBlueprint, VariantSettingOverrides } from "../blueprint/index.js";
 import type { DataCache } from "../cache.js";
 import type {
     CostEstimate,
@@ -14,6 +14,7 @@ import type {
     ModelSelection,
     PendingImageCounts,
     TextProvider,
+    VariantSettings,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
 
@@ -21,6 +22,7 @@ import {
     applyColorSystem,
     BlueprintGenerator,
     BlueprintHydrator,
+    blueprintVariantSettings,
     collectShadeNames,
     buildCmsImageSpecs,
     buildThemeImageSpecs,
@@ -28,6 +30,7 @@ import {
     estimateHydrationCost,
     flattenCategories,
     formatCostEstimate,
+    formatVariantSettings,
     generateCmsBlueprint,
     hydrateCmsBlueprint,
     hydrateCmsImages,
@@ -36,6 +39,8 @@ import {
     hydrateThemeMedia,
     normalizeProductColors,
     priceTokenUsage,
+    resolveVariantSettings,
+    VariantSettingsError,
 } from "../blueprint/index.js";
 import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
 import {
@@ -47,11 +52,30 @@ import { DataHydrator } from "../shopware/index.js";
 import { countCategories, logger, PropertyCollector } from "../utils/index.js";
 import { buildGenerationStep } from "./template-service.js";
 
+/**
+ * Resolve variant settings for a new blueprint (flag beats env var beats default).
+ * Returns an "Error: ..." line for an invalid value.
+ */
+export function resolveNewVariantSettings(
+    overrides: VariantSettingOverrides = {}
+): VariantSettings | string {
+    try {
+        return resolveVariantSettings(overrides);
+    } catch (error) {
+        if (error instanceof VariantSettingsError) return `Error: ${error.message}`;
+        throw error;
+    }
+}
+
 export async function createBlueprint(
     salesChannelName: string,
     description: string,
-    products: number
+    products: number,
+    variantOverrides: VariantSettingOverrides = {}
 ): Promise<string[]> {
+    const variants = resolveNewVariantSettings(variantOverrides);
+    if (typeof variants === "string") return [variants];
+
     const maxProductsPerBranch = parseInt(process.env.PRODUCTS_PER_CATEGORY || "30", 10);
     const topLevelCategories = Math.max(1, Math.ceil(products / maxProductsPerBranch));
     const productsPerBranch = Math.ceil(products / topLevelCategories);
@@ -62,6 +86,7 @@ export async function createBlueprint(
         totalProducts: products,
         topLevelCategories,
         productsPerBranch,
+        variants,
     });
 
     const blueprint = generator.generateBlueprint(salesChannelName, description);
@@ -73,6 +98,7 @@ export async function createBlueprint(
         `Name: ${salesChannelName}`,
         `Description: ${description}`,
         `Products: ${products} (${topLevelCategories} categories)`,
+        `Variants: ${formatVariantSettings(variants)}`,
         ``,
         `Blueprint created:`,
         `  Categories: ${categoryCount}`,
@@ -81,14 +107,62 @@ export async function createBlueprint(
     ];
 }
 
-type HydrateOnly = "categories" | "properties" | "cms";
+export type HydrateOnly = "categories" | "properties" | "cms" | "variants";
+
+/** Options shared by hydrate and estimate */
+interface HydrateRunOptions {
+    only?: HydrateOnly;
+    /** Variant setting overrides, only for --only=variants */
+    variants?: VariantSettingOverrides;
+}
+
+/**
+ * Variant settings for a hydration run. Overrides only apply to --only=variants, and the
+ * share cannot change there (it decides which products have variants, set at create).
+ * Returns an "Error: ..." line for an invalid combination or value.
+ */
+function resolveRunVariantSettings(
+    options: HydrateRunOptions,
+    stored: VariantSettings
+): VariantSettings | string {
+    const overrides = options.variants ?? {};
+    const hasOverrides = Object.values(overrides).some((v) => v !== undefined);
+    if (options.only !== "variants") {
+        if (hasOverrides) {
+            return (
+                `Error: Variant settings can only change with --only=variants ` +
+                `(or at blueprint create).`
+            );
+        }
+        return stored;
+    }
+    if (overrides.share !== undefined) {
+        return (
+            `Error: --variant-share can only be set at blueprint create, ` +
+            `because it decides which products have variants.`
+        );
+    }
+    try {
+        return { ...resolveVariantSettings(overrides, process.env, stored), share: stored.share };
+    } catch (error) {
+        if (error instanceof VariantSettingsError) return `Error: ${error.message}`;
+        throw error;
+    }
+}
+
+function missingHydratedForVariants(salesChannelName: string): string[] {
+    return [
+        `Error: --only=variants needs a hydrated blueprint for "${salesChannelName}". ` +
+            `Run: blueprint hydrate --name=${salesChannelName}`,
+    ];
+}
 
 /**
  * Forecast the cost of `blueprint hydrate` without making any AI call.
  */
 export function estimateBlueprintCost(
     salesChannelName: string,
-    options: { only?: HydrateOnly }
+    options: HydrateRunOptions
 ): string[] {
     const cache = createCacheFromEnv();
     const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
@@ -100,10 +174,19 @@ export function estimateBlueprintCost(
         ];
     }
 
+    if (options.only === "variants" && !existingHydratedBlueprint) {
+        return missingHydratedForVariants(salesChannelName);
+    }
+    const variants = resolveRunVariantSettings(
+        options,
+        blueprintVariantSettings(existingHydratedBlueprint ?? blueprint)
+    );
+    if (typeof variants === "string") return [variants];
+
     const scope = resolveHydrationScope(options.only, Boolean(existingHydratedBlueprint));
     const source =
         scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
-    const estimate = buildCostEstimate(cache, salesChannelName, scope, source);
+    const estimate = buildCostEstimate(cache, salesChannelName, scope, source, variants);
     return formatCostEstimate(estimate);
 }
 
@@ -121,7 +204,8 @@ function buildCostEstimate(
     cache: DataCache,
     salesChannelName: string,
     scope: HydrationScope,
-    blueprint: EstimateBlueprint & { salesChannel: { description: string } }
+    blueprint: EstimateBlueprint & { salesChannel: { description: string } },
+    variants: VariantSettings
 ): CostEstimate {
     const selection = resolveModelSelection(providerConfigFromEnv());
     const description = blueprint.salesChannel.description || `${salesChannelName} webshop`;
@@ -132,6 +216,7 @@ function buildCostEstimate(
         cms: countCmsTextWork(generateCmsBlueprint(salesChannelName)),
         pendingImages: countPendingImages(cache, salesChannelName, blueprint, description),
         hasInspirationColors: Boolean(cache.loadInspiration(salesChannelName)?.brandColors),
+        variants,
     });
 }
 
@@ -179,7 +264,7 @@ export function formatActualUsage(textProvider: TextProvider, selection: ModelSe
 
 export async function hydrateBlueprint(
     salesChannelName: string,
-    options: { only?: HydrateOnly; force?: boolean }
+    options: HydrateRunOptions & { force?: boolean }
 ): Promise<string[]> {
     const { only: hydrateOnly, force: forceHydration = false } = options;
 
@@ -192,7 +277,7 @@ export async function hydrateBlueprint(
         return [
             `Error: Hydrated blueprint already exists for "${salesChannelName}". ` +
                 `Re-hydrating will change product names and trigger image regeneration. ` +
-                `Use --only=categories, --only=properties, or --rehydrate.`,
+                `Use --only=categories, --only=properties, --only=variants, or --rehydrate.`,
         ];
     }
 
@@ -204,10 +289,25 @@ export async function hydrateBlueprint(
         ];
     }
 
+    if (hydrateOnly === "variants" && !existingHydratedBlueprint) {
+        return missingHydratedForVariants(salesChannelName);
+    }
+    const variantSettings = resolveRunVariantSettings(
+        options,
+        blueprintVariantSettings(existingHydratedBlueprint ?? blueprint)
+    );
+    if (typeof variantSettings === "string") return [variantSettings];
+
     const scope = resolveHydrationScope(hydrateOnly, Boolean(existingHydratedBlueprint));
     const estimateSource =
         scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
-    const estimate = buildCostEstimate(cache, salesChannelName, scope, estimateSource);
+    const estimate = buildCostEstimate(
+        cache,
+        salesChannelName,
+        scope,
+        estimateSource,
+        variantSettings
+    );
     for (const line of formatCostEstimate(estimate)) {
         logger.info(line, { cli: true });
     }
@@ -264,6 +364,13 @@ export async function hydrateBlueprint(
 
     if (hydrateOnly === "categories" && existingHydratedBlueprint) {
         hydratedBlueprint = await hydrator.hydrateCategoriesOnly(existingHydratedBlueprint);
+    } else if (hydrateOnly === "variants" && existingHydratedBlueprint) {
+        hydratedBlueprint = await hydrator.hydrateVariantsOnly(
+            existingHydratedBlueprint,
+            variantSettings
+        );
+        // Keep blueprint.json in step, so a later full re-hydration uses the same settings
+        cache.saveBlueprint(salesChannelName, { ...blueprint, variants: { ...variantSettings } });
     } else if (hydrateOnly === "properties" && existingHydratedBlueprint) {
         hydratedBlueprint = await hydrator.hydratePropertiesOnly(
             existingHydratedBlueprint,
@@ -336,6 +443,7 @@ export async function hydrateBlueprint(
         `  Mode: ${hydrateOnly || "full"}`,
         `  Property groups: ${hydratedBlueprint.propertyGroups.length}`,
         `  Manufacturers: ${collector.collectManufacturers(hydratedBlueprint).length}`,
+        `  Variants: ${formatVariantSettings(blueprintVariantSettings(hydratedBlueprint))}`,
     ];
 
     if (hydratedBlueprint.brandColors) {

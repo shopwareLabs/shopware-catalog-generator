@@ -24,11 +24,14 @@ import type {
     TokenUsage,
     TranslationCostEstimate,
     TranslationSource,
+    VariantSettings,
 } from "../types/index.js";
 
 import { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "../fixtures/index.js";
 import { countCategories } from "../utils/index.js";
+import { VARIANT_COLOR_BATCH_SIZE } from "./hydrators/product.js";
 import { collectTerms, TRANSLATION_BATCH_SIZES } from "./hydrators/translation.js";
+import { formatVariantSettings, productsMissingColors } from "./variant-settings.js";
 
 /** Products per AI batch (mirrors ProductHydrator MAX_BATCH_SIZE) */
 const PRODUCT_BATCH_SIZE = 10;
@@ -48,6 +51,7 @@ const TOKENS = {
     propertyBatch: { input: 10000, outputPerProduct: 120 },
     propertyOptions: { input: 300, output: 100 },
     cmsPage: { input: 350, inputPerSlot: 60, outputPerSlot: 65 },
+    variantColors: { input: 400, inputPerProduct: 25, outputPerProduct: 45 },
 } as const;
 
 /** Blueprint shape the estimator needs */
@@ -65,6 +69,8 @@ export interface CostEstimateInput {
     pendingImages: PendingImageCounts;
     /** Inspiration brand colors replace the brand-colors AI call */
     hasInspirationColors: boolean;
+    /** Variant settings of the run (scope "variants": the new settings) */
+    variants?: VariantSettings;
 }
 
 /**
@@ -314,6 +320,9 @@ function buildTextItems(input: CostEstimateInput): TextCostItem[] {
     if (scope === "full" || scope === "cms") {
         items.push(cmsItem(input.cms));
     }
+    if (scope === "variants" && input.variants) {
+        items.push(variantColorItem(input.blueprint.products, input.variants));
+    }
 
     return items.filter((i) => i.calls > 0);
 }
@@ -359,6 +368,19 @@ function cmsItem(cms: { pages: number; slots: number }): TextCostItem {
         calls: cms.pages,
         inputTokens: cms.pages * TOKENS.cmsPage.input + cms.slots * TOKENS.cmsPage.inputPerSlot,
         outputTokens: cms.slots * TOKENS.cmsPage.outputPerSlot,
+    };
+}
+
+/** Extra colours for variant products that have fewer than the new colour count */
+function variantColorItem(products: BlueprintProduct[], settings: VariantSettings): TextCostItem {
+    const count = productsMissingColors(products, settings).length;
+    const calls = Math.ceil(count / VARIANT_COLOR_BATCH_SIZE);
+    return {
+        label: "Variant colours",
+        calls,
+        inputTokens:
+            calls * TOKENS.variantColors.input + count * TOKENS.variantColors.inputPerProduct,
+        outputTokens: count * TOKENS.variantColors.outputPerProduct,
     };
 }
 
@@ -464,8 +486,19 @@ function buildNotes(input: CostEstimateInput): string[] {
     if (input.scope === "full" || input.scope === "properties") {
         notes.push("Property options calls only happen for properties missing from the cache.");
     }
+    notes.push(...variantNotes(input));
     notes.push(`List prices as of ${PRICING_AS_OF}. Actual cost may differ.`);
     return notes;
+}
+
+function variantNotes(input: CostEstimateInput): string[] {
+    const { variants, scope } = input;
+    if (!variants || scope === "categories" || scope === "cms") return [];
+    const variantProducts =
+        scope === "full"
+            ? Math.round(input.blueprint.products.length * variants.share)
+            : input.blueprint.products.filter((p) => p.metadata.isVariant).length;
+    return [`Variants: ${variantProducts} variant products (${formatVariantSettings(variants)}).`];
 }
 
 function describeImageSelection(selection: ModelSelection): string {
