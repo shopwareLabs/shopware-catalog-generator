@@ -16,6 +16,7 @@ import {
     OpenAIImageProvider,
     OpenAITextProvider,
 } from "../../../src/providers/index.js";
+import { detectImageMimeType } from "../../../src/providers/openai-provider.js";
 
 describe("OpenAI SDK compatibility", () => {
     const requests: Request[] = [];
@@ -236,6 +237,46 @@ describe("OpenAI SDK compatibility", () => {
             error: { message: "Invalid image request", type: "invalid_request_error" },
         };
         expect(await new OpenAIImageProvider("test-key").generateImage("Product photo")).toBeNull();
+    });
+
+    test("editImage uploads the source image with its mime type and asks for webp", async () => {
+        responseBody = { data: [{ b64_json: "ZWRpdGVk" }] };
+        const webp = Buffer.concat([
+            Buffer.from("RIFF"),
+            Buffer.alloc(4),
+            Buffer.from("WEBPVP8 "),
+        ]).toString("base64");
+
+        const result = await new OpenAIImageProvider("test-key", "gpt-image-2.5-flare").editImage(
+            "Recolour",
+            webp
+        );
+
+        expect(result).toBe("ZWRpdGVk");
+        const request = requests.find((r) => r.url.endsWith("/images/edits"));
+        const form = await request?.formData();
+        expect(form?.get("model")).toBe("gpt-image-2.5-flare");
+        expect(form?.get("prompt")).toBe("Recolour");
+        expect(form?.get("output_format")).toBe("webp");
+        const image = form?.get("image");
+        expect(image instanceof File ? image.type : null).toBe("image/webp");
+    });
+
+    test("editImage returns null on API errors", async () => {
+        responseStatus = 400;
+        responseBody = { error: { message: "Bad edit", type: "invalid_request_error" } };
+
+        expect(await new OpenAIImageProvider("test-key").editImage("Recolour", "aW1n")).toBeNull();
+    });
+});
+
+describe("detectImageMimeType", () => {
+    test.each([
+        [Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBP")]), "image/webp"],
+        [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
+        [Buffer.from([0x89, 0x50, 0x4e, 0x47]), "image/png"],
+    ])("detects %#", (buffer, type) => {
+        expect<string>(detectImageMimeType(buffer)).toBe(type);
     });
 });
 

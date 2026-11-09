@@ -44,7 +44,7 @@ function createInput(overrides: Partial<CostEstimateInput> = {}): CostEstimateIn
         },
         selection: OPENAI_SELECTION,
         cms: { pages: 8, slots: 20 },
-        pendingImages: { cms: 20, product: 60, category: 1, theme: 3 },
+        pendingImages: { cms: 20, product: 60, category: 1, theme: 3, variantColor: 0 },
         hasInspirationColors: false,
         ...overrides,
     };
@@ -275,6 +275,76 @@ describe("estimateHydrationCost - variants", () => {
         );
 
         expect(estimate.notes.some((n) => n.startsWith("Variants:"))).toBe(false);
+    });
+});
+
+describe("estimateHydrationCost - variant colour images", () => {
+    const withColors = (overrides: Partial<CostEstimateInput> = {}): CostEstimateInput =>
+        createInput({
+            pendingImages: { cms: 0, product: 0, category: 0, theme: 0, variantColor: 12 },
+            ...overrides,
+        });
+    const variantItem = (input: CostEstimateInput) =>
+        estimateHydrationCost(input).images.items.find((i) => i.label === "Variant colour images");
+
+    test("counts colour images as edits in the full and variant-images scopes", () => {
+        expect(variantItem(withColors())).toEqual({
+            label: "Variant colour images",
+            count: 12,
+            edit: true,
+        });
+        expect(variantItem(withColors({ scope: "variant-images" }))?.count).toBe(12);
+        expect(variantItem(withColors({ scope: "variants" }))?.count).toBe(0);
+        expect(variantItem(withColors({ scope: "cms" }))?.count).toBe(0);
+    });
+
+    test("prices colour images with the edit price", () => {
+        const estimate = estimateHydrationCost(withColors({ scope: "variant-images" }));
+
+        expect(estimate.images.count).toBe(12);
+        expect(estimate.images.editUnitUsd).not.toBeNull();
+        expect(estimate.images.usd).toBeCloseTo(12 * (estimate.images.editUnitUsd ?? NaN), 6);
+        expect(estimate.notes).toContain(
+            "Variant colour images are priced like new images; edits also pay for the input image."
+        );
+    });
+
+    test("shows the edit price per image in the formatted estimate", () => {
+        const output = formatCostEstimate(
+            estimateHydrationCost(withColors({ scope: "variant-images" }))
+        ).join("\n");
+
+        expect(output).toContain("Variant colour images");
+        expect(output).toContain("(edits x $");
+    });
+
+    test("notes the upper bound in the full scope", () => {
+        expect(estimateHydrationCost(withColors()).notes).toContain(
+            "Variant colour images are an upper bound: not every variant product has colours."
+        );
+        expect(
+            estimateHydrationCost(withColors({ scope: "variant-images" })).notes.some((n) =>
+                n.includes("upper bound")
+            )
+        ).toBe(false);
+    });
+
+    test("notes that Pollinations skips colour images", () => {
+        const estimate = estimateHydrationCost(
+            withColors({
+                pendingImages: { cms: 0, product: 0, category: 0, theme: 0, variantColor: 0 },
+                selection: {
+                    ...OPENAI_SELECTION,
+                    imageProvider: "pollinations",
+                    imageModel: "flux",
+                    imageFreeTier: true,
+                },
+            })
+        );
+
+        expect(estimate.notes).toContain(
+            "Variant colour images need image editing (OpenAI); skipped with Pollinations."
+        );
     });
 });
 

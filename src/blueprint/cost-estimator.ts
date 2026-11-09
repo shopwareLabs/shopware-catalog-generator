@@ -88,13 +88,14 @@ export function estimateHydrationCost(input: CostEstimateInput): CostEstimate {
 
     const imageCount = sum(imageItems.map((i) => i.count));
     const unitUsd = lookupImageUnitPrice(input.selection);
-    const imageUsd = imageCount === 0 ? 0 : unitUsd === null ? null : unitUsd * imageCount;
+    const editUnitUsd = lookupImageUnitPrice(input.selection, "edit");
+    const imageUsd = priceImageItems(imageItems, unitUsd, editUnitUsd);
 
     return {
         scope: input.scope,
         selection: input.selection,
         text: { items: textItems, calls, inputTokens, outputTokens, usd: textUsd },
-        images: { items: imageItems, count: imageCount, unitUsd, usd: imageUsd },
+        images: { items: imageItems, count: imageCount, unitUsd, editUnitUsd, usd: imageUsd },
         totalUsd: textUsd === null || imageUsd === null ? null : textUsd + imageUsd,
         notes: buildNotes(input),
     };
@@ -128,7 +129,13 @@ export function formatCostEstimate(estimate: CostEstimate): string[] {
     lines.push(
         ...images.items
             .filter((i) => i.count > 0)
-            .map((i) => `  ${i.label.padEnd(22)} ${String(i.count).padStart(4)} images`)
+            .map(
+                (i) =>
+                    `  ${i.label.padEnd(22)} ${String(i.count).padStart(4)} images` +
+                    (i.edit && images.editUnitUsd !== null
+                        ? ` (edits x ${formatUsd(images.editUnitUsd, 3)})`
+                        : "")
+            )
     );
     const unit = images.unitUsd === null ? "" : ` x ${formatUsd(images.unitUsd, 3)}`;
     lines.push(`  Total: ${images.count} images${unit} -> ${formatUsd(images.usd)}`);
@@ -417,13 +424,33 @@ function buildImageItems(input: CostEstimateInput): ImageCostItem[] {
     const { pendingImages, scope } = input;
     const includeCms = scope === "full" || scope === "cms";
     const includeCatalog = scope === "full";
+    const includeVariantColors = scope === "full" || scope === "variant-images";
 
     return [
         { label: "CMS images", count: includeCms ? pendingImages.cms : 0 },
         { label: "Product images", count: includeCatalog ? pendingImages.product : 0 },
         { label: "Category banners", count: includeCatalog ? pendingImages.category : 0 },
         { label: "Theme media", count: includeCatalog ? pendingImages.theme : 0 },
+        {
+            label: "Variant colour images",
+            count: includeVariantColors ? pendingImages.variantColor : 0,
+            edit: true,
+        },
     ];
+}
+
+/** Generated images at the unit price, edited ones at the edit price. Null when unknown */
+function priceImageItems(
+    items: ImageCostItem[],
+    unitUsd: number | null,
+    editUnitUsd: number | null
+): number | null {
+    const generated = sum(items.filter((i) => !i.edit).map((i) => i.count));
+    const edited = sum(items.filter((i) => i.edit).map((i) => i.count));
+    const generatedUsd = generated === 0 ? 0 : unitUsd;
+    const editedUsd = edited === 0 ? 0 : editUnitUsd;
+    if (generatedUsd === null || editedUsd === null) return null;
+    return generatedUsd * generated + editedUsd * edited;
 }
 
 // =============================================================================
@@ -435,17 +462,26 @@ function lookupTextPrice(selection: ModelSelection): TextModelPrice | null {
     return OPENAI_TEXT_PRICES[stripSnapshotDate(selection.textModel)] ?? null;
 }
 
-function lookupImageUnitPrice(selection: ModelSelection): number | null {
+function hasEditPrice(selection: ModelSelection): boolean {
+    return Boolean(OPENAI_IMAGE_PRICES[stripSnapshotDate(selection.imageModel ?? "")]?.edit);
+}
+
+/** Price per image; "edit" adds the input image (falls back to the generate price) */
+function lookupImageUnitPrice(
+    selection: ModelSelection,
+    kind: "generate" | "edit" = "generate"
+): number | null {
     if (selection.imageProvider === "none") return 0;
     if (selection.imageProvider === "pollinations") return selection.imageFreeTier ? 0 : null;
 
     const price = OPENAI_IMAGE_PRICES[stripSnapshotDate(selection.imageModel ?? "")];
     if (!price) return null;
 
+    const table = kind === "edit" ? (price.edit ?? price) : price;
     const quality = selection.imageQuality ?? "low";
-    if (quality === "medium" || quality === "high" || quality === "low") return price[quality];
+    if (quality === "medium" || quality === "high" || quality === "low") return table[quality];
     // "auto" lets OpenAI pick; forecast as medium
-    return price.medium;
+    return table.medium;
 }
 
 function priceTokens(price: TextModelPrice, inputTokens: number, outputTokens: number): number {
@@ -487,6 +523,7 @@ function buildNotes(input: CostEstimateInput): string[] {
         notes.push("Property options calls only happen for properties missing from the cache.");
     }
     notes.push(...variantNotes(input));
+    notes.push(...variantImageNotes(input));
     notes.push(`List prices as of ${PRICING_AS_OF}. Actual cost may differ.`);
     return notes;
 }
@@ -499,6 +536,26 @@ function variantNotes(input: CostEstimateInput): string[] {
             ? Math.round(input.blueprint.products.length * variants.share)
             : input.blueprint.products.filter((p) => p.metadata.isVariant).length;
     return [`Variants: ${variantProducts} variant products (${formatVariantSettings(variants)}).`];
+}
+
+function variantImageNotes(input: CostEstimateInput): string[] {
+    const { scope, selection } = input;
+    if (scope !== "full" && scope !== "variant-images") return [];
+    if (selection.imageProvider === "pollinations") {
+        return ["Variant colour images need image editing (OpenAI); skipped with Pollinations."];
+    }
+    const notes: string[] = [];
+    if (scope === "full" && input.pendingImages.variantColor > 0) {
+        notes.push(
+            "Variant colour images are an upper bound: not every variant product has colours."
+        );
+    }
+    if (input.pendingImages.variantColor > 0 && !hasEditPrice(selection)) {
+        notes.push(
+            "Variant colour images are priced like new images; edits also pay for the input image."
+        );
+    }
+    return notes;
 }
 
 function describeImageSelection(selection: ModelSelection): string {

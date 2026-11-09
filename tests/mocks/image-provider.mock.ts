@@ -87,3 +87,24 @@ export class SlowImageProvider implements ImageProvider {
         return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
     }
 }
+
+/**
+ * Mock image provider that can edit images (recolour). Records each edit call.
+ */
+export class EditingImageProvider extends MockImageProvider {
+    readonly edits: Array<{ prompt: string; sourceBase64: string }> = [];
+    private editResult: string | null = Buffer.from("edited").toString("base64");
+
+    setEditResult(base64: string | null): void {
+        this.editResult = base64;
+    }
+
+    async editImage(
+        prompt: string,
+        sourceBase64: string,
+        _options?: ImageGenerationOptions
+    ): Promise<string | null> {
+        this.edits.push({ prompt, sourceBase64 });
+        return this.editResult;
+    }
+}

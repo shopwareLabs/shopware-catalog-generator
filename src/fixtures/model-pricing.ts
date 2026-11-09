@@ -29,6 +29,9 @@ export const OPENAI_TEXT_PRICES: Record<string, TextModelPrice> = {
  * gpt-image-2 / 2.5 / 2.6: output tokens from the guide's token calculator at $30 per 1M.
  * gpt-image-2.6 uses more tokens than 2.5 at low and medium quality, so it costs more there.
  * Square images cost more than landscape for gpt-image-2+, and less for older models.
+ *
+ * Edits (variant colour images) also pay for the input image. Without an `edit` entry the
+ * forecast uses the generate price, so it is a lower bound until edit prices are measured.
  */
 export const OPENAI_IMAGE_PRICES: Record<string, ImageModelPrice> = {
     "gpt-image-1-mini": { low: 0.006, medium: 0.015, high: 0.052 },

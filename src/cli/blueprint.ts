@@ -11,6 +11,7 @@ import {
     createBlueprint,
     estimateBlueprintCost,
     fixBlueprint,
+    HYDRATE_ONLY_MODES,
     hydrateBlueprint,
     inspireBlueprint,
     resolveCmsStoreDescription,
@@ -35,8 +36,6 @@ export async function blueprintCreate(args: CliArgs): Promise<void> {
     }
 }
 
-const HYDRATE_ONLY_MODES: readonly HydrateOnly[] = ["categories", "properties", "cms", "variants"];
-
 function isHydrateOnly(value: string): value is HydrateOnly {
     return HYDRATE_ONLY_MODES.some((mode) => mode === value);
 }
@@ -46,7 +45,7 @@ function parseHydrateOnly(args: CliArgs, command: string): HydrateOnly | undefin
     if (!hydrateOnly) return undefined;
     if (isHydrateOnly(hydrateOnly)) return hydrateOnly;
     throw new CLIError(
-        `--only must be 'categories', 'properties', 'cms', or 'variants' for ${command} (got: ${hydrateOnly})`,
+        `--only must be one of ${HYDRATE_ONLY_MODES.map((m) => `'${m}'`).join(", ")} for ${command} (got: ${hydrateOnly})`,
         "INVALID_OPTION"
     );
 }

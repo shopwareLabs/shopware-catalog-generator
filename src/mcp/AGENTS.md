@@ -49,7 +49,8 @@ mcp/
 `blueprint_create`, `blueprint_estimate`, `blueprint_hydrate` and `generate` spread
 `variantSettingParams` from `tools/variant-params.ts`. The ranges come from `VARIANT_SETTING_LIMITS`,
 so they match the CLI flags (`--variant-colors`, `--variant-options`, `--max-variants`,
-`--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"`.
+`--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"` and `only: "variant-images"`
+(both use `HYDRATE_ONLY_MODES` from the blueprint service).
 
 ## Architecture: Shared Services Layer
 

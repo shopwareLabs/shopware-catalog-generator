@@ -12,6 +12,7 @@ import {
     createBlueprint,
     estimateBlueprintCost,
     fixBlueprint,
+    HYDRATE_ONLY_MODES,
     hydrateBlueprint,
     inspireBlueprint,
 } from "../../services/blueprint-service.js";
@@ -72,10 +73,10 @@ export function registerBlueprintTools(server: FastMCP): void {
         parameters: z.object({
             name: z.string().describe("SalesChannel name"),
             only: z
-                .enum(["categories", "properties", "cms", "variants"])
+                .enum(HYDRATE_ONLY_MODES)
                 .optional()
                 .describe(
-                    "Estimate a selective hydration (categories, properties, cms, or variants)"
+                    "Estimate a selective hydration (categories, properties, cms, variants, or variant-images)"
                 ),
             languages: z
                 .string()
@@ -148,12 +149,13 @@ export function registerBlueprintTools(server: FastMCP): void {
         parameters: z.object({
             name: z.string().describe("SalesChannel name"),
             only: z
-                .enum(["categories", "properties", "cms", "variants"])
+                .enum(HYDRATE_ONLY_MODES)
                 .optional()
                 .describe(
                     "Selectively hydrate only this part (categories, properties, cms, or variants). " +
                         "Preserves existing product names (important for image stability). " +
-                        "'variants' re-picks the variant options for new variant settings."
+                        "'variants' re-picks the variant options for new variant settings. " +
+                        "'variant-images' recolours the product images per colour variant (OpenAI image editing)."
                 ),
             rehydrate: z
                 .boolean()

@@ -149,6 +149,7 @@ bun run blueprint hydrate --name=music
 | `--only=properties`        | Only update product properties, preserve names (image-stable)  |
 | `--only=cms`               | Only hydrate CMS blueprint text (`cms-blueprint.json`)         |
 | `--only=variants`          | Re-pick variant options with new settings (see below)          |
+| `--only=variant-images`    | Recolour product images per colour variant (OpenAI edits)      |
 | `--rehydrate`              | Force full re-hydration even if hydrated blueprint exists      |
 
 If a hydrated blueprint already exists, `--only` or `--rehydrate` is required to prevent accidental name changes.
@@ -162,6 +163,11 @@ first); without AI the colours are topped up from the known shades. The new sett
 ```bash
 bun run blueprint hydrate --name=music --only=variants --variant-colors=6 --max-variants=36
 ```
+
+`--only=variant-images` recolours the parent images (default colour) into every other colour of a
+colour variant product with OpenAI `images.edit`. Run it after `--only=variants`. Pollinations cannot
+edit images, so it is skipped with a warning. `VARIANT_IMAGE_VIEWS=cover` only recolours the first view.
+`blueprint estimate --only=variant-images` shows the edit count and cost first.
 
 **Output:** `generated/sales-channels/{name}/hydrated-blueprint.json`
 
