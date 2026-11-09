@@ -60,6 +60,55 @@ describe("trimAndResize with native sharp", () => {
     test("preserves the original data if decoding fails", async () => {
         expect(await trimAndResize("invalid-image", 96, 96)).toBe("invalid-image");
     });
+
+    test("keys out a white background for transparent output, keeps colored pixels", async () => {
+        const logo = Buffer.from(
+            // White canvas with a 100x40 logo at (10,10) and a white hole in its middle
+            '<svg width="120" height="60" xmlns="http://www.w3.org/2000/svg">' +
+                '<rect width="120" height="60" fill="#ffffff"/>' +
+                '<rect x="10" y="10" width="50" height="40" fill="#d9b7a8"/>' +
+                '<rect x="60" y="10" width="50" height="40" fill="#6b3f50"/>' +
+                '<rect x="50" y="25" width="20" height="10" fill="#ffffff"/></svg>'
+        );
+
+        const output = await trimAndResize(logo.toString("base64"), 474, 40, {
+            transparent: true,
+            fitHeight: true,
+        });
+        const { data, info } = await sharp(Buffer.from(output, "base64"))
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        const alphaAt = (x: number, y: number): number => data[(y * info.width + x) * 4 + 3]!;
+
+        expect(info.channels).toBe(4);
+        expect(alphaAt(10, 5)).toBe(255); // light brand color stays
+        expect(alphaAt(90, 5)).toBe(255); // dark brand color stays
+        expect(alphaAt(50, 20)).toBe(0); // white becomes transparent
+    });
+
+    test("trims a noisy off-white background, not only pure white", async () => {
+        const { width, height } = { width: 300, height: 200 };
+        const noise = Buffer.alloc(width * height * 3);
+        for (let i = 0; i < noise.length; i++) noise[i] = 238 + ((i * 7919) % 17); // 238..254
+        const logo = Buffer.from(
+            `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">` +
+                '<rect x="50" y="80" width="200" height="40" fill="#6b3f50"/></svg>'
+        );
+        const noisy = await sharp(noise, { raw: { width, height, channels: 3 } })
+            .composite([{ input: logo }])
+            .png()
+            .toBuffer();
+
+        const output = await trimAndResize(noisy.toString("base64"), 474, 70, {
+            transparent: true,
+            fitHeight: true,
+        });
+        const metadata = await sharp(Buffer.from(output, "base64")).metadata();
+
+        // 200x40 content scaled to 70px height -> 350px wide, padding removed
+        expect(metadata.height).toBe(70);
+        expect(metadata.width).toBe(350);
+    });
 });
 
 describe("buildCmsImageSpecs", () => {
@@ -578,12 +627,15 @@ describe("buildThemeImageSpecs", () => {
         expect(share!.fitHeight).toBeUndefined();
     });
 
-    test("logo and favicon prompts mention transparent background", () => {
+    test("logo and favicon prompts ask for a plain white background, not transparency", () => {
         const specs = buildThemeImageSpecs("music", "Musical instruments");
         const logo = specs.find((s) => s.key === "store-logo");
         const favicon = specs.find((s) => s.key === "store-favicon");
-        expect(logo!.prompt).toContain("transparent background");
-        expect(favicon!.prompt).toContain("transparent background");
+        // "transparent background" makes image models paint a checkerboard
+        for (const prompt of [logo!.prompt, favicon!.prompt]) {
+            expect(prompt).toContain("plain solid white background");
+            expect(prompt).not.toContain("transparent background");
+        }
     });
 
     test("cleans technical store name prefix from description", () => {

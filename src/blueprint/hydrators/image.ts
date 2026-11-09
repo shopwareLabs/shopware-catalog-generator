@@ -361,7 +361,7 @@ export function buildThemeImageSpecs(
                 `The logo MUST include the text "${displayName}" as the main element.`,
                 `Small icon or symbol next to the store name. Compact landscape format, tightly cropped with no padding.`,
                 colorHint,
-                `Flat vector style, transparent background, no photorealism. Looks good at 237x35px.`,
+                `Flat vector style on a plain solid white background (no checkerboard, no pattern), no photorealism. Looks good at 237x35px.`,
             ]
                 .filter(Boolean)
                 .join(" "),
@@ -377,7 +377,7 @@ export function buildThemeImageSpecs(
                 `Single flat-design shape representing the store category.`,
                 `Must be recognizable at 32x32px — no fine details, no text.`,
                 colorHint,
-                `Clean silhouette on transparent background, vector-style.`,
+                `Clean silhouette on a plain solid white background (no checkerboard, no pattern), vector-style.`,
             ]
                 .filter(Boolean)
                 .join(" "),
@@ -400,6 +400,41 @@ export function buildThemeImageSpecs(
         },
     ];
     return specs.map(withBrandSafePrompt);
+}
+
+/**
+ * Colour distance that still counts as background when trimming. sharp's default (10) keeps
+ * the faint noise and soft gradients AI models paint into "white" backgrounds, so most of
+ * the padding survived and the logo filled only ~40% of its height.
+ */
+const TRIM_THRESHOLD = 30;
+
+/** Pixels whose darkest channel is at least this light become fully transparent */
+const WHITE_KEY_FULL = 245;
+/** Pixels between this and WHITE_KEY_FULL fade out, which keeps anti-aliased edges smooth */
+const WHITE_KEY_START = 215;
+
+/**
+ * Image models cannot reliably produce real transparency: asked for a "transparent background"
+ * they paint a checkerboard. Logos are generated on plain white instead, and the near-white
+ * pixels are keyed out here. Colored pixels (darkest channel below WHITE_KEY_START) stay opaque.
+ */
+async function whiteToTransparent(image: Buffer): Promise<Buffer> {
+    const { data, info } = await sharp(image)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+    for (let i = 0; i < data.length; i += 4) {
+        const lightness = Math.min(data[i]!, data[i + 1]!, data[i + 2]!);
+        if (lightness < WHITE_KEY_START) continue;
+        const fade = (WHITE_KEY_FULL - lightness) / (WHITE_KEY_FULL - WHITE_KEY_START);
+        data[i + 3] = Math.round(data[i + 3]! * Math.max(0, fade));
+    }
+    return sharp(data, {
+        raw: { width: info.width, height: info.height, channels: 4 },
+    })
+        .png()
+        .toBuffer();
 }
 
 interface TrimAndResizeOptions {
@@ -429,7 +464,7 @@ export async function trimAndResize(
 
     try {
         const buffer = Buffer.from(base64, "base64");
-        const trimmed = await sharp(buffer).trim().toBuffer();
+        const trimmed = await sharp(buffer).trim({ threshold: TRIM_THRESHOLD }).toBuffer();
         const background = opts.transparent
             ? { r: 0, g: 0, b: 0, alpha: 0 }
             : { r: 255, g: 255, b: 255, alpha: 1 };
@@ -438,7 +473,8 @@ export async function trimAndResize(
             ? { height: targetHeight, withoutEnlargement: false }
             : { width: targetWidth, height: targetHeight, fit: "contain" as const, background };
 
-        let pipeline = sharp(trimmed).resize(resizeOptions);
+        const source = opts.transparent ? await whiteToTransparent(trimmed) : trimmed;
+        let pipeline = sharp(source).resize(resizeOptions);
         pipeline = opts.transparent ? pipeline.png() : pipeline.webp();
         const resized = await pipeline.toBuffer();
         return resized.toString("base64");
