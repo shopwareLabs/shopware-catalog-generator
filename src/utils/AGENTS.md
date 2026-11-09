@@ -98,6 +98,21 @@ const textColor2 = getContrastTextColor("#FFD700"); // "#000000" (black on gold)
 `getContrastTextColor()` is used by the theme processor to derive `sw-color-buy-button-text`
 from the brand primary color, ensuring readable button text regardless of the chosen brand color.
 
+### image-prompt.ts
+
+Guard against real trademarks in generated images:
+
+```typescript
+import { withFictionalBranding } from "./utils/index.js";
+
+const prompt = withFictionalBranding("Vitamin D3 Capsules, front view on white background");
+// "... background. Any brand names, logos or label text shown must be invented and fictional. ..."
+```
+
+Every image prompt (product, category, CMS, theme, image fix) goes through it where the prompt is
+built, so the cached metadata stores the exact prompt that was sent. Image models otherwise put real
+brand names on packaging. Text the prompt asks for explicitly (the store name in the logo) stays allowed.
+
 ### property-collector.ts
 
 Collect and deduplicate property groups:

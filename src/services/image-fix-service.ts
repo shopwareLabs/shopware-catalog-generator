@@ -12,6 +12,7 @@ import { hydrateThemeMedia } from "../blueprint/index.js";
 import { DEFAULT_PROCESSOR_OPTIONS, runProcessors } from "../post-processors/index.js";
 import { createProvidersFromEnv } from "../providers/index.js";
 import { DataHydrator, detectShopwareCapabilities } from "../shopware/index.js";
+import { withFictionalBranding } from "../utils/index.js";
 import { createProcessorDeps } from "./shopware-context.js";
 
 export const THEME_MEDIA_KEYS = ["store-logo", "store-favicon", "store-share"] as const;
@@ -63,7 +64,8 @@ export async function fixProductImages(
 
     for (const desc of imageDescriptions) {
         cache.images.deleteImageWithView(salesChannelName, product.id, desc.view, "product_media");
-        const imageData = await imageProvider.generateImage(desc.prompt);
+        const prompt = withFictionalBranding(desc.prompt);
+        const imageData = await imageProvider.generateImage(prompt);
         if (!imageData) {
             results.push(`  ✗ Failed: ${desc.view}`);
             continue;
@@ -73,7 +75,7 @@ export async function fixProductImages(
             product.id,
             desc.view,
             imageData,
-            desc.prompt,
+            prompt,
             undefined,
             "product_media"
         );
@@ -127,7 +129,8 @@ export async function fixCategoryImages(
 
     const { image: imageProvider } = createProvidersFromEnv();
     cache.images.deleteImageWithView(salesChannelName, category.id, "banner", "category_media");
-    const imageData = await imageProvider.generateImage(category.imageDescription);
+    const prompt = withFictionalBranding(category.imageDescription);
+    const imageData = await imageProvider.generateImage(prompt);
     if (!imageData) {
         return [...results, `✗ Failed to generate`];
     }
@@ -137,7 +140,7 @@ export async function fixCategoryImages(
         category.id,
         "banner",
         imageData,
-        category.imageDescription,
+        prompt,
         undefined,
         "category_media"
     );

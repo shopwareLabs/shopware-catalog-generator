@@ -53,6 +53,8 @@ export {
 } from "./color-palette.js";
 // Concurrency utilities
 export { ConcurrencyLimiter } from "./concurrency.js";
+// Image prompt utilities
+export { FICTIONAL_BRANDING_INSTRUCTION, withFictionalBranding } from "./image-prompt.js";
 // Logger utilities
 export type { LogLevel, LogOptions } from "./logger.js";
 export { logger } from "./logger.js";

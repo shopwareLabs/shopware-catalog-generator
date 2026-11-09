@@ -161,6 +161,7 @@ src/
 │   ├── property-collector.ts # Collect, deduplicate, merge properties
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
+│   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
 │   ├── seeded-random.ts      # Deterministic PRNG (stable reviews across runs)
 │   ├── arrays.ts             # Array utilities (randomPick, etc.)
