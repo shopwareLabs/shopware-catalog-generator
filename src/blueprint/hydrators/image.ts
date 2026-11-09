@@ -19,6 +19,7 @@ import {
     ConcurrencyLimiter,
     executeWithRetry,
     logger,
+    withFictionalBranding,
 } from "../../utils/index.js";
 import { flattenCategories } from "./category.js";
 
@@ -36,7 +37,7 @@ interface CmsImageSpec {
  * The home hero also uses `storeName` for a branded feel.
  */
 export function buildCmsImageSpecs(storeName: string, storeDescription: string): CmsImageSpec[] {
-    return [
+    const specs: CmsImageSpec[] = [
         // ── Home hero ────────────────────────────────────────────────────
         {
             key: "home-hero",
@@ -110,6 +111,7 @@ export function buildCmsImageSpecs(storeName: string, storeDescription: string):
             height: 1080,
         },
     ];
+    return specs.map(withBrandSafePrompt);
 }
 
 export interface CmsImageHydrationResult {
@@ -351,7 +353,7 @@ export function buildThemeImageSpecs(
 
     const productDescription = cleanStoreDescription(storeName, storeDescription);
 
-    return [
+    const specs: ThemeImageSpec[] = [
         {
             key: "store-logo",
             prompt: [
@@ -397,6 +399,7 @@ export function buildThemeImageSpecs(
             height: 630,
         },
     ];
+    return specs.map(withBrandSafePrompt);
 }
 
 interface TrimAndResizeOptions {
@@ -547,9 +550,7 @@ function collectImageTasks(
             );
 
             if (!hasImage) {
-                const prompt = metadata.baseImagePrompt
-                    ? buildImagePrompt(metadata.baseImagePrompt, desc.view)
-                    : desc.prompt;
+                const prompt = buildProductImagePrompt(metadata.baseImagePrompt, desc);
                 tasks.push({
                     type: "product",
                     id: product.id,
@@ -578,9 +579,7 @@ function collectImageTasks(
                     "product_media"
                 );
                 result.stale++;
-                const prompt = metadata.baseImagePrompt
-                    ? buildImagePrompt(metadata.baseImagePrompt, desc.view)
-                    : desc.prompt;
+                const prompt = buildProductImagePrompt(metadata.baseImagePrompt, desc);
                 tasks.push({
                     type: "product",
                     id: product.id,
@@ -614,10 +613,24 @@ function collectImageTasks(
                 id: category.id,
                 name: category.name,
                 view: "banner",
-                prompt: category.imageDescription,
+                prompt: withFictionalBranding(category.imageDescription),
             });
         }
     }
 
     return tasks;
+}
+
+/** Spec copy whose prompt asks for fictional branding only (no real trademarks). */
+function withBrandSafePrompt<T extends { prompt: string }>(spec: T): T {
+    return { ...spec, prompt: withFictionalBranding(spec.prompt) };
+}
+
+/** Product image prompt: base prompt + view suffix, or the AI view prompt as fallback. */
+function buildProductImagePrompt(
+    baseImagePrompt: string | undefined,
+    desc: { view: string; prompt: string }
+): string {
+    const prompt = baseImagePrompt ? buildImagePrompt(baseImagePrompt, desc.view) : desc.prompt;
+    return withFictionalBranding(prompt);
 }

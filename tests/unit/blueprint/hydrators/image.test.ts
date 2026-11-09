@@ -13,6 +13,7 @@ import {
 } from "../../../../src/blueprint/hydrators/image.js";
 import { DataCache } from "../../../../src/cache.js";
 import { NoOpImageProvider } from "../../../../src/providers/noop-provider.js";
+import { FICTIONAL_BRANDING_INSTRUCTION } from "../../../../src/utils/index.js";
 import { FailingImageProvider, MockImageProvider } from "../../../mocks/image-provider.mock.js";
 
 function createTestCache(): DataCache {
@@ -728,5 +729,41 @@ describe("hydrateThemeMedia", () => {
         const shareCalls = calls.filter((c) => c.options?.width === 1200);
         expect(shareCalls).toHaveLength(1);
         expect(shareCalls[0]?.options?.height).toBe(630);
+    });
+});
+
+describe("fictional branding in image prompts", () => {
+    test("every CMS image prompt forbids real trademarks", () => {
+        const specs = buildCmsImageSpecs("drugstore", "Personal care and health products");
+        for (const spec of specs) {
+            expect(spec.prompt).toEndWith(FICTIONAL_BRANDING_INSTRUCTION);
+        }
+    });
+
+    test("every theme image prompt forbids real trademarks and keeps the store name", () => {
+        const specs = buildThemeImageSpecs("drugstore", "Personal care and health products");
+        for (const spec of specs) {
+            expect(spec.prompt).toEndWith(FICTIONAL_BRANDING_INSTRUCTION);
+        }
+        const logo = specs.find((s) => s.key === "store-logo");
+        expect(logo?.prompt).toContain(`MUST include the text "Drugstore"`);
+    });
+
+    test("product image prompts sent to the provider forbid real trademarks", async () => {
+        const imageProvider = new MockImageProvider();
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Vitamin D3 Capsules",
+                baseImagePrompt: "Vitamin D3 Capsules - 1000 IU - 90 Pieces",
+                imageDescriptions: [{ view: "front", prompt: "Bottle front view" }],
+            },
+        ]);
+
+        await hydrateProductImages(imageProvider, createTestCache(), "test-store", blueprint);
+
+        const [prompt] = imageProvider.getPrompts();
+        expect(prompt).toStartWith("Vitamin D3 Capsules - 1000 IU - 90 Pieces, front view");
+        expect(prompt).toEndWith(FICTIONAL_BRANDING_INSTRUCTION);
     });
 });
