@@ -8,6 +8,7 @@ import type { DataHydrator } from "../../../src/shopware/index.js";
 import type {
     BlueprintPropertyGroup,
     HydratedBlueprint,
+    PropertyGroup,
     SalesChannelFull,
 } from "../../../src/types/index.js";
 
@@ -531,6 +532,82 @@ describe("syncPropertyGroups", () => {
         expect(dataHydrator.hydrateEnvWithPropertyGroups).toHaveBeenCalled();
 
         logger.setMcpMode(false);
+    });
+
+    describe("filterable", () => {
+        const blueprintWithShades = (): HydratedBlueprint => ({
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    filterable: false,
+                    options: [{ id: "opt-red", name: "Red" }],
+                },
+            ],
+        });
+
+        const mockExisting = (dataHydrator: DataHydrator, filterable: boolean): void => {
+            (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
+                async () => [
+                    {
+                        id: "existing-pg",
+                        name: "Color",
+                        displayType: "color",
+                        filterable,
+                        options: [{ id: "existing-red", name: "Red" }],
+                    },
+                ]
+            );
+        };
+
+        const syncedGroups = (dataHydrator: DataHydrator): PropertyGroup[] => {
+            const calls = (dataHydrator.hydrateEnvWithPropertyGroups as ReturnType<typeof mock>)
+                .mock.calls;
+            return calls[0]?.[0] ?? [];
+        };
+
+        test("sends filterable for new groups", async () => {
+            logger.setMcpMode(true);
+            const dataHydrator = createMockDataHydrator();
+
+            await syncPropertyGroups(dataHydrator, blueprintWithShades());
+
+            expect(syncedGroups(dataHydrator)[0]?.filterable).toBe(false);
+            logger.setMcpMode(false);
+        });
+
+        test("updates an existing group when filterable differs", async () => {
+            logger.setMcpMode(true);
+            const dataHydrator = createMockDataHydrator();
+            mockExisting(dataHydrator, true);
+
+            await syncPropertyGroups(dataHydrator, blueprintWithShades());
+
+            expect(syncedGroups(dataHydrator)[0]).toMatchObject({
+                id: "existing-pg",
+                filterable: false,
+                options: [],
+            });
+            logger.setMcpMode(false);
+        });
+
+        test("skips an existing group when filterable already matches", async () => {
+            logger.setMcpMode(true);
+            const dataHydrator = createMockDataHydrator();
+            mockExisting(dataHydrator, false);
+
+            await syncPropertyGroups(dataHydrator, blueprintWithShades());
+
+            expect(dataHydrator.hydrateEnvWithPropertyGroups).not.toHaveBeenCalled();
+            logger.setMcpMode(false);
+        });
     });
 });
 

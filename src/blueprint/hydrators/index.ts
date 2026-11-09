@@ -1,5 +1,6 @@
 export { applyCategoryHydration, flattenCategories, hydrateCategories } from "./category.js";
 export type { CategoryHydrationResult } from "./category.js";
+export { COLOR_SHADE_BATCH_SIZE, findUnknownShades, hydrateColorShades } from "./color-shades.js";
 export { countCmsTextWork, generateCmsBlueprint, hydrateCmsBlueprint } from "./cms.js";
 export {
     buildCmsImageSpecs,

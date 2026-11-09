@@ -32,6 +32,15 @@ export type {
 } from "./blueprint.js";
 export { DEFAULT_BLUEPRINT_CONFIG } from "./blueprint.js";
 
+// Colour types
+export type { ColorFamily, ColorShade, LearnedColorShades } from "./color.js";
+export {
+    COLOR_FAMILY_KEYS,
+    ColorFamilySchema,
+    ColorShadeSchema,
+    LearnedColorShadesSchema,
+} from "./color.js";
+
 // Cache types
 export type {
     CacheOptions,

@@ -297,6 +297,30 @@ describe("DataCache", () => {
         });
     });
 
+    describe("learned colour shades", () => {
+        test("returns an empty object when nothing is learned yet", () => {
+            expect(cache.loadColorShades(TEST_SALES_CHANNEL)).toEqual({});
+        });
+
+        test("saves and loads learned shades", () => {
+            const shades = {
+                "dusty rose": { name: "Dusty Rose", hex: "#c48b8b", family: "pink" as const },
+            };
+            cache.saveColorShades(TEST_SALES_CHANNEL, shades);
+            expect(cache.loadColorShades(TEST_SALES_CHANNEL)).toEqual(shades);
+        });
+
+        test("ignores an invalid file", () => {
+            const file = path.join(
+                cache.getSalesChannelDir(TEST_SALES_CHANNEL),
+                "color-shades.json"
+            );
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, JSON.stringify({ moss: { name: "Moss", hex: "green" } }));
+            expect(cache.loadColorShades(TEST_SALES_CHANNEL)).toEqual({});
+        });
+    });
+
     describe("CMS blueprint cache", () => {
         const testCmsBlueprint: CmsBlueprint = {
             salesChannelName: TEST_SALES_CHANNEL,

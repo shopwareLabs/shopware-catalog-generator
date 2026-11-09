@@ -87,8 +87,8 @@ Color handling, fuzzy matching, and contrast utilities:
 ```typescript
 import { getHexColor, findClosestColor, getContrastTextColor } from "./utils/index.js";
 
-const hex = getHexColor("red"); // "#FF0000"
-const match = findClosestColor("burgundy"); // { name: "Red", hex: "#FF0000" }
+const hex = getHexColor("red"); // hex of the curated "Red" shade
+const match = findClosestColor("dark burgundy"); // { name: "Burgundy", hex: ... } (closest by name)
 
 // WCAG 2.0 relative luminance — returns "#000000" or "#ffffff" for optimal contrast
 const textColor = getContrastTextColor("#E91E63"); // "#ffffff" (white on dark pink)
@@ -97,6 +97,31 @@ const textColor2 = getContrastTextColor("#FFD700"); // "#000000" (black on gold)
 
 `getContrastTextColor()` is used by the theme processor to derive `sw-color-buy-button-text`
 from the brand primary color, ensuring readable button text regardless of the chosen brand color.
+
+The palette hex values come from the curated shades in `fixtures/property-groups.ts`, so a
+shade has the same hex everywhere.
+
+### color-normalize.ts
+
+Maps raw colour values to shades and families (pure, no AI):
+
+```typescript
+import { normalizeColorName, resolveShade, estimateShade, familyFromHex } from "./utils/index.js";
+
+normalizeColorName("navy blue"); // "Navy"
+normalizeColorName("grey"); // "Gray"
+normalizeColorName("3 colours"); // "Multicolor"
+normalizeColorName("black & white"); // "Black/White"
+
+resolveShade("Navy"); // { name: "Navy", hex: "...", family: "blue" }
+resolveShade("Dusty Rose", learned); // learned shade, or null when unknown
+estimateShade("Dusty Rose"); // no-AI fallback: closest palette match or neutral gray
+familyFromHex("#8B4513"); // "brown"
+```
+
+Resolution order in `resolveShade`: curated shade → learned shade (`color-shades.json`) →
+image colour (Multicolor, Rainbow, ...) → combination of two curated colours (family
+`multicolor`). Unknown names return `null` and go to the AI classifier during hydration.
 
 ### image-prompt.ts
 

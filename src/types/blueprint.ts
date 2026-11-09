@@ -5,6 +5,8 @@
  * then hydrates it with AI-generated content in a separate phase.
  */
 
+import type { ColorFamily } from "./color.js";
+
 // =============================================================================
 // Blueprint Core Types
 // =============================================================================
@@ -325,6 +327,12 @@ export interface BlueprintPropertyGroup {
     /** Display type */
     displayType: "text" | "color";
 
+    /**
+     * Shown in the listing filter. Undefined keeps Shopware's value (default: true).
+     * The shade group "Color" is hidden, the family group "Color family" is shown.
+     */
+    filterable?: boolean;
+
     /** Unique option values collected from products */
     options: BlueprintPropertyOption[];
 }
@@ -339,6 +347,9 @@ export interface BlueprintPropertyOption {
 
     /** Hex color code for color-type properties */
     colorHexCode?: string;
+
+    /** Colour family of a shade (options of the "Color" group only) */
+    family?: ColorFamily;
 }
 
 // =============================================================================

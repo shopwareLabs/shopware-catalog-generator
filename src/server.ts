@@ -7,12 +7,12 @@
 
 import type { ProcessContext } from "./server/index.js";
 
-import { BlueprintGenerator, BlueprintHydrator } from "./blueprint/index.js";
+import { applyColorSystem, BlueprintGenerator, BlueprintHydrator } from "./blueprint/index.js";
 import { DataCache } from "./cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "./post-processors/index.js";
 import { createProvidersFromEnv } from "./providers/index.js";
 import { processManager } from "./server/index.js";
-import { inspireBlueprint } from "./services/blueprint-service.js";
+import { buildPropertyGroups, inspireBlueprint } from "./services/blueprint-service.js";
 import { createProcessorDeps } from "./services/shopware-context.js";
 import {
     buildPropertyMaps,
@@ -24,7 +24,7 @@ import {
     syncPropertyIdsToBlueprint,
 } from "./shopware/index.js";
 import { createTemplateFetcherFromEnv } from "./templates/index.js";
-import { PropertyCollector, validateSubdomainName } from "./utils/index.js";
+import { validateSubdomainName } from "./utils/index.js";
 
 const port = Number(process.env.SERVER_PORT) || 3000;
 
@@ -181,12 +181,13 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
         const hydrator = new BlueprintHydrator(textProvider);
         const hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties);
 
-        const collector = new PropertyCollector();
-        const propertyGroups = collector.collectFromBlueprint(
+        await buildPropertyGroups(
+            textProvider,
+            cache,
+            salesChannel,
             hydratedBlueprint,
             existingProperties
         );
-        hydratedBlueprint.propertyGroups = propertyGroups;
 
         cache.saveHydratedBlueprint(salesChannel, hydratedBlueprint);
         ctx.log("Blueprint hydrated successfully");
@@ -203,6 +204,8 @@ async function generateTask(params: GenerateParams, ctx: ProcessContext): Promis
     if (!hydratedBlueprint) {
         throw new Error("Failed to load hydrated blueprint");
     }
+    // Blueprints from older runs and templates get the colour system before upload
+    applyColorSystem(hydratedBlueprint, cache.loadColorShades(salesChannel));
 
     ctx.setProgress("upload", 0, 4);
 

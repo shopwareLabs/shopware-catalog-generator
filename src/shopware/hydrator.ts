@@ -316,6 +316,7 @@ export class ShopwareHydrator extends ShopwareClient {
                 name: group.name,
                 description: group.description,
                 displayType: group.displayType,
+                ...(group.filterable !== undefined && { filterable: group.filterable }),
                 options: group.options.map((option: PropertyOption) => {
                     // Reuse existing option ID if available
                     const existingOptionId = existing?.options.get(option.name.toLowerCase());

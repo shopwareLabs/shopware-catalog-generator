@@ -1,6 +1,13 @@
 export { BlueprintGenerator } from "./generator.js";
 export { BlueprintHydrator } from "./hydrator.js";
 export {
+    applyColorSystem,
+    collectShadeNames,
+    isFamilyGroupName,
+    isShadeGroupName,
+    normalizeProductColors,
+} from "./color-system.js";
+export {
     estimateHydrationCost,
     estimateTranslationCost,
     estimateTranslationSource,
@@ -23,6 +30,7 @@ export {
     hydrateBrandColors,
     hydrateCmsBlueprint,
     hydrateCmsImages,
+    hydrateColorShades,
     hydrateProductImages,
     hydrateThemeMedia,
     ProductHydrator,

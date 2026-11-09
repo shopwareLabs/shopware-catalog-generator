@@ -11,6 +11,7 @@ import type {
     GenerationLog,
     GenerationStep,
     HydratedBlueprint,
+    LearnedColorShades,
     Manufacturer,
     ProductCacheMetadata,
     ProductInput,
@@ -26,6 +27,7 @@ import { ImageCache } from "./image-cache.js";
 import {
     DEFAULT_CACHE_OPTIONS,
     GenerationLogSchema,
+    LearnedColorShadesSchema,
     TemplateInfoSchema,
     TranslationFileSchema,
 } from "./types/index.js";
@@ -566,6 +568,22 @@ export class DataCache implements DataCacheApi {
     hasInspiration(salesChannel: string): boolean {
         const file = path.join(this.getSalesChannelDir(salesChannel), "inspiration.json");
         return this.hasCachedFile(file);
+    }
+
+    // =========================================================================
+    // Learned colour shades (color-shades.json)
+    // =========================================================================
+
+    /** Store-specific shades classified by the AI, keyed by lower-case shade name */
+    loadColorShades(salesChannel: string): LearnedColorShades {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "color-shades.json");
+        const parsed = LearnedColorShadesSchema.safeParse(this.loadJsonFile<unknown>(file) ?? {});
+        return parsed.success ? parsed.data : {};
+    }
+
+    saveColorShades(salesChannel: string, shades: LearnedColorShades): void {
+        const file = path.join(this.getSalesChannelDir(salesChannel), "color-shades.json");
+        this.saveJsonFile(file, shades);
     }
 
     // =========================================================================

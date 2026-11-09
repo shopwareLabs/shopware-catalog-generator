@@ -18,8 +18,10 @@ import type {
 import type { ExistingProperty } from "../utils/index.js";
 
 import {
+    applyColorSystem,
     BlueprintGenerator,
     BlueprintHydrator,
+    collectShadeNames,
     buildCmsImageSpecs,
     buildThemeImageSpecs,
     countCmsTextWork,
@@ -29,8 +31,10 @@ import {
     generateCmsBlueprint,
     hydrateCmsBlueprint,
     hydrateCmsImages,
+    hydrateColorShades,
     hydrateProductImages,
     hydrateThemeMedia,
+    normalizeProductColors,
     priceTokenUsage,
 } from "../blueprint/index.js";
 import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
@@ -302,9 +306,14 @@ export async function hydrateBlueprint(
         }
     }
 
+    await buildPropertyGroups(
+        textProvider,
+        cache,
+        salesChannelName,
+        hydratedBlueprint,
+        existingProperties
+    );
     const collector = new PropertyCollector();
-    const propertyGroups = collector.collectFromBlueprint(hydratedBlueprint, existingProperties);
-    hydratedBlueprint.propertyGroups = propertyGroups;
 
     cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
     cache.recordGenerationStep(
@@ -325,7 +334,7 @@ export async function hydrateBlueprint(
         ``,
         `Hydrated blueprint saved:`,
         `  Mode: ${hydrateOnly || "full"}`,
-        `  Property groups: ${propertyGroups.length}`,
+        `  Property groups: ${hydratedBlueprint.propertyGroups.length}`,
         `  Manufacturers: ${collector.collectManufacturers(hydratedBlueprint).length}`,
     ];
 
@@ -340,6 +349,37 @@ export async function hydrateBlueprint(
         ...formatActualUsage(textProvider, estimate.selection)
     );
     return results;
+}
+
+/**
+ * Build the property groups of a hydrated blueprint, with the colour system:
+ * normalise colour values, classify new shade names via AI (learned per store),
+ * collect the groups, then add shade families and the "Color family" group.
+ */
+export async function buildPropertyGroups(
+    textProvider: TextProvider,
+    cache: DataCache,
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    existingProperties: ExistingProperty[]
+): Promise<void> {
+    normalizeProductColors(blueprint);
+    const learned = await hydrateColorShades(
+        textProvider,
+        collectShadeNames(blueprint),
+        {
+            name: blueprint.salesChannel.name || salesChannelName,
+            description: blueprint.salesChannel.description || `${salesChannelName} webshop`,
+        },
+        cache.loadColorShades(salesChannelName)
+    );
+    cache.saveColorShades(salesChannelName, learned);
+
+    blueprint.propertyGroups = new PropertyCollector().collectFromBlueprint(
+        blueprint,
+        existingProperties
+    );
+    applyColorSystem(blueprint, learned);
 }
 
 export async function fixBlueprint(salesChannelName: string): Promise<string[]> {
@@ -373,7 +413,6 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
     const fixedBlueprint = await hydrator.fixPlaceholders(blueprint);
 
     if (placeholderProducts.length > 0) {
-        const collector = new PropertyCollector();
         const existingProperties: ExistingProperty[] = blueprint.propertyGroups.map((pg) => ({
             id: pg.id,
             name: pg.name,
@@ -384,8 +423,13 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
                 colorHexCode: o.colorHexCode,
             })),
         }));
-        const propertyGroups = collector.collectFromBlueprint(fixedBlueprint, existingProperties);
-        fixedBlueprint.propertyGroups = propertyGroups;
+        await buildPropertyGroups(
+            textProvider,
+            cache,
+            salesChannelName,
+            fixedBlueprint,
+            existingProperties
+        );
     }
 
     cache.saveHydratedBlueprint(salesChannelName, fixedBlueprint);

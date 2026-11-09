@@ -58,12 +58,27 @@ export { PROMOTIONS } from "./promotions.js";
 export type { DiscountScope, DiscountType, PromotionDefinition } from "./promotions.js";
 // Property Groups (universal groups for seeding generated/properties/)
 export {
+    COLOR_ALIASES,
+    COLOR_OPTIONS,
     colorHasImage,
     getColorImagePath,
+    getCuratedShade,
     getUniversalPropertyGroups,
     IMAGE_COLOR_OPTIONS,
     UNIVERSAL_PROPERTY_GROUPS,
 } from "./property-groups.js";
+// Colour families (filterable colour level)
+export {
+    COLOR_FAMILIES,
+    COLOR_FAMILY_GROUP_ID,
+    COLOR_FAMILY_GROUP_NAME,
+    COLOR_FAMILY_GROUP_TRANSLATIONS,
+    COLOR_SHADE_GROUP_NAME,
+    colorFamilyOptionId,
+    colorFamilyTranslation,
+    getColorFamily,
+} from "./color-families.js";
+export type { ColorFamilyFixture } from "./color-families.js";
 // Review Data
 export {
     buildProductReviews,
