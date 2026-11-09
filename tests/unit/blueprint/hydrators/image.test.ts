@@ -60,6 +60,30 @@ describe("trimAndResize with native sharp", () => {
     test("preserves the original data if decoding fails", async () => {
         expect(await trimAndResize("invalid-image", 96, 96)).toBe("invalid-image");
     });
+
+    test("trims a noisy off-white background, not only pure white", async () => {
+        const { width, height } = { width: 300, height: 200 };
+        const noise = Buffer.alloc(width * height * 3);
+        for (let i = 0; i < noise.length; i++) noise[i] = 238 + ((i * 7919) % 17); // 238..254
+        const logo = Buffer.from(
+            `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">` +
+                '<rect x="50" y="80" width="200" height="40" fill="#6b3f50"/></svg>'
+        );
+        const noisy = await sharp(noise, { raw: { width, height, channels: 3 } })
+            .composite([{ input: logo }])
+            .png()
+            .toBuffer();
+
+        const output = await trimAndResize(noisy.toString("base64"), 474, 70, {
+            transparent: true,
+            fitHeight: true,
+        });
+        const metadata = await sharp(Buffer.from(output, "base64")).metadata();
+
+        // 200x40 content scaled to 70px height -> 350px wide, padding removed
+        expect(metadata.height).toBe(70);
+        expect(metadata.width).toBe(350);
+    });
 });
 
 describe("buildCmsImageSpecs", () => {

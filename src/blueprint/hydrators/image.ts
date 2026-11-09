@@ -402,6 +402,13 @@ export function buildThemeImageSpecs(
     return specs.map(withBrandSafePrompt);
 }
 
+/**
+ * Colour distance that still counts as background when trimming. sharp's default (10) keeps
+ * the faint noise and soft gradients AI models paint into "white" backgrounds, so most of
+ * the padding survived and the logo filled only ~40% of its height.
+ */
+const TRIM_THRESHOLD = 30;
+
 interface TrimAndResizeOptions {
     transparent?: boolean;
     fitHeight?: boolean;
@@ -429,7 +436,7 @@ export async function trimAndResize(
 
     try {
         const buffer = Buffer.from(base64, "base64");
-        const trimmed = await sharp(buffer).trim().toBuffer();
+        const trimmed = await sharp(buffer).trim({ threshold: TRIM_THRESHOLD }).toBuffer();
         const background = opts.transparent
             ? { r: 0, g: 0, b: 0, alpha: 0 }
             : { r: 255, g: 255, b: 255, alpha: 1 };
