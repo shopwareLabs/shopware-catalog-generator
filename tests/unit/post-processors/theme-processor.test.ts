@@ -134,6 +134,7 @@ describe("ThemeProcessor theme media upload", () => {
         await ThemeProcessor.process(context);
 
         expect(uploads(mockApi)).toEqual([]);
+        expect(mockApi.getCallsByEndpoint("_action/cache")).toEqual([]);
     });
 
     test("replaces the file of the existing media when the cached logo changed", async () => {
@@ -143,6 +144,8 @@ describe("ThemeProcessor theme media upload", () => {
 
         expect(uploads(mockApi)).toHaveLength(1);
         expect(uploads(mockApi)[0]).toStartWith(`_action/media/${LOGO_MEDIA_ID}/upload`);
+        // Cached pages still link the deleted old file URL
+        expect(mockApi.getCallsByEndpoint("_action/cache")).toHaveLength(1);
         expect(mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body)).not.toContainEqual(
             expect.objectContaining({ createMedia: expect.anything() })
         );

@@ -43,6 +43,7 @@ class ThemeProcessorImpl implements PostProcessor {
 
     private themeMediaFolderId: string | null | undefined = undefined;
     private mediaFileNameCache = new Map<string, ThemeMediaFile>();
+    private replacedMediaFiles = 0;
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         this.resetCaches();
@@ -107,6 +108,8 @@ class ThemeProcessorImpl implements PostProcessor {
             errors.push("Failed to assign theme to SalesChannel");
         }
 
+        if (this.replacedMediaFiles > 0) await this.clearShopCache(context);
+
         const processed = configUpdated || assigned ? 1 : 0;
         logger.info(`  ✓ Theme customized for ${context.salesChannelName}`, { cli: true });
 
@@ -169,6 +172,7 @@ class ThemeProcessorImpl implements PostProcessor {
     private resetCaches(): void {
         this.themeMediaFolderId = undefined;
         this.mediaFileNameCache.clear();
+        this.replacedMediaFiles = 0;
     }
 
     private async getStorefrontThemeId(context: PostProcessorContext): Promise<string | null> {
@@ -368,6 +372,7 @@ class ThemeProcessorImpl implements PostProcessor {
             );
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             this.mediaFileNameCache.set(fileName, { id: mediaId, fileSize: imageBuffer.length });
+            if (existing) this.replacedMediaFiles++;
             logger.info(`  ✓ ${existing ? "Replaced" : "Uploaded"} theme ${field}`, { cli: true });
             return mediaId;
         } catch (error) {
@@ -408,6 +413,21 @@ class ThemeProcessorImpl implements PostProcessor {
             return file;
         } catch {
             return null;
+        }
+    }
+
+    /**
+     * A replaced file gets a new URL and the old one is deleted. Cached storefront pages
+     * still link the old URL (404), so the shop cache is cleared once after replacing.
+     */
+    private async clearShopCache(context: PostProcessorContext): Promise<void> {
+        try {
+            await context.api.httpDelete("_action/cache");
+            logger.info("  ✓ Cleared shop cache (theme media changed)", { cli: true });
+        } catch (error) {
+            logger.warn(`  Could not clear shop cache, run bin/console cache:clear: ${error}`, {
+                cli: true,
+            });
         }
     }
 
