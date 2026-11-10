@@ -25,7 +25,7 @@ import {
 } from "./cli/blueprint.js";
 import { generate, processCommand } from "./cli/generate.js";
 import { imageFixCommand } from "./cli/image-fix.js";
-import { CLIError } from "./cli/shared.js";
+import { CLIError, variantOverridesFromFlags } from "./cli/shared.js";
 import { templateMetadataCommand } from "./cli/template.js";
 
 export { CLIError, parseCliArgs };
@@ -93,6 +93,7 @@ function parseCliArgs(): CliArgs {
         formality: typeof flags.formality === "string" ? flags.formality : undefined,
         force: flags.force === true,
         e2e: typeof flags.e2e === "string" ? flags.e2e : undefined,
+        variants: variantOverridesFromFlags(flags),
     };
 }
 
@@ -124,11 +125,17 @@ Options:
   --type=<type>         Image fix type: product, category, cms, or theme
   --only=<list>         Comma-separated list:
                         - For 'process': processor names (images, manufacturers, etc.)
-                        - For 'blueprint hydrate' / 'blueprint estimate': categories, properties, or cms
+                        - For 'blueprint hydrate' / 'blueprint estimate': categories, properties, cms, or variants
   --rehydrate           [blueprint hydrate only] Force full re-hydration (overwrites existing, changes product names)
   --languages=<list>    Languages to translate into (blueprint translate, estimate, generate):
                         all (SalesChannel languages, de-DE for a new one), none, or de-DE,fr-FR
                         Default: TRANSLATION_LANGUAGES env, else asks in a terminal, else none
+  --variant-colors=<n>  Colours per colour variant product, 2-12 (default: 4, env VARIANT_COLORS)
+  --variant-options=<n> Options per other variant group, 2-8 (default: 3, env VARIANT_OPTIONS)
+  --max-variants=<n>    Max variants per product, 4-100 (default: 24, env MAX_VARIANTS)
+  --variant-share=<x>   Share of products with variants, 0-1 (default: 0.3, env VARIANT_SHARE)
+                        Set at blueprint create / generate; change colours, options and max later
+                        with 'blueprint hydrate --only=variants' (the share is fixed per blueprint)
   --formality=<value>   [blueprint translate] formal or informal (default: AI decides per language)
   --force               [blueprint translate] Translate everything again (ignore cached translations)
   --dry-run             Log actions without executing
@@ -144,6 +151,7 @@ Examples:
   bun run src/main.ts blueprint hydrate --name=furniture --only=categories  # Categories only
   bun run src/main.ts blueprint hydrate --name=furniture --only=properties  # Properties only
   bun run src/main.ts blueprint hydrate --name=furniture --rehydrate        # Full re-hydration
+  bun run src/main.ts blueprint hydrate --name=furniture --only=variants --variant-colors=6
   bun run src/main.ts blueprint translate --name=furniture --languages=de-DE,fr-FR
   bun run src/main.ts blueprint fix --name=furniture
   bun run src/main.ts generate --name=furniture --description="Wood furniture store"

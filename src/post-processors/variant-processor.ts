@@ -16,6 +16,7 @@ import type {
     PostProcessorResult,
 } from "./index.js";
 
+import { blueprintVariantSettings, capVariantConfigs } from "../blueprint/variant-settings.js";
 import { PropertyCache } from "../property-cache.js";
 import { searchAllByEqualsAny, searchAllByFilter } from "../shopware/api-helpers.js";
 import {
@@ -116,11 +117,15 @@ class VariantProcessorImpl implements PostProcessor {
             cli: true,
         });
 
+        // Older blueprints were hydrated without a variant cap
+        const { maxVariants } = blueprintVariantSettings(blueprint);
+
         for (const product of variantProducts) {
             const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
 
             // Use variantConfigs from metadata (new format)
-            const variantConfigs = metadata?.variantConfigs ?? product.metadata.variantConfigs;
+            const storedConfigs = metadata?.variantConfigs ?? product.metadata.variantConfigs;
+            const variantConfigs = storedConfigs && capVariantConfigs(storedConfigs, maxVariants);
 
             if (!metadata?.isVariant || !variantConfigs || variantConfigs.length === 0) {
                 skipped++;

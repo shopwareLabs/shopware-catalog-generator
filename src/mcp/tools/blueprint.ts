@@ -21,6 +21,7 @@ import {
     tryParseLanguageSelection,
 } from "../../services/translation-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
+import { variantOverridesFromParams, variantSettingParams } from "./variant-params.js";
 
 const LANGUAGES_DESCRIPTION =
     `Languages: "all" (SalesChannel languages, de-DE for a new SalesChannel), "none", ` +
@@ -42,6 +43,7 @@ export function registerBlueprintTools(server: FastMCP): void {
                 .number()
                 .default(90)
                 .describe("Number of products to generate (default: 90)"),
+            ...variantSettingParams,
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
@@ -51,7 +53,12 @@ export function registerBlueprintTools(server: FastMCP): void {
             const salesChannelName = validation.sanitized;
             const description = args.description || `${salesChannelName} webshop`;
 
-            const lines = await createBlueprint(salesChannelName, description, args.products);
+            const lines = await createBlueprint(
+                salesChannelName,
+                description,
+                args.products,
+                variantOverridesFromParams(args)
+            );
             return lines.join("\n");
         },
     });
@@ -65,13 +72,16 @@ export function registerBlueprintTools(server: FastMCP): void {
         parameters: z.object({
             name: z.string().describe("SalesChannel name"),
             only: z
-                .enum(["categories", "properties", "cms"])
+                .enum(["categories", "properties", "cms", "variants"])
                 .optional()
-                .describe("Estimate a selective hydration (categories, properties, or cms)"),
+                .describe(
+                    "Estimate a selective hydration (categories, properties, cms, or variants)"
+                ),
             languages: z
                 .string()
                 .optional()
                 .describe(`Also forecast translation. ${LANGUAGES_DESCRIPTION}`),
+            ...variantSettingParams,
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
@@ -81,7 +91,10 @@ export function registerBlueprintTools(server: FastMCP): void {
             const languages = tryParseLanguageSelection(args.languages);
             if (languages.error) return languages.error;
 
-            const lines = estimateBlueprintCost(validation.sanitized, { only: args.only });
+            const lines = estimateBlueprintCost(validation.sanitized, {
+                only: args.only,
+                variants: variantOverridesFromParams(args),
+            });
             const translation = languages.selection
                 ? ["", ...(await estimateTranslation(validation.sanitized, languages.selection))]
                 : [];
@@ -135,11 +148,12 @@ export function registerBlueprintTools(server: FastMCP): void {
         parameters: z.object({
             name: z.string().describe("SalesChannel name"),
             only: z
-                .enum(["categories", "properties", "cms"])
+                .enum(["categories", "properties", "cms", "variants"])
                 .optional()
                 .describe(
-                    "Selectively hydrate only this part (categories, properties, or cms). " +
-                        "Preserves existing product names (important for image stability)."
+                    "Selectively hydrate only this part (categories, properties, cms, or variants). " +
+                        "Preserves existing product names (important for image stability). " +
+                        "'variants' re-picks the variant options for new variant settings."
                 ),
             rehydrate: z
                 .boolean()
@@ -148,6 +162,7 @@ export function registerBlueprintTools(server: FastMCP): void {
                     "Force full re-hydration even if hydrated blueprint exists. " +
                         "WARNING: changes product names and triggers image regeneration."
                 ),
+            ...variantSettingParams,
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
@@ -159,6 +174,7 @@ export function registerBlueprintTools(server: FastMCP): void {
             const lines = await hydrateBlueprint(salesChannelName, {
                 only: args.only,
                 force: args.rehydrate,
+                variants: variantOverridesFromParams(args),
             });
             return lines.join("\n");
         },

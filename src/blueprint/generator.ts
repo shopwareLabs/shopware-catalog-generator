@@ -23,6 +23,7 @@ import type {
 import { findPackagingUnit, PACKAGING_OPTIONS, PACKAGING_SHARE } from "../fixtures/index.js";
 import { DEFAULT_BLUEPRINT_CONFIG } from "../types/index.js";
 import { createShortHash, generateNumericHash, generateUUID, randomPick } from "../utils/index.js";
+import { assignVariantProducts } from "./variant-settings.js";
 
 /** Assumed number of delivery time slots in Shopware (round-robin index). */
 const DELIVERY_TIME_SLOTS = 5;
@@ -110,6 +111,7 @@ export class BlueprintGenerator {
             categories,
             products,
             createdAt: new Date().toISOString(),
+            variants: { ...this.config.variants },
         };
     }
 
@@ -191,6 +193,7 @@ export class BlueprintGenerator {
         }
 
         this.ensureMinimumFlags(products);
+        assignVariantProducts(products, this.config.variants.share);
 
         return products;
     }
@@ -280,7 +283,6 @@ export class BlueprintGenerator {
      */
     private generateProductMetadata(productId: string): ProductMetadata {
         const imageCount = randomPick([1, 2, 3]) as 1 | 2 | 3;
-        const isVariant = Math.random() < this.config.variantPercentage;
         const hasSalesPrice = Math.random() < this.config.salePercentage;
 
         // Review count distribution: 0 (17%), 1-2 (28%), 3-5 (33%), 8-10 (22%)
@@ -323,7 +325,7 @@ export class BlueprintGenerator {
         return {
             imageCount,
             imageDescriptions,
-            isVariant,
+            isVariant: false, // Set for exactly share × products in assignVariantProducts()
             variantConfigs: undefined,
             properties: [],
             manufacturerName: undefined,

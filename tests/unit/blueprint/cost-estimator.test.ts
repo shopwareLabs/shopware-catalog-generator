@@ -212,8 +212,69 @@ describe("estimateHydrationCost", () => {
             })
         );
 
-        expect(estimate.images.items).toHaveLength(0);
+        expect(estimate.images.count).toBe(0);
         expect(estimate.images.usd).toBe(0);
+    });
+});
+
+describe("estimateHydrationCost - variants", () => {
+    const settings = { colors: 4, options: 3, maxVariants: 24, share: 0.5 };
+
+    function variantProduct(id: string, colors: string[]): ReturnType<typeof createTestProduct> {
+        return createTestProduct({
+            id,
+            metadata: {
+                isVariant: true,
+                properties: [],
+                variantConfigs: [{ group: "Color", selectedOptions: colors, priceModifiers: {} }],
+            },
+        });
+    }
+
+    test("variants scope counts one call per 25 products missing colours", () => {
+        const products = [
+            ...Array.from({ length: 30 }, (_, i) => variantProduct(`v${i}`, ["Red"])),
+            variantProduct("full", ["Red", "Navy", "Olive", "Sand"]),
+        ];
+        const estimate = estimateHydrationCost(
+            createInput({
+                scope: "variants",
+                variants: settings,
+                blueprint: { categories: [], products },
+            })
+        );
+
+        expect(estimate.text.items.map((i) => i.label)).toEqual(["Variant colours"]);
+        expect(estimate.text.items[0]?.calls).toBe(2);
+        expect(estimate.images.count).toBe(0);
+    });
+
+    test("variants scope has no AI calls when every product has enough colours", () => {
+        const estimate = estimateHydrationCost(
+            createInput({
+                scope: "variants",
+                variants: { ...settings, colors: 2 },
+                blueprint: { categories: [], products: [variantProduct("a", ["Red", "Navy"])] },
+            })
+        );
+
+        expect(estimate.text.items).toHaveLength(0);
+    });
+
+    test("full scope notes the variant product count from the share", () => {
+        const estimate = estimateHydrationCost(createInput({ variants: settings }));
+
+        expect(estimate.notes).toContain(
+            "Variants: 15 variant products (50% variant products, 4 colours, 3 options per other group, max 24 variants)."
+        );
+    });
+
+    test("categories scope has no variant note", () => {
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "categories", variants: settings })
+        );
+
+        expect(estimate.notes.some((n) => n.startsWith("Variants:"))).toBe(false);
     });
 });
 

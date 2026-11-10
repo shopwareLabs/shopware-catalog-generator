@@ -15,6 +15,7 @@ import {
 } from "../../services/generate-service.js";
 import { tryParseLanguageSelection } from "../../services/translation-service.js";
 import { validateSubdomainName } from "../../utils/index.js";
+import { variantOverridesFromParams, variantSettingParams } from "./variant-params.js";
 
 export function registerGenerateTools(server: FastMCP): void {
     // generate - Full pipeline: create + hydrate + upload
@@ -45,6 +46,7 @@ export function registerGenerateTools(server: FastMCP): void {
                         `"none", or locale codes like "de-DE,fr-FR". Default: English only, cached translations ` +
                         `are still uploaded. Forecast the cost first with blueprint_estimate.`
                 ),
+            ...variantSettingParams,
         }),
         execute: async (args) => {
             const validation = validateSubdomainName(args.name);
@@ -62,6 +64,7 @@ export function registerGenerateTools(server: FastMCP): void {
                 dryRun: args.dryRun,
                 noTemplate: args.noTemplate,
                 languages: languages.selection,
+                variants: variantOverridesFromParams(args),
             });
             return lines.join("\n");
         },

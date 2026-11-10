@@ -166,6 +166,31 @@ function addMissingShadeOptions(group: BlueprintPropertyGroup, names: string[]):
     group.options.push(...missing.map((name) => ({ id: generateUUID(), name })));
 }
 
+/**
+ * Set `defaultColor` (first colour variant, the colour of the main image) and
+ * `variantColors` (name, hex, family per colour variant). Clears both for products
+ * without colour variants, so re-runs stay consistent.
+ */
+function assignVariantColors(
+    product: BlueprintProduct,
+    shadeByName: Map<string, BlueprintPropertyOption>
+): void {
+    const colorConfig = product.metadata.variantConfigs?.find((c) => isShadeGroupName(c.group));
+    const colors = colorConfig?.selectedOptions.flatMap((name) => {
+        const shade = shadeByName.get(name.toLowerCase());
+        return shade?.family
+            ? [{ name: shade.name, hex: shade.colorHexCode, family: shade.family }]
+            : [];
+    });
+    if (!colors || colors.length === 0) {
+        delete product.metadata.defaultColor;
+        delete product.metadata.variantColors;
+        return;
+    }
+    product.metadata.defaultColor = colors[0]?.name;
+    product.metadata.variantColors = colors;
+}
+
 /** Families of the shades a product uses, in fixture order */
 function productFamilies(
     product: BlueprintProduct,
@@ -253,6 +278,8 @@ export function applyColorSystem(
             o.family ? [[o.name.toLowerCase(), o.family] as const] : []
         )
     );
+    const shadeByName = new Map(shadeGroup.options.map((o) => [o.name.toLowerCase(), o]));
+    blueprint.products.forEach((p) => assignVariantColors(p, shadeByName));
     const usedFamilies = new Set(
         blueprint.products.flatMap((p) => assignProductFamilies(p, familyByShade))
     );

@@ -17,6 +17,7 @@ blueprint/
 ├── hydrator.ts           # BlueprintHydrator - Phase 2 orchestrator
 ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
+├── variant-settings.ts   # Variant settings (resolve, assign, pick, cap, re-pick) - no AI
 ├── cost-estimator.ts     # Hydration + translation cost forecast (no AI): tokens, images, USD
 ├── color-system.ts       # Colour system (no AI): normalise shades, "Color" + "Color family" groups
 ├── index.ts              # Re-exports
@@ -98,6 +99,7 @@ Supports selective re-hydration modes:
 - `categories` — Only update category names/descriptions
 - `properties` — Only update product properties (preserves names for image stability)
 - `cms` — Only hydrate CMS text blueprint
+- `variants` — `hydrateVariantsOnly(blueprint, settings)`: re-pick variant options with new settings
 
 ### VariantResolver
 
@@ -106,6 +108,24 @@ Resolves variant configurations using a two-tier cache:
 1. Check store-scoped property cache (`generated/sales-channels/{store}/properties/`)
 2. Check universal property cache (`generated/properties/`)
 3. Fall back to AI generation if not cached
+
+### Variant Settings
+
+`variant-settings.ts` holds all variant rules (no AI). `VariantSettings` (`colors`, `options`,
+`maxVariants`, `share`) come from flags, then env vars, then the stored blueprint settings or
+`DEFAULT_VARIANT_SETTINGS` (`resolveVariantSettings`). Invalid values throw `VariantSettingsError`.
+
+- `assignVariantProducts()` — the generator marks exactly `round(n × share)` products as variant
+  products, ranked by a seeded hash of their IDs (stable, a larger share keeps the smaller set)
+- `pickOptions()` / `pickPreferredOptions()` — seeded picks (`variant-options:${productId}:${group}`);
+  the product's default colour is always the first colour option
+- `capVariantConfigs()` — keeps the cartesian product under `maxVariants`: shrink the largest other
+  group to 2, then the colours to 2, then drop other groups from the end. The variant processor
+  applies it again at upload time
+- `repickVariantConfigs()` — `--only=variants`: existing options first, AI colours next, then known
+  options; new options get price modifier 1.0
+- The product hydrator asks for `variantColors` (default colour first) with the product content.
+  `hydrateVariantColors()` fills gaps for older blueprints in batches of 25
 
 ## Hydration Flow
 

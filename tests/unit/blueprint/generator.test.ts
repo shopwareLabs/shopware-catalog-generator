@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { BlueprintConfig } from "../../../src/types/index.js";
 
 import { BlueprintGenerator } from "../../../src/blueprint/generator.js";
+import { DEFAULT_VARIANT_SETTINGS } from "../../../src/types/index.js";
 
 describe("BlueprintGenerator", () => {
     describe("generateBlueprint", () => {
@@ -362,6 +363,34 @@ describe("BlueprintGenerator", () => {
                 expect([3, 5, 10, 20, 50]).toContain(p.metadata.maxPurchase!);
             }
         });
+    });
+});
+
+describe("BlueprintGenerator - variant settings", () => {
+    test("stores the default variant settings and marks 30% of the products", () => {
+        const blueprint = new BlueprintGenerator().generateBlueprint("store", "A store");
+
+        expect(blueprint.variants).toEqual(DEFAULT_VARIANT_SETTINGS);
+        expect(blueprint.products.filter((p) => p.metadata.isVariant)).toHaveLength(27);
+    });
+
+    test("uses the configured share and stores the settings", () => {
+        const variants = { colors: 6, options: 2, maxVariants: 12, share: 0.5 };
+        const blueprint = new BlueprintGenerator({ totalProducts: 60, variants }).generateBlueprint(
+            "store",
+            "A store"
+        );
+
+        expect(blueprint.variants).toEqual(variants);
+        expect(blueprint.products.filter((p) => p.metadata.isVariant)).toHaveLength(30);
+    });
+
+    test("share 0 creates no variant products", () => {
+        const blueprint = new BlueprintGenerator({
+            variants: { ...DEFAULT_VARIANT_SETTINGS, share: 0 },
+        }).generateBlueprint("store", "A store");
+
+        expect(blueprint.products.some((p) => p.metadata.isVariant)).toBe(false);
     });
 });
 

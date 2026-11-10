@@ -2,6 +2,7 @@
  * Shared CLI utilities: error class, validation helpers.
  */
 
+import type { VariantSettingOverrides } from "../blueprint/index.js";
 import type { DataCache } from "../cache.js";
 import type { HydratedBlueprint } from "../types/index.js";
 
@@ -48,6 +49,26 @@ export interface CliArgs {
     force?: boolean;
     /** --e2e: e2e-results/<timestamp> directory of a lane matrix run (template metadata) */
     e2e?: string;
+    /** --variant-colors, --variant-options, --max-variants, --variant-share (raw, validated later) */
+    variants?: VariantSettingOverrides;
+}
+
+/** Raw values of the variant flags; a flag without value becomes "" and fails validation */
+export function variantOverridesFromFlags(
+    flags: Record<string, string | boolean>
+): VariantSettingOverrides {
+    const read = (flag: string): string | undefined => {
+        const value = flags[flag];
+        if (value === undefined || value === false) return undefined;
+        return value === true ? "" : value;
+    };
+    const overrides: VariantSettingOverrides = {
+        colors: read("variant-colors"),
+        options: read("variant-options"),
+        maxVariants: read("max-variants"),
+        share: read("variant-share"),
+    };
+    return Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined));
 }
 
 // =============================================================================

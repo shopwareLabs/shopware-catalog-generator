@@ -5,10 +5,11 @@
  * Never calls console.log directly.
  */
 
+import type { VariantSettingOverrides } from "../blueprint/index.js";
 import type { PostProcessorResult } from "../post-processors/index.js";
 import type { LanguageSelection, ProductSyncResult } from "../types/index.js";
 
-import { applyColorSystem } from "../blueprint/index.js";
+import { applyColorSystem, hasVariantOverrides } from "../blueprint/index.js";
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
 import {
@@ -40,6 +41,8 @@ export interface GenerateOptions {
      * translations (e.g. from a template) are still uploaded.
      */
     languages?: LanguageSelection;
+    /** Variant settings for a new blueprint (ignored with a warning for an existing one) */
+    variants?: VariantSettingOverrides;
 }
 
 /**
@@ -110,9 +113,22 @@ export async function generate(
 
     if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
         results.push(`Step 1: Creating blueprint...`);
-        const lines = await createBlueprint(salesChannelName, description, options.products ?? 90);
+        const lines = await createBlueprint(
+            salesChannelName,
+            description,
+            options.products ?? 90,
+            options.variants
+        );
+        const createError = lines.find((l) => l.startsWith("Error:"));
+        if (createError) return [...results, createError];
         results.push(...lines.filter((l) => !l.startsWith("===")));
     } else {
+        if (options.variants && hasVariantOverrides(options.variants)) {
+            results.push(
+                `⚠ Variant settings are ignored for an existing blueprint. ` +
+                    `Use: blueprint hydrate --name=${salesChannelName} --only=variants`
+            );
+        }
         results.push(
             usedTemplate ? `Step 1: Using template blueprint` : `Step 1: Using existing blueprint`
         );
