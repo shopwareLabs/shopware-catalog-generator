@@ -434,18 +434,16 @@ class VariantProcessorImpl implements PostProcessor {
     ): Promise<void> {
         if (plan.staleChildIds.length === 0 && plan.staleSettingIds.length === 0) return;
 
-        const response = await syncWithRetry(context, "delete stale variants", {
-            deleteStaleChildren: {
-                entity: "product",
-                action: "delete",
-                payload: plan.staleChildIds.map((id) => ({ id })),
-            },
-            deleteStaleSettings: {
-                entity: "product_configurator_setting",
-                action: "delete",
-                payload: plan.staleSettingIds.map((id) => ({ id })),
-            },
-        });
+        // Shopware rejects sync operations with an empty payload
+        const operations = {
+            ...deleteOperation("deleteStaleChildren", "product", plan.staleChildIds),
+            ...deleteOperation(
+                "deleteStaleSettings",
+                "product_configurator_setting",
+                plan.staleSettingIds
+            ),
+        };
+        const response = await syncWithRetry(context, "delete stale variants", operations);
         if (response.ok) return;
 
         logger.apiError("_action/sync (delete stale variants)", response.status, {
@@ -691,6 +689,16 @@ function groupDefinition(
         name: cachedGroup?.name ?? groupName,
         displayType: cachedGroup?.displayType ?? "text",
     };
+}
+
+/** A sync delete operation, or nothing when there are no IDs */
+function deleteOperation(
+    key: string,
+    entity: string,
+    ids: string[]
+): Record<string, { entity: string; action: "delete"; payload: Array<{ id: string }> }> {
+    if (ids.length === 0) return {};
+    return { [key]: { entity, action: "delete", payload: ids.map((id) => ({ id })) } };
 }
 
 /** Option names that the Shopware group does not have yet (case-insensitive, once each), with new IDs */

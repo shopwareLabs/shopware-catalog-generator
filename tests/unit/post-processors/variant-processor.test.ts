@@ -394,6 +394,75 @@ describe("VariantProcessor", () => {
             expect(created.map((v) => v.options.map((o) => o.id))).toEqual([["opt-blue"]]);
         });
 
+        test("deletes only stale settings when no child is stale", async () => {
+            const colorConfig: VariantConfig = {
+                group: "Color",
+                selectedOptions: ["Red", "Blue"],
+                priceModifiers: {},
+            };
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: createMockProductMetadata({
+                            isVariant: true,
+                            variantConfigs: [colorConfig],
+                        }),
+                    }),
+                ],
+                propertyGroups: [
+                    {
+                        id: "pg-color",
+                        name: "Color",
+                        displayType: "color",
+                        options: [
+                            { id: "opt-red", name: "Red" },
+                            { id: "opt-blue", name: "Blue" },
+                        ],
+                    },
+                ],
+            });
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/product", {
+                data: [
+                    {
+                        id: "p1",
+                        children: [
+                            { id: "child-red", optionIds: ["opt-red"] },
+                            { id: "child-blue", optionIds: ["opt-blue"] },
+                        ],
+                        configuratorSettings: [
+                            { id: "cs-red", optionId: "opt-red" },
+                            { id: "cs-blue", optionId: "opt-blue" },
+                            { id: "cs-old", optionId: "opt-old" },
+                        ],
+                    },
+                ],
+            });
+            mockApi.mockSyncSuccess();
+            const { context } = createTestContext({
+                blueprint,
+                metadataMap: new Map([["p1", { isVariant: true, variantConfigs: [colorConfig] }]]),
+                dryRun: false,
+                mockApi,
+            });
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.errors).toHaveLength(0);
+            const bodies = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body);
+            expect(bodies).toEqual([
+                {
+                    deleteStaleSettings: {
+                        entity: "product_configurator_setting",
+                        action: "delete",
+                        payload: [{ id: "cs-old" }],
+                    },
+                },
+            ]);
+        });
+
         test("processes multiple property groups with cartesian product", async () => {
             const sizeConfig: VariantConfig = {
                 group: "Size",
