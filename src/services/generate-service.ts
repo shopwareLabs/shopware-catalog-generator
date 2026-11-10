@@ -6,9 +6,15 @@
  */
 
 import type { VariantSettingOverrides } from "../blueprint/index.js";
-import type { PostProcessorResult } from "../post-processors/index.js";
-import type { DataHydrator } from "../shopware/index.js";
-import type { HydratedBlueprint, LanguageSelection, ProductSyncResult } from "../types/index.js";
+import type { DataCache } from "../cache.js";
+import type { PostProcessorContext, PostProcessorResult } from "../post-processors/index.js";
+import type { DataHydrator, ShopwareCapabilities } from "../shopware/index.js";
+import type {
+    HydratedBlueprint,
+    LanguageSelection,
+    ProductSyncResult,
+    SalesChannelFull,
+} from "../types/index.js";
 import type { ShopwareConnection } from "./shopware-context.js";
 
 import { applyColorSystem, hasVariantOverrides } from "../blueprint/index.js";
@@ -212,30 +218,86 @@ export async function runGenerate(
     });
     const shopware = await detectShopwareCapabilities(deps.apiHelpers);
     out.push(`  Shopware: ${shopware.describe()}`);
+
+    const upload = await uploadCatalog(
+        {
+            salesChannelName,
+            blueprint,
+            cache,
+            dataHydrator,
+            shopware,
+            locales: translation.locales,
+        },
+        out,
+        progress
+    );
+    out.push(``, `=== Sync Complete ===`, ``);
+
+    const processorResults = await runAllProcessors(
+        {
+            salesChannelId: upload.salesChannel.id,
+            salesChannelName,
+            blueprint,
+            cache,
+            textProvider: deps.textProvider,
+            imageProvider: deps.imageProvider,
+            api: deps.apiHelpers,
+            shopware,
+            options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
+        },
+        Boolean(options.skipProcessors),
+        out,
+        progress
+    );
+
+    out.push(...formatCompletion(salesChannelName, blueprint, upload, processorResults));
+    return {
+        lines: out.lines,
+        summary: buildSummary(salesChannelName, blueprint, upload, processorResults),
+    };
+}
+
+type ProgressFn = (phase: GeneratePhase, current: number, total: number) => void;
+
+interface UploadInput {
+    salesChannelName: string;
+    blueprint: HydratedBlueprint;
+    cache: DataCache;
+    dataHydrator: DataHydrator;
+    shopware: ShopwareCapabilities;
+    /** Locales with a translation, created as SalesChannel domains */
+    locales: string[];
+}
+
+interface UploadResult {
+    salesChannel: SalesChannelFull;
+    categories: number;
+    productSync: ProductSyncResult;
+}
+
+/** Step 3: SalesChannel, categories, property groups and products */
+async function uploadCatalog(
+    input: UploadInput,
+    out: RunOutput,
+    progress: ProgressFn
+): Promise<UploadResult> {
+    const { salesChannelName, blueprint, dataHydrator, shopware } = input;
     progress("upload", 0, 4);
 
-    let salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
-    const isNewSalesChannel = !salesChannel;
-
-    if (!salesChannel) {
-        salesChannel = await dataHydrator.createSalesChannel({
+    const existing = await dataHydrator.findSalesChannelByName(salesChannelName);
+    const salesChannel =
+        existing ??
+        (await dataHydrator.createSalesChannel({
             name: salesChannelName,
             description: blueprint.salesChannel.description,
             imperialEnglishDomain: shopware.supports("measurementUnits"),
-            locales: translation.locales,
-        });
-        out.push(`  Created SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
-    } else {
-        out.push(`  Using existing SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
-    }
+            locales: input.locales,
+        }));
+    const verb = existing ? "Using existing" : "Created";
+    out.push(`  ${verb} SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
     progress("upload", 1, 4);
 
-    const categoryIdMap = await syncCategories(
-        dataHydrator,
-        blueprint,
-        salesChannel,
-        isNewSalesChannel
-    );
+    const categoryIdMap = await syncCategories(dataHydrator, blueprint, salesChannel, !existing);
     out.push(`  Synced ${categoryIdMap.size} categories`);
     progress("upload", 2, 4);
 
@@ -245,7 +307,7 @@ export async function runGenerate(
 
     const propertyMaps = buildPropertyMaps(blueprint);
     syncPropertyIdsToBlueprint(blueprint, propertyMaps);
-    cache.saveHydratedBlueprint(salesChannelName, blueprint);
+    input.cache.saveHydratedBlueprint(salesChannelName, blueprint);
 
     // A rejected batch does not stop the run: post-processors still finish the products that
     // were uploaded, and the error line at the end makes the CLI exit non-zero.
@@ -260,65 +322,65 @@ export async function runGenerate(
     out.push(`  Synced ${productSync.synced} of ${blueprint.products.length} products`);
     progress("upload", 4, 4);
 
-    out.push(``, `=== Sync Complete ===`, ``);
+    return { salesChannel, categories: categoryIdMap.size, productSync };
+}
 
-    const processorNames = options.skipProcessors ? [] : registry.getNames();
-    if (options.skipProcessors) {
-        out.push(`Skipping post-processors`);
-    } else {
-        out.push(`Running post-processors...`);
-    }
-    progress("processors", 0, processorNames.length);
-    const processorResults =
-        processorNames.length === 0
-            ? []
-            : await runProcessors(
-                  {
-                      salesChannelId: salesChannel.id,
-                      salesChannelName,
-                      blueprint,
-                      cache,
-                      textProvider: deps.textProvider,
-                      imageProvider: deps.imageProvider,
-                      api: deps.apiHelpers,
-                      shopware,
-                      options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
-                  },
-                  processorNames
-              );
-    progress("processors", processorNames.length, processorNames.length);
+/** Step 4: every registered post-processor, unless skipped */
+async function runAllProcessors(
+    context: PostProcessorContext,
+    skip: boolean,
+    out: RunOutput,
+    progress: ProgressFn
+): Promise<PostProcessorResult[]> {
+    const names = skip ? [] : registry.getNames();
+    out.push(skip ? `Skipping post-processors` : `Running post-processors...`);
+    progress("processors", 0, names.length);
+    const results = names.length === 0 ? [] : await runProcessors(context, names);
+    progress("processors", names.length, names.length);
+    return results;
+}
 
-    const totalProcessed = processorResults.reduce((sum, r) => sum + r.processed, 0);
-    const totalErrors = processorResults.reduce((sum, r) => sum + r.errors.length, 0);
+function formatCompletion(
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    upload: UploadResult,
+    results: PostProcessorResult[]
+): string[] {
+    const totalProcessed = results.reduce((sum, r) => sum + r.processed, 0);
+    const totalErrors = results.reduce((sum, r) => sum + r.errors.length, 0);
+    const errorLines = [
+        formatProductSyncErrorLine(upload.productSync),
+        formatProcessorErrorLine(results),
+    ].filter((line): line is string => line !== undefined);
 
-    out.push(
+    return [
         ``,
         `=== Generation Complete ===`,
         `SalesChannel: ${salesChannelName}`,
         `Storefront: ${blueprint.salesChannel.baseUrl}`,
-        `Post-processors: ${totalProcessed} processed, ${totalErrors} errors`
-    );
-    const errorLines = [
-        formatProductSyncErrorLine(productSync),
-        formatProcessorErrorLine(processorResults),
-    ].filter((line): line is string => line !== undefined);
-    out.push(...errorLines);
+        `Post-processors: ${totalProcessed} processed, ${totalErrors} errors`,
+        ...errorLines,
+    ];
+}
 
+function buildSummary(
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    upload: UploadResult,
+    results: PostProcessorResult[]
+): GenerateSummary {
     return {
-        lines: out.lines,
-        summary: {
-            salesChannelId: salesChannel.id,
-            salesChannelName,
-            categories: categoryIdMap.size,
-            products: productSync.synced,
-            failedProducts: productSync.failed,
-            propertyGroups: blueprint.propertyGroups.length,
-            processors: processorResults.map((r) => ({
-                name: r.name,
-                processed: r.processed,
-                errors: r.errors,
-            })),
-        },
+        salesChannelId: upload.salesChannel.id,
+        salesChannelName,
+        categories: upload.categories,
+        products: upload.productSync.synced,
+        failedProducts: upload.productSync.failed,
+        propertyGroups: blueprint.propertyGroups.length,
+        processors: results.map((r) => ({
+            name: r.name,
+            processed: r.processed,
+            errors: r.errors,
+        })),
     };
 }
 
