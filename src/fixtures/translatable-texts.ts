@@ -139,3 +139,16 @@ export function productMediaTexts(
     const fallback = `${productName} (${view} view)`;
     return { alt: fallback, title: fallback };
 }
+
+/**
+ * Alt text and title for a colour variant image: the parent image text with the shade,
+ * e.g. "Oak Desk, Burgundy (front view)".
+ */
+export function variantMediaTexts(
+    productName: string,
+    view: string,
+    shade: string,
+    texts: Readonly<Record<string, string>> | null = null
+): { alt: string; title: string } {
+    return productMediaTexts(`${productName}, ${shade}`, view, texts);
+}
