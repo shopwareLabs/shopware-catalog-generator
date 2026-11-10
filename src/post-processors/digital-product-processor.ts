@@ -28,6 +28,11 @@ import { apiPost, generateUUID, logger } from "../utils/index.js";
 /** Cache file for storing digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
 
+/** Voucher file name, unique per media because Shopware rejects duplicate file names */
+function voucherFileName(mediaId: string): string {
+    return `gift-card-voucher-${mediaId.slice(0, 8)}`;
+}
+
 interface DigitalProductCache {
     productId: string;
     mediaId: string;
@@ -708,17 +713,36 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 .replace("{{CODE}}", voucherCode)
                 .replace("{{DATE}}", voucherDate);
 
-            await context.api.uploadMedia(
-                mediaId,
-                Buffer.from(voucherContent),
-                "gift-card-voucher",
-                "txt"
-            );
+            await this.uploadVoucherFile(context, mediaId, voucherContent);
 
             return mediaId;
         } catch (error) {
             logger.warn("Failed to create download media", { data: error });
             return null;
+        }
+    }
+
+    /**
+     * Upload the voucher file. Shopware rejects a file name that another media already
+     * uses, and earlier runs can leave private voucher media behind that the download
+     * search no longer finds. So the name gets a suffix from the media ID, and the empty
+     * media entity is deleted again when the upload fails.
+     */
+    private async uploadVoucherFile(
+        context: PostProcessorContext,
+        mediaId: string,
+        content: string
+    ): Promise<void> {
+        try {
+            await context.api.uploadMedia(
+                mediaId,
+                Buffer.from(content),
+                voucherFileName(mediaId),
+                "txt"
+            );
+        } catch (error) {
+            await context.api.deleteEntity("media", mediaId);
+            throw error;
         }
     }
 

@@ -156,6 +156,50 @@ describe("DigitalProductProcessor", () => {
                 .find((call) => JSON.stringify(call.body).includes('"private":true'));
             expect(JSON.stringify(mediaCall?.body)).toContain('"mediaFolderId":"download-folder"');
         });
+
+        test("uploads the voucher under a file name unique to the media", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+
+            await DigitalProductProcessor.process(context);
+
+            const upload = mockApi
+                .getCalls()
+                .find((call) => call.endpoint.includes("extension=txt"));
+            const mediaId = upload?.endpoint.match(/_action\/media\/([0-9a-f]+)\/upload/)?.[1];
+            expect(mediaId).toBeDefined();
+            expect(upload?.endpoint).toContain(
+                `fileName=gift-card-voucher-${mediaId?.slice(0, 8)}`
+            );
+        });
+
+        test("deletes the empty media when the voucher upload fails", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+            const uploadSpy = spyOn(mockApi, "uploadMedia").mockImplementation(
+                (_mediaId, _file, _fileName, extension) =>
+                    extension === "txt"
+                        ? Promise.reject(new Error("CONTENT__MEDIA_DUPLICATED_FILE_NAME"))
+                        : Promise.resolve()
+            );
+            const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+            const result = await DigitalProductProcessor.process(context);
+
+            const voucherMediaId = uploadSpy.mock.calls.find((call) => call[3] === "txt")?.[0];
+            expect(voucherMediaId).toBeDefined();
+            expect(mockApi.getCalls()).toContainEqual({
+                method: "delete",
+                endpoint: `media/${voucherMediaId}`,
+            });
+            expect(result.errors).toEqual(["Failed to create download media"]);
+            uploadSpy.mockRestore();
+            warnSpy.mockRestore();
+        });
     });
 
     describe("product type", () => {
