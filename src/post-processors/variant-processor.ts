@@ -29,6 +29,12 @@ import {
     uniqueById,
 } from "../utils/index.js";
 import { errorMessage, syncWithRetry } from "./processor-utils.js";
+import {
+    type ExistingVariants,
+    isVariantPlanEmpty,
+    planVariantReconcile,
+    type VariantReconcilePlan,
+} from "./variant-reconcile.js";
 
 interface PropertyOption {
     id: string;
@@ -65,8 +71,8 @@ type VariantOutcome = "processed" | "skipped" | "failed";
 
 /** Product data returned by the variant check */
 interface ExistingVariantData {
-    children?: Array<{ id: string }>;
-    configuratorSettings?: Array<{ id: string }>;
+    children?: Array<{ id: string; optionIds?: string[]; options?: Array<{ id: string }> }>;
+    configuratorSettings?: Array<{ id: string; optionId: string }>;
 }
 
 /**
@@ -180,24 +186,21 @@ class VariantProcessorImpl implements PostProcessor {
             return "skipped";
         }
 
-        if (await this.productHasVariants(context, product.id)) {
+        const existing = await this.fetchExistingVariants(context, product.id);
+        const combinations = cartesianProduct(resolvedGroups.map((g) => g.selectedOptions));
+        const plan = planVariantReconcile(combinations, existing);
+        if (isVariantPlanEmpty(plan)) {
             logger.info(`      ⊘ ${product.name}: Already configured as variant product`, {
                 cli: true,
             });
             return "skipped";
         }
 
-        const variantCount = await this.createMultiPropertyVariants(
-            context,
-            product,
-            resolvedGroups
-        );
-        // 0 variants created means a duplicate was detected
-        if (variantCount === 0) return "skipped";
+        await this.applyVariantPlan(context, product, resolvedGroups, plan);
 
         const groupNames = resolvedGroups.map((g) => g.group.name).join(" + ");
         logger.info(
-            `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})${formatIssues(resolution.issues)}`,
+            `      ✓ ${product.name}: ${describeVariantPlan(plan, existing)} (${groupNames})${formatIssues(resolution.issues)}`,
             { cli: true }
         );
         return "processed";
@@ -231,34 +234,37 @@ class VariantProcessorImpl implements PostProcessor {
     }
 
     /**
-     * Ensure a property group exists in Shopware with all its options
-     * Uses PropertyCache for group definitions
+     * Ensure a property group exists in Shopware with the cached options (once per
+     * group) and the selected options of this variant config.
+     *
+     * The variant options can differ from the cached plain-property options
+     * (e.g. "Small, Medium, Large" vs. "100ml, 200ml"), so both are added.
      */
     private async ensurePropertyGroupInShopware(
         context: PostProcessorContext,
-        groupName: string
+        config: VariantConfig
     ): Promise<PropertyGroup | null> {
-        // Only ensure once per group
-        if (this.ensuredGroups.has(groupName)) {
-            return await this.getPropertyGroup(context, groupName);
-        }
-        this.ensuredGroups.add(groupName);
-
+        const groupName = config.group;
         const cachedGroup = this.propertyCache?.get(groupName) ?? null;
-        if (!cachedGroup) {
+        const existingGroup = await this.getPropertyGroup(context, groupName);
+        if (!cachedGroup && !existingGroup) {
             logger.debug(`No cached property group definition for "${groupName}"`);
             return null;
         }
 
+        const firstEnsure = !this.ensuredGroups.has(groupName);
+        this.ensuredGroups.add(groupName);
+
         // Compare option names, not counts: a shop group can have more options
         // (plain product properties) and still lack the variant options
-        const existingGroup = await this.getPropertyGroup(context, groupName);
-        const newOptions = missingCachedOptions(cachedGroup, existingGroup);
+        const wanted = wantedGroupOptions(config, cachedGroup, firstEnsure);
+        const newOptions = missingOptions(wanted, existingGroup);
         if (existingGroup && newOptions.length === 0) {
             return existingGroup;
         }
 
-        return await this.syncPropertyGroup(context, cachedGroup, existingGroup, newOptions);
+        const definition = groupDefinition(groupName, cachedGroup);
+        return await this.syncPropertyGroup(context, definition, existingGroup, newOptions);
     }
 
     /**
@@ -267,13 +273,13 @@ class VariantProcessorImpl implements PostProcessor {
      */
     private async syncPropertyGroup(
         context: PostProcessorContext,
-        cachedGroup: CachedPropertyGroup,
+        cachedGroup: Pick<CachedPropertyGroup, "name" | "displayType">,
         existingGroup: PropertyGroup | null,
         newOptions: PropertyOption[]
     ): Promise<PropertyGroup | null> {
         const groupName = cachedGroup.name;
         logger.info(
-            `      Creating variant property group "${groupName}" with ${cachedGroup.options.length} options...`,
+            `      Adding ${newOptions.length} option(s) to variant property group "${groupName}"...`,
             { cli: true }
         );
 
@@ -334,30 +340,30 @@ class VariantProcessorImpl implements PostProcessor {
     }
 
     /**
-     * Check if product already has variants or configurator settings
+     * Load the child variants (with their options) and configurator settings of a product
      */
-    private async productHasVariants(
+    private async fetchExistingVariants(
         context: PostProcessorContext,
         productId: string
-    ): Promise<boolean> {
+    ): Promise<ExistingVariants> {
+        const none: ExistingVariants = { children: [], settings: [] };
         try {
-            // Check for child products AND configurator settings in one query
             const productResponse = await apiPost(context, "search/product", {
                 ids: [productId],
                 associations: {
-                    children: {},
+                    children: { associations: { options: {} } },
                     configuratorSettings: {},
                 },
             });
-            if (!productResponse.ok) return false;
+            if (!productResponse.ok) return none;
 
             const productData = (await productResponse.json()) as {
                 data?: ExistingVariantData[];
             };
-            return hasExistingVariants(productId, productData.data?.[0]);
+            return toExistingVariants(productData.data?.[0]);
         } catch (error) {
             logger.warn(`Error checking variants for ${productId}`, { data: error });
-            return false;
+            return none;
         }
     }
 
@@ -378,7 +384,7 @@ class VariantProcessorImpl implements PostProcessor {
             return blueprintGroup;
         }
         return (
-            (await this.ensurePropertyGroupInShopware(context, config.group)) ??
+            (await this.ensurePropertyGroupInShopware(context, config)) ??
             (await this.getPropertyGroup(context, config.group)) ??
             blueprintGroup
         );
@@ -405,61 +411,93 @@ class VariantProcessorImpl implements PostProcessor {
     }
 
     /**
-     * Create variants using cartesian product of multiple property groups
+     * Bring the variants of a product in line with the blueprint: remove stale variants
+     * and settings, add missing configurator settings, create missing variants
      */
-    private async createMultiPropertyVariants(
+    private async applyVariantPlan(
         context: PostProcessorContext,
         product: { id: string; name: string; price: number },
-        resolvedGroups: ResolvedVariantGroup[]
-    ): Promise<number> {
-        // Get currency ID for pricing
+        resolvedGroups: ResolvedVariantGroup[],
+        plan: VariantReconcilePlan<PropertyOption>
+    ): Promise<void> {
+        await this.deleteStaleVariants(context, product.id, plan);
+        await this.addConfiguratorSettings(context, product.id, plan.missingOptionIds);
+        if (plan.missingCombos.length === 0) return;
+        await this.createVariants(context, product, resolvedGroups, plan.missingCombos);
+    }
+
+    /** Delete children and configurator settings that are no longer in the blueprint */
+    private async deleteStaleVariants(
+        context: PostProcessorContext,
+        productId: string,
+        plan: VariantReconcilePlan<PropertyOption>
+    ): Promise<void> {
+        if (plan.staleChildIds.length === 0 && plan.staleSettingIds.length === 0) return;
+
+        const response = await syncWithRetry(context, "delete stale variants", {
+            deleteStaleChildren: {
+                entity: "product",
+                action: "delete",
+                payload: plan.staleChildIds.map((id) => ({ id })),
+            },
+            deleteStaleSettings: {
+                entity: "product_configurator_setting",
+                action: "delete",
+                payload: plan.staleSettingIds.map((id) => ({ id })),
+            },
+        });
+        if (response.ok) return;
+
+        logger.apiError("_action/sync (delete stale variants)", response.status, {
+            productId,
+            error: response.errorText ?? "Unknown error",
+        });
+        throw new Error(`Failed to delete stale variants: ${response.status}`);
+    }
+
+    /** Add configurator settings for options the parent does not have yet */
+    private async addConfiguratorSettings(
+        context: PostProcessorContext,
+        productId: string,
+        optionIds: string[]
+    ): Promise<void> {
+        if (optionIds.length === 0) return;
+
+        const response = await syncWithRetry(context, "update parent configurator settings", {
+            updateParent: {
+                entity: "product",
+                action: "upsert",
+                payload: [
+                    {
+                        id: productId,
+                        configuratorSettings: optionIds.map((optionId) => ({
+                            id: generateUUID(),
+                            optionId,
+                        })),
+                    },
+                ],
+            },
+        });
+        if (response.ok) return;
+
+        logger.apiError("_action/sync (configuratorSettings)", response.status, {
+            productId,
+            error: response.errorText ?? "Unknown error",
+        });
+        throw new Error(`Failed to update parent product: ${response.status}`);
+    }
+
+    /**
+     * Create one child variant per option combination
+     */
+    private async createVariants(
+        context: PostProcessorContext,
+        product: { id: string; name: string; price: number },
+        resolvedGroups: ResolvedVariantGroup[],
+        combinations: PropertyOption[][]
+    ): Promise<void> {
         const currencyId = await this.getCurrencyId(context);
 
-        // Step 1: Collect all options for configurator settings
-        const allConfiguratorSettings: Array<{ id: string; optionId: string }> = [];
-        for (const { selectedOptions } of resolvedGroups) {
-            for (const option of selectedOptions) {
-                allConfiguratorSettings.push({
-                    id: generateUUID(),
-                    optionId: option.id,
-                });
-            }
-        }
-
-        // Update parent with all configurator settings
-        const updateParentResponse = await syncWithRetry(
-            context,
-            "update parent configurator settings",
-            {
-                updateParent: {
-                    entity: "product",
-                    action: "upsert",
-                    payload: [
-                        {
-                            id: product.id,
-                            configuratorSettings: allConfiguratorSettings,
-                        },
-                    ],
-                },
-            }
-        );
-
-        if (!updateParentResponse.ok) {
-            // Existing variants are skipped before (productHasVariants), so a duplicate
-            // entry here is a real error, not "already exists"
-            const errorText = updateParentResponse.errorText ?? "Unknown error";
-            logger.apiError("_action/sync (configuratorSettings)", updateParentResponse.status, {
-                productId: product.id,
-                error: errorText,
-            });
-            throw new Error(`Failed to update parent product: ${updateParentResponse.status}`);
-        }
-
-        // Step 2: Generate cartesian product of options
-        const optionArrays = resolvedGroups.map((g) => g.selectedOptions);
-        const combinations = cartesianProduct(optionArrays);
-
-        // Step 3: Create variant products
         const variantPayload = combinations.map((combo) => {
             // Calculate combined price modifier
             let totalModifier = 1;
@@ -540,8 +578,6 @@ class VariantProcessorImpl implements PostProcessor {
                 error: visibilityResponse.errorText ?? "Unknown error",
             });
         }
-
-        return variantPayload.length;
     }
 
     /**
@@ -636,16 +672,37 @@ function toPropertyGroup(group: {
     };
 }
 
-/** Cached option names that the Shopware group does not have yet, with new IDs */
-function missingCachedOptions(
-    cachedGroup: CachedPropertyGroup,
-    existingGroup: PropertyGroup | null
-): PropertyOption[] {
-    const existingOptionNames = new Set(
-        existingGroup?.options.map((o) => o.name.toLowerCase()) || []
-    );
-    return cachedGroup.options
-        .filter((name) => !existingOptionNames.has(name.toLowerCase()))
+/** Cached options (first time a group is ensured) plus the selected variant options */
+function wantedGroupOptions(
+    config: VariantConfig,
+    cachedGroup: CachedPropertyGroup | null,
+    includeCached: boolean
+): string[] {
+    const cachedOptions = includeCached ? (cachedGroup?.options ?? []) : [];
+    return [...cachedOptions, ...config.selectedOptions];
+}
+
+/** Name and display type for a group sync, from the cache when there is one */
+function groupDefinition(
+    groupName: string,
+    cachedGroup: CachedPropertyGroup | null
+): Pick<CachedPropertyGroup, "name" | "displayType"> {
+    return {
+        name: cachedGroup?.name ?? groupName,
+        displayType: cachedGroup?.displayType ?? "text",
+    };
+}
+
+/** Option names that the Shopware group does not have yet (case-insensitive, once each), with new IDs */
+function missingOptions(names: string[], existingGroup: PropertyGroup | null): PropertyOption[] {
+    const seen = new Set(existingGroup?.options.map((o) => o.name.toLowerCase()) || []);
+    return names
+        .filter((name) => {
+            const key = name.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
         .map((name) => ({ id: generateUUID(), name }));
 }
 
@@ -671,21 +728,48 @@ async function searchPropertyGroup(
     return toPropertyGroup({ id: group.id, name: group.name, options: group.options });
 }
 
-/** The product has child variants or configurator settings */
-function hasExistingVariants(productId: string, product: ExistingVariantData | undefined): boolean {
-    const childCount = product?.children?.length ?? 0;
-    const configCount = product?.configuratorSettings?.length ?? 0;
-    if (childCount === 0 && configCount === 0) return false;
+/** Map the product search result to existing children (with option IDs) and settings */
+function toExistingVariants(product: ExistingVariantData | undefined): ExistingVariants {
+    return {
+        children: (product?.children ?? []).map((child) => ({
+            id: child.id,
+            optionIds: child.options?.map((o) => o.id) ?? child.optionIds ?? [],
+        })),
+        settings: (product?.configuratorSettings ?? []).map((s) => ({
+            id: s.id,
+            optionId: s.optionId,
+        })),
+    };
+}
 
-    logger.debug(`Product ${productId} already has variants`, {
-        data: {
-            hasChildren: childCount > 0,
-            hasConfigSettings: configCount > 0,
-            childCount,
-            configCount,
-        },
-    });
-    return true;
+/** Log text for a variant plan: a fresh product or a repaired one */
+function describeVariantPlan(
+    plan: VariantReconcilePlan<PropertyOption>,
+    existing: ExistingVariants
+): string {
+    const created = plan.missingCombos.length;
+    if (existing.children.length === 0) return `Created ${created} variants`;
+    return `Completed variants: ${created} added, ${plan.staleChildIds.length} stale removed, ${existing.children.length - plan.staleChildIds.length} kept`;
+}
+
+/**
+ * One group option per selected name, in group order.
+ *
+ * A shop group can hold the same name in different cases ("10 Pairs", "10 pairs").
+ * Taking both gives two variants with the same product number, so an exact match
+ * wins and a case-insensitive match is only the fallback.
+ */
+function matchSelectedOptions(names: string[], groupOptions: PropertyOption[]): PropertyOption[] {
+    const keys = new Set(names.map((name) => name.toLowerCase()));
+    const matched = new Set(
+        [...keys].flatMap((key) => {
+            const match =
+                groupOptions.find((o) => names.includes(o.name) && o.name.toLowerCase() === key) ??
+                groupOptions.find((o) => o.name.toLowerCase() === key);
+            return match ? [match.id] : [];
+        })
+    );
+    return groupOptions.filter((o) => matched.has(o.id));
 }
 
 /**
@@ -710,10 +794,7 @@ function selectVariantOptions(
     // One option per ID: a group can list the same option twice, and Shopware
     // rejects duplicate configurator settings.
     const groupOptions = uniqueById(propertyGroup.options);
-    const selectedOptionNames = new Set(config.selectedOptions.map((o) => o.toLowerCase()));
-    const selectedOptions = groupOptions.filter((o) =>
-        selectedOptionNames.has(o.name.toLowerCase())
-    );
+    const selectedOptions = matchSelectedOptions(config.selectedOptions, groupOptions);
     const { priceModifiers } = config;
 
     if (selectedOptions.length >= 2) {
