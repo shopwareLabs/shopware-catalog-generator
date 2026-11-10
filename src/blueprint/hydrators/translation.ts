@@ -506,7 +506,6 @@ export function collectTerms(source: TranslationSource): string[] {
     return [...new Set([...categoryNames, ...groupTerms].filter((t) => t.trim()))];
 }
 
-/** Entries of `source` whose hash matches the previous translation */
 /**
  * A fixture text needs translating when it is new, changed since the last run or forced.
  * Files from before fixture hashes existed reuse every entry that has a text.
@@ -522,6 +521,7 @@ export function isStaleFixture(
     return previous.fixtureHashes[key] !== hash;
 }
 
+/** Split keys into entries reused from the previous file (same hash) and stale ones */
 function splitStale<T extends { sourceHash: string }>(
     keys: string[],
     hashes: Map<string, string>,
@@ -541,185 +541,203 @@ function splitStale<T extends { sourceHash: string }>(
     return { reused, stale };
 }
 
-/**
- * Translate the catalog into one locale.
- */
-export async function translateCatalog(
-    input: TranslateCatalogInput
-): Promise<TranslateCatalogResult> {
-    const { textProvider, locale, source, storeName, storeDescription } = input;
-    const force = input.force ?? false;
-    const previous = force ? null : (input.previous ?? null);
-    const limiter = new ConcurrencyLimiter(textProvider.maxConcurrency);
-    const storeContext = [`Store: "${storeName}"`, `Store description: ${storeDescription}`];
-    const failed: string[] = [];
-    let translatedCount = 0;
-    let reusedCount = 0;
+/** Shared state of one translateCatalog run */
+interface CatalogRun {
+    ctx: BatchContext;
+    limiter: ConcurrencyLimiter;
+    source: TranslationSource;
+    previous: TranslationFile | null;
+    force: boolean;
+    storeContext: string[];
+}
 
-    const formality =
-        input.formality ??
-        previous?.style.formality ??
-        (await decideFormality(textProvider, locale, storeName, storeDescription));
-    const ctx: BatchContext = { textProvider, locale, formality, glossary: {} };
+/** One translated section: its entries, counts and failed keys ("<section>:<key>") */
+interface SectionResult<T> {
+    entries: T;
+    translated: number;
+    reused: number;
+    failed: string[];
+}
 
-    // 1. Glossary
-    const terms = collectTerms(source);
+const hashesOf = (entries: Record<string, unknown>): Map<string, string> =>
+    new Map(Object.entries(entries).map(([k, v]) => [k, sourceHashOf(v)]));
+
+/** 1. Glossary of shared terms. Terms that fail stay English (still a valid name). */
+async function translateGlossary(run: CatalogRun): Promise<SectionResult<Record<string, string>>> {
+    const { previous } = run;
+    const terms = collectTerms(run.source);
     const knownTerms = Object.fromEntries(
         terms.filter((t) => previous?.glossary[t]).map((t) => [t, previous?.glossary[t] ?? t])
     );
     const missingTerms = terms.filter((t) => !(t in knownTerms));
-    const termResult = await translateItems(
-        ctx,
-        limiter,
-        { mode: "terms", label: "category, filter and option names", context: storeContext },
+    const result = await translateItems(
+        run.ctx,
+        run.limiter,
+        { mode: "terms", label: "category, filter and option names", context: run.storeContext },
         missingTerms.map((t) => ({ key: t, fields: { term: t } })),
         TRANSLATION_BATCH_SIZES.terms
     );
-    // Terms that fail stay English: a name that cannot be translated is still valid
-    const glossary: Record<string, string> = {
+    const glossary = {
         ...knownTerms,
-        ...Object.fromEntries(
-            missingTerms.map((t) => [t, termResult.translated.get(t)?.term ?? t])
-        ),
+        ...Object.fromEntries(missingTerms.map((t) => [t, result.translated.get(t)?.term ?? t])),
     };
-    ctx.glossary = glossary;
-    translatedCount += termResult.translated.size;
-    reusedCount += Object.keys(knownTerms).length;
+    return {
+        entries: glossary,
+        translated: result.translated.size,
+        reused: Object.keys(knownTerms).length,
+        failed: [],
+    };
+}
 
-    // 2. Categories (name from the glossary, description translated)
-    const categoryHashes = new Map(
-        Object.entries(source.categories).map(([k, v]) => [k, sourceHashOf(v)])
-    );
-    const categorySplit = splitStale(
+/** 2. Categories: name from the glossary, description translated */
+async function translateCategories(
+    run: CatalogRun
+): Promise<SectionResult<TranslationFile["categories"]>> {
+    const { source, ctx } = run;
+    const hashes = hashesOf(source.categories);
+    const split = splitStale(
         Object.keys(source.categories),
-        categoryHashes,
-        previous?.categories,
-        force
+        hashes,
+        run.previous?.categories,
+        run.force
     );
-    const categoryResult = await translateItems(
+    const result = await translateItems(
         ctx,
-        limiter,
-        { mode: "copy", label: "category descriptions", context: storeContext },
-        categorySplit.stale.map((path) => ({
+        run.limiter,
+        { mode: "copy", label: "category descriptions", context: run.storeContext },
+        split.stale.map((path) => ({
             key: path,
             fields: { description: source.categories[path]?.description ?? "" },
         })),
         TRANSLATION_BATCH_SIZES.categories
     );
-    const categories: TranslationFile["categories"] = { ...categorySplit.reused };
-    for (const path of categorySplit.stale) {
+    const categories: TranslationFile["categories"] = { ...split.reused };
+    for (const path of split.stale) {
         const english = source.categories[path];
-        const description = categoryResult.translated.get(path)?.description;
+        const description = result.translated.get(path)?.description;
         if (!english || description === undefined) continue;
         categories[path] = {
-            name: glossary[english.name] ?? english.name,
+            name: ctx.glossary[english.name] ?? english.name,
             description,
-            sourceHash: categoryHashes.get(path) ?? "",
+            sourceHash: hashes.get(path) ?? "",
         };
     }
-    failed.push(...categoryResult.failed.map((k) => `categories:${k}`));
-    translatedCount += categoryResult.translated.size;
-    reusedCount += Object.keys(categorySplit.reused).length;
+    return {
+        entries: categories,
+        translated: result.translated.size,
+        reused: Object.keys(split.reused).length,
+        failed: result.failed.map((k) => `categories:${k}`),
+    };
+}
 
-    // 3. Products
-    const productHashes = new Map(
-        Object.entries(source.products).map(([k, v]) => [k, sourceHashOf(v)])
-    );
-    const productSplit = splitStale(
+/** 3. Product names and descriptions */
+async function translateProducts(
+    run: CatalogRun
+): Promise<SectionResult<TranslationFile["products"]>> {
+    const { source } = run;
+    const hashes = hashesOf(source.products);
+    const split = splitStale(
         Object.keys(source.products),
-        productHashes,
-        previous?.products,
-        force
+        hashes,
+        run.previous?.products,
+        run.force
     );
-    const productResult = await translateItems(
-        ctx,
-        limiter,
-        { mode: "copy", label: "product names and descriptions", context: storeContext },
-        productSplit.stale.map((id) => ({
+    const result = await translateItems(
+        run.ctx,
+        run.limiter,
+        { mode: "copy", label: "product names and descriptions", context: run.storeContext },
+        split.stale.map((id) => ({
             key: id,
             fields: translatableProductFields(source.products[id]),
         })),
         TRANSLATION_BATCH_SIZES.products
     );
-    const products: TranslationFile["products"] = { ...productSplit.reused };
-    for (const [id, fields] of productResult.translated) {
+    const products: TranslationFile["products"] = { ...split.reused };
+    for (const [id, fields] of result.translated) {
         products[id] = {
             name: fields.name ?? source.products[id]?.name ?? "",
             description: fields.description ?? "",
-            sourceHash: productHashes.get(id) ?? "",
+            sourceHash: hashes.get(id) ?? "",
         };
     }
-    failed.push(...productResult.failed.map((k) => `products:${k}`));
-    translatedCount += productResult.translated.size;
-    reusedCount += Object.keys(productSplit.reused).length;
+    return {
+        entries: products,
+        translated: result.translated.size,
+        reused: Object.keys(split.reused).length,
+        failed: result.failed.map((k) => `products:${k}`),
+    };
+}
 
-    // 4. Reviews (keys "<productId>#<index>")
-    const reviewHashes = new Map(
-        Object.entries(source.reviews).map(([k, v]) => [k, sourceHashOf(v)])
-    );
-    const reviewSplit = splitStale(
-        Object.keys(source.reviews),
-        reviewHashes,
-        previous?.reviews,
-        force
-    );
-    const reviewItems = reviewSplit.stale.flatMap((id) =>
+/** 4. Reviews (item keys "<productId>#<index>"), with the localised product names as context */
+async function translateReviews(
+    run: CatalogRun,
+    products: TranslationFile["products"]
+): Promise<SectionResult<TranslationFile["reviews"]>> {
+    const { source } = run;
+    const hashes = hashesOf(source.reviews);
+    const split = splitStale(Object.keys(source.reviews), hashes, run.previous?.reviews, run.force);
+    const items = split.stale.flatMap((id) =>
         (source.reviews[id] ?? []).map((review, index) => ({
             key: `${id}#${index}`,
             fields: { title: review.title, content: review.content },
         }))
     );
     const productNames = Object.fromEntries(
-        reviewSplit.stale.map((id) => [
+        split.stale.map((id) => [
             source.products[id]?.name ?? id,
             products[id]?.name ?? source.products[id]?.name ?? id,
         ])
     );
-    const reviewResult = await translateItems(
-        ctx,
-        limiter,
+    const result = await translateItems(
+        run.ctx,
+        run.limiter,
         {
             mode: "reviews",
             label: "customer reviews (title and text)",
             context: [
-                ...storeContext,
+                ...run.storeContext,
                 "Localised product names (English -> target):",
                 JSON.stringify(productNames),
             ],
         },
-        reviewItems,
+        items,
         TRANSLATION_BATCH_SIZES.reviews
     );
-    const reviews: TranslationFile["reviews"] = { ...reviewSplit.reused };
-    for (const id of reviewSplit.stale) {
+    const reviews: TranslationFile["reviews"] = { ...split.reused };
+    for (const id of split.stale) {
         const english = source.reviews[id] ?? [];
-        const translated = english.map((_, i) => reviewResult.translated.get(`${id}#${i}`));
+        const translated = english.map((_, i) => result.translated.get(`${id}#${i}`));
         if (translated.some((t) => !t)) continue;
         reviews[id] = {
             reviews: translated.map((t) => ({ title: t?.title ?? "", content: t?.content ?? "" })),
-            sourceHash: reviewHashes.get(id) ?? "",
+            sourceHash: hashes.get(id) ?? "",
         };
     }
-    failed.push(...reviewResult.failed.map((k) => `reviews:${k}`));
-    translatedCount += reviewResult.translated.size;
-    // Count single reviews and CMS slots, the same unit as translatedCount
-    reusedCount += Object.values(reviewSplit.reused).reduce((n, r) => n + r.reviews.length, 0);
+    return {
+        entries: reviews,
+        translated: result.translated.size,
+        // Count single reviews, the same unit as translated
+        reused: Object.values(split.reused).reduce((n, r) => n + r.reviews.length, 0),
+        failed: result.failed.map((k) => `reviews:${k}`),
+    };
+}
 
-    // 5. CMS pages (one call per page)
-    const cmsHashes = new Map(Object.entries(source.cms).map(([k, v]) => [k, sourceHashOf(v)]));
-    const cmsSplit = splitStale(Object.keys(source.cms), cmsHashes, previous?.cms, force);
-    const cms: TranslationFile["cms"] = { ...cmsSplit.reused };
-    const cmsResults = await Promise.all(
-        cmsSplit.stale.map(async (pageName) => {
+/** 5. CMS pages, one call per page */
+async function translateCmsPages(run: CatalogRun): Promise<SectionResult<TranslationFile["cms"]>> {
+    const { source } = run;
+    const hashes = hashesOf(source.cms);
+    const split = splitStale(Object.keys(source.cms), hashes, run.previous?.cms, run.force);
+    const pages = await Promise.all(
+        split.stale.map(async (pageName) => {
             const slots = source.cms[pageName] ?? {};
             const items = Object.entries(slots).map(([key, html]) => ({ key, fields: { html } }));
             const result = await translateItems(
-                ctx,
-                limiter,
+                run.ctx,
+                run.limiter,
                 {
                     mode: "copy",
                     label: `CMS page "${pageName}" (HTML text blocks)`,
-                    context: storeContext,
+                    context: run.storeContext,
                 },
                 items,
                 Math.max(1, items.length)
@@ -727,58 +745,73 @@ export async function translateCatalog(
             return { pageName, items, result };
         })
     );
-    for (const { pageName, items, result } of cmsResults) {
+    const section: SectionResult<TranslationFile["cms"]> = {
+        entries: { ...split.reused },
+        translated: 0,
+        // Count CMS slots, the same unit as translated
+        reused: Object.values(split.reused).reduce((n, p) => n + Object.keys(p.slots).length, 0),
+        failed: [],
+    };
+    for (const { pageName, items, result } of pages) {
         if (items.length === 0) continue;
-        const complete = result.failed.length === 0;
-        cms[pageName] = {
+        section.entries[pageName] = {
             slots: Object.fromEntries(
                 [...result.translated].map(([key, f]) => [key, f.html ?? ""])
             ),
             // An incomplete page is stored without hash, so the next run translates it again
-            sourceHash: complete ? (cmsHashes.get(pageName) ?? "") : "",
+            sourceHash: result.failed.length === 0 ? (hashes.get(pageName) ?? "") : "",
         };
-        failed.push(...result.failed.map((k) => `cms:${pageName}:${k}`));
-        translatedCount += result.translated.size;
+        section.failed.push(...result.failed.map((k) => `cms:${pageName}:${k}`));
+        section.translated += result.translated.size;
     }
-    reusedCount += Object.values(cmsSplit.reused).reduce(
-        (n, page) => n + Object.keys(page.slots).length,
-        0
-    );
+    return section;
+}
 
-    // 6. Fixture texts
+interface FixtureTranslations {
+    fixtures: Record<string, string>;
+    fixtureHashes: Record<string, string>;
+}
+
+/** 6. Fixture texts. A failed entry keeps its old text without hash, so the next run retries it */
+async function translateFixtures(run: CatalogRun): Promise<SectionResult<FixtureTranslations>> {
+    const { source, previous } = run;
     const previousFixtures = previous?.fixtures ?? {};
-    const fixtureKeys = Object.keys(source.fixtures);
-    const currentHashes = new Map(
-        fixtureKeys.map((k) => [k, sourceHashOf(source.fixtures[k] ?? "")])
-    );
-    const staleFixtures = fixtureKeys.filter((k) =>
-        isStaleFixture(k, currentHashes.get(k) ?? "", previous, force)
-    );
-    const fixtureResult = await translateItems(
-        ctx,
-        limiter,
-        { mode: "copy", label: "short store texts", context: storeContext },
-        staleFixtures.map((k) => ({ key: k, fields: { text: source.fixtures[k] ?? "" } })),
+    const keys = Object.keys(source.fixtures);
+    const hashes = new Map(keys.map((k) => [k, sourceHashOf(source.fixtures[k] ?? "")]));
+    const stale = keys.filter((k) => isStaleFixture(k, hashes.get(k) ?? "", previous, run.force));
+    const result = await translateItems(
+        run.ctx,
+        run.limiter,
+        { mode: "copy", label: "short store texts", context: run.storeContext },
+        stale.map((k) => ({ key: k, fields: { text: source.fixtures[k] ?? "" } })),
         TRANSLATION_BATCH_SIZES.fixtures
     );
     const fixtures: Record<string, string> = Object.fromEntries(
-        fixtureKeys
+        keys
             .map((k): [string, string | undefined] => [
                 k,
-                fixtureResult.translated.get(k)?.text ?? previousFixtures[k],
+                result.translated.get(k)?.text ?? previousFixtures[k],
             ])
             .filter((entry): entry is [string, string] => entry[1] !== undefined)
     );
-    // A failed entry keeps its old text without hash, so the next run retries it
-    const failedFixtures = new Set(fixtureResult.failed);
-    const fixtureHashes: Record<string, string> = Object.fromEntries(
-        [...currentHashes].filter(([k]) => fixtures[k] !== undefined && !failedFixtures.has(k))
+    const failedKeys = new Set(result.failed);
+    const fixtureHashes = Object.fromEntries(
+        [...hashes].filter(([k]) => fixtures[k] !== undefined && !failedKeys.has(k))
     );
-    failed.push(...fixtureResult.failed.map((k) => `fixtures:${k}`));
-    translatedCount += fixtureResult.translated.size;
-    reusedCount += fixtureKeys.length - staleFixtures.length;
+    return {
+        entries: { fixtures, fixtureHashes },
+        translated: result.translated.size,
+        reused: keys.length - stale.length,
+        failed: result.failed.map((k) => `fixtures:${k}`),
+    };
+}
 
-    const propertyGroups: TranslationFile["propertyGroups"] = Object.fromEntries(
+/** Property groups and options, named from the glossary (no AI call of their own) */
+function propertyGroupsFromGlossary(
+    source: TranslationSource,
+    glossary: Record<string, string>
+): TranslationFile["propertyGroups"] {
+    return Object.fromEntries(
         Object.entries(source.propertyGroups).map(([key, group]) => [
             key,
             {
@@ -787,6 +820,39 @@ export async function translateCatalog(
             },
         ])
     );
+}
+
+/**
+ * Translate the catalog into one locale.
+ */
+export async function translateCatalog(
+    input: TranslateCatalogInput
+): Promise<TranslateCatalogResult> {
+    const { textProvider, locale, storeName, storeDescription } = input;
+    const force = input.force ?? false;
+    const previous = force ? null : (input.previous ?? null);
+    const formality =
+        input.formality ??
+        previous?.style.formality ??
+        (await decideFormality(textProvider, locale, storeName, storeDescription));
+    const run: CatalogRun = {
+        ctx: { textProvider, locale, formality, glossary: {} },
+        limiter: new ConcurrencyLimiter(textProvider.maxConcurrency),
+        source: input.source,
+        previous,
+        force,
+        storeContext: [`Store: "${storeName}"`, `Store description: ${storeDescription}`],
+    };
+
+    // Sequential: every later section uses the glossary, reviews use the product names
+    const glossary = await translateGlossary(run);
+    run.ctx.glossary = glossary.entries;
+    const categories = await translateCategories(run);
+    const products = await translateProducts(run);
+    const reviews = await translateReviews(run, products.entries);
+    const cms = await translateCmsPages(run);
+    const fixtures = await translateFixtures(run);
+    const sections = [glossary, categories, products, reviews, cms, fixtures];
 
     return {
         file: {
@@ -794,17 +860,16 @@ export async function translateCatalog(
             sourceLocale: SOURCE_LOCALE,
             translatedAt: new Date().toISOString(),
             style: { formality },
-            glossary,
-            categories,
-            products,
-            propertyGroups,
-            reviews,
-            cms,
-            fixtures,
-            fixtureHashes,
+            glossary: glossary.entries,
+            categories: categories.entries,
+            products: products.entries,
+            propertyGroups: propertyGroupsFromGlossary(input.source, glossary.entries),
+            reviews: reviews.entries,
+            cms: cms.entries,
+            ...fixtures.entries,
         },
-        translated: translatedCount,
-        reused: reusedCount,
-        failed,
+        translated: sections.reduce((n, s) => n + s.translated, 0),
+        reused: sections.reduce((n, s) => n + s.reused, 0),
+        failed: sections.flatMap((s) => s.failed),
     };
 }
