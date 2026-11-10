@@ -117,4 +117,29 @@ describe("parseCliArgs", () => {
             expect(parse().command).toBe("help");
         });
     });
+
+    describe("flags without a value", () => {
+        test("a bare string flag is undefined, not true", () => {
+            const args = parse("blueprint", "create", "--name", "--dry-run");
+            expect(args.name).toBeUndefined();
+            expect(args.dryRun).toBe(true);
+        });
+
+        test("a bare --only does not throw", () => {
+            expect(parse("process", "--name=shop", "--only").only).toBeUndefined();
+        });
+
+        test("a bare --products is NaN, so validation rejects it", () => {
+            expect(parse("generate", "--name=shop", "--products").products).toBeNaN();
+        });
+
+        test("an empty --description= stays an empty string", () => {
+            expect(parse("generate", "--name=shop", "--description=").description).toBe("");
+        });
+
+        test("only the first positional becomes the subcommand", () => {
+            expect(parse("blueprint", "create", "extra", "--name=shop").subcommand).toBe("create");
+            expect(parse("generate", "stray", "--name=shop").subcommand).toBeUndefined();
+        });
+    });
 });
