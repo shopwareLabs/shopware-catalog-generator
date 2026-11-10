@@ -35,10 +35,12 @@ The server module provides:
 
 ## Files
 
-| File                 | Description                          |
-| -------------------- | ------------------------------------ |
-| `index.ts`           | Exports types and singleton instance |
-| `process-manager.ts` | ProcessManager class and types       |
+| File                 | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `index.ts`           | Exports types and singleton instance                               |
+| `process-manager.ts` | ProcessManager class and types                                     |
+| `routes.ts`          | `routeRequest`, `createRequestHandler`, status and health handlers |
+| `generate-route.ts`  | POST /generate: `parseGenerateBody`, `runGenerateTask` (thin)      |
 
 ## Usage
 
@@ -283,7 +285,7 @@ const processId = processManager.start("Task", async (ctx) => {
 
 ### Adding New Endpoints
 
-1. Add route handler in `src/server.ts`
+1. Add the route to `routeRequest()` in `src/server/routes.ts` (`src/server.ts` only starts Bun.serve)
 2. Use `processManager.start()` for long-running operations
 3. Return process ID immediately for async polling
 4. Update this AGENTS.md with new endpoint docs

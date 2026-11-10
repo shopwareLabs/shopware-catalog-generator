@@ -11,14 +11,15 @@ import type {
     BlueprintCategory,
     BlueprintProduct,
     HydratedBlueprint,
-    ProductProperty,
     TextProvider,
+    VariantConfig,
     VariantSettings,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import type { PropertyUpdate } from "./hydrators/product.js";
 
 import { PropertyCache } from "../property-cache.js";
-import { logger, normalizeColorName, toKebabCase } from "../utils/index.js";
+import { buildBaseImagePrompt, logger, toKebabCase } from "../utils/index.js";
 import {
     findPlaceholderCategories,
     findPlaceholderProducts,
@@ -26,11 +27,12 @@ import {
 } from "./fix-placeholders.js";
 import {
     applyCategoryHydration,
+    flattenCategories,
     hydrateBrandColors,
     hydrateCategories,
     ProductHydrator,
 } from "./hydrators/index.js";
-import { productColorPreferences } from "./hydrators/product.js";
+import { groupProductsByBranch, productColorPreferences } from "./hydrators/product.js";
 import { VariantResolver } from "./variant-resolver.js";
 import {
     blueprintVariantSettings,
@@ -213,102 +215,32 @@ export class BlueprintHydrator {
         this.propertyCache = PropertyCache.forStore(this.cacheDir, storeSlug);
         this.propertyCache.ensureDefaults();
 
-        const storeContext: StoreContext = {
-            name: existingBlueprint.salesChannel.name,
-            description: existingBlueprint.salesChannel.description,
-        };
-
-        const productsByBranch = new Map<string, BlueprintProduct[]>();
-        for (const product of existingBlueprint.products) {
-            const branch = product.primaryCategoryId;
-            const existing = productsByBranch.get(branch);
-            if (existing) {
-                existing.push(product);
-            } else {
-                productsByBranch.set(branch, [product]);
-            }
-        }
-
-        const categoryNameMap = new Map<string, string>();
-        const flatCats = (cats: BlueprintCategory[]): void => {
-            for (const cat of cats) {
-                categoryNameMap.set(cat.id, cat.name);
-                if (cat.children.length > 0) flatCats(cat.children);
-            }
-        };
-        flatCats(existingBlueprint.categories);
-
         const settings = blueprintVariantSettings(existingBlueprint);
-        const productHydrator = this.createProductHydrator(settings);
-        const variantResolver = new VariantResolver(
-            this.textProvider,
-            this.propertyCache,
-            settings
+        const run: PropertyRun = {
+            productHydrator: this.createProductHydrator(settings),
+            variantResolver: new VariantResolver(this.textProvider, this.propertyCache, settings),
+            existingProperties,
+            storeContext: {
+                name: existingBlueprint.salesChannel.name,
+                description: existingBlueprint.salesChannel.description,
+            },
+        };
+        const categoryNames = new Map(
+            flattenCategories(existingBlueprint.categories).map((c) => [c.id, c.name])
         );
 
-        const updatedProducts: BlueprintProduct[] = [];
-        const branches = Array.from(productsByBranch.entries());
-
-        for (const [branchId, branchProducts] of branches) {
-            const branchName = categoryNameMap.get(branchId) || "Unknown";
-            logger.info(`  Processing ${branchName} (${branchProducts.length} products)...`);
-
-            const propertyUpdates = await productHydrator.hydratePropertiesForBranch(
-                branchProducts,
-                branchName,
-                existingProperties,
-                storeContext
-            );
-
-            for (const product of branchProducts) {
-                const update = propertyUpdates.get(product.id);
-                if (update) {
-                    let variantConfigs = product.metadata.variantConfigs;
-                    if (
-                        product.metadata.isVariant &&
-                        update.suggestedVariantGroups &&
-                        update.suggestedVariantGroups.length > 0
-                    ) {
-                        variantConfigs = await variantResolver.resolveVariantConfigs(
-                            update.suggestedVariantGroups,
-                            {
-                                name: product.name,
-                                category: branchName,
-                                productId: product.id,
-                                colors: productColorPreferences(
-                                    update.properties,
-                                    update.variantColors
-                                ),
-                            }
-                        );
-                    }
-
-                    updatedProducts.push({
-                        ...product,
-                        metadata: {
-                            ...product.metadata,
-                            properties: update.properties as ProductProperty[],
-                            variantConfigs:
-                                variantConfigs && variantConfigs.length > 0
-                                    ? variantConfigs
-                                    : undefined,
-                        },
-                    });
-                } else {
-                    updatedProducts.push(product);
-                }
-            }
+        // Branches run one after the other: each one is a single AI call
+        const products: BlueprintProduct[] = [];
+        for (const [branchId, branchProducts] of groupProductsByBranch(
+            existingBlueprint.products
+        )) {
+            const branchName = categoryNames.get(branchId) || "Unknown";
+            products.push(...(await updateBranchProperties(branchProducts, branchName, run)));
         }
-
-        const hydrated: HydratedBlueprint = {
-            ...existingBlueprint,
-            products: updatedProducts,
-            hydratedAt: new Date().toISOString(),
-        };
 
         logger.info("  Properties hydrated successfully (names preserved)", { cli: true });
         logger.info("Properties-only hydration complete");
-        return hydrated;
+        return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
     }
 
     /**
@@ -433,42 +365,79 @@ export class BlueprintHydrator {
             this.textProvider,
             this.propertyCache,
             variantResolver,
-            (name, props) => this.generateBaseImagePrompt(name, props),
+            buildBaseImagePrompt,
             inspiration,
             settings
         );
     }
+}
 
-    /**
-     * Generate a consistent base image prompt from product name and properties
-     */
-    private generateBaseImagePrompt(
-        productName: string,
-        properties: Array<{ group: string; value: string }>
-    ): string {
-        const material = properties.find((p) => p.group.toLowerCase() === "material")?.value;
-        const color = properties.find((p) => p.group.toLowerCase() === "color")?.value;
-        const style = properties.find((p) => p.group.toLowerCase() === "style")?.value;
+/** Shared state of one hydratePropertiesOnly() run */
+interface PropertyRun {
+    productHydrator: ProductHydrator;
+    variantResolver: VariantResolver;
+    existingProperties: ExistingProperty[];
+    storeContext: StoreContext;
+}
 
-        let basePrompt = productName;
+/** New properties for one branch; products the AI left out stay unchanged */
+async function updateBranchProperties(
+    products: BlueprintProduct[],
+    branchName: string,
+    run: PropertyRun
+): Promise<BlueprintProduct[]> {
+    logger.info(`  Processing ${branchName} (${products.length} products)...`);
+    const updates = await run.productHydrator.hydratePropertiesForBranch(
+        products,
+        branchName,
+        run.existingProperties,
+        run.storeContext
+    );
 
-        if (material && !productName.toLowerCase().includes(material.toLowerCase())) {
-            basePrompt += `, ${material} construction`;
-        }
-
-        if (color) {
-            const colorName = normalizeColorName(color) || color;
-            if (!productName.toLowerCase().includes(color.toLowerCase())) {
-                basePrompt += `, ${colorName} finish`;
-            }
-        }
-
-        if (style && !productName.toLowerCase().includes(style.toLowerCase())) {
-            basePrompt += `, ${style} design`;
-        }
-
-        return basePrompt;
+    const updated: BlueprintProduct[] = [];
+    for (const product of products) {
+        const update = updates.get(product.id);
+        updated.push(
+            update ? await applyPropertyUpdate(product, update, branchName, run) : product
+        );
     }
+    return updated;
+}
+
+async function applyPropertyUpdate(
+    product: BlueprintProduct,
+    update: PropertyUpdate,
+    branchName: string,
+    run: PropertyRun
+): Promise<BlueprintProduct> {
+    const variantConfigs = await resolveUpdatedVariants(product, update, branchName, run);
+    return {
+        ...product,
+        metadata: {
+            ...product.metadata,
+            properties: update.properties,
+            variantConfigs:
+                variantConfigs && variantConfigs.length > 0 ? variantConfigs : undefined,
+        },
+    };
+}
+
+/** New variant configs for variant products with suggested groups, else the existing ones */
+async function resolveUpdatedVariants(
+    product: BlueprintProduct,
+    update: PropertyUpdate,
+    branchName: string,
+    run: PropertyRun
+): Promise<VariantConfig[] | undefined> {
+    const groups = update.suggestedVariantGroups ?? [];
+    if (!product.metadata.isVariant || groups.length === 0) return product.metadata.variantConfigs;
+
+    return run.variantResolver.resolveVariantConfigs(groups, {
+        name: product.name,
+        category: branchName,
+        productId: product.id,
+        colors: productColorPreferences(update.properties, update.variantColors),
+    });
 }
 
 /** The product's default colour: stored default, else its own Color, else the first colour variant */

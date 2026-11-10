@@ -163,94 +163,57 @@ export class CategoryImageProcessor {
             return false;
         }
 
-        const sanitizedName = categoryName.replace(/[^a-zA-Z0-9]/g, "-");
-        const fileName = `${sanitizedName}-banner`;
-
+        const fileName = `${categoryName.replace(/[^a-zA-Z0-9]/g, "-")}-banner`;
         const existingFileMediaId = await this.findMediaByFileName(context, fileName);
-        let mediaId: string;
-        let isExistingMedia = false;
+        const banner: BannerSource = { categoryId, categoryName, fileName, base64Data };
+        const mediaId =
+            existingFileMediaId ?? (await this.createAndUploadBannerMedia(context, banner));
 
-        if (existingFileMediaId) {
-            mediaId = existingFileMediaId;
-            isExistingMedia = true;
-        } else {
-            mediaId = generateUUID();
-            const mediaFolderId = await this.getCategoryMediaFolderId(context);
+        await assignCategoryMedia(context, categoryId, mediaId);
 
-            const createMediaResponse = await apiPost(context, "_action/sync", {
-                createMedia: {
-                    entity: "media",
-                    action: "upsert",
-                    payload: [
-                        {
-                            id: mediaId,
-                            private: false,
-                            ...(mediaFolderId && { mediaFolderId }),
-                            alt: categoryName,
-                            title: categoryName,
-                        },
-                    ],
-                },
-            });
+        const action = existingFileMediaId ? "Reused existing" : "Uploaded";
+        logger.info(`      ✓ ${action} banner for "${categoryName}"`, { cli: true });
+        return true;
+    }
 
-            if (!createMediaResponse.ok) {
-                const errorText = await createMediaResponse.text();
-                logger.apiError(
-                    "_action/sync (create category media)",
-                    createMediaResponse.status,
-                    { categoryId, error: errorText }
-                );
-                throw new Error(`Failed to create media entity: ${createMediaResponse.status}`);
-            }
+    /**
+     * Create a media entity for a category banner and upload the image data.
+     * Returns the new media ID.
+     */
+    private async createAndUploadBannerMedia(
+        context: PostProcessorContext,
+        banner: BannerSource
+    ): Promise<string> {
+        const mediaId = generateUUID();
+        const mediaFolderId = await this.getCategoryMediaFolderId(context);
 
-            const imageBuffer = Buffer.from(base64Data, "base64");
-            const format = detectImageFormat(imageBuffer);
-
-            const uploadResponse = await uploadImageWithRetry(
-                context,
-                mediaId,
-                fileName,
-                imageBuffer,
-                format
-            );
-
-            if (!uploadResponse.ok) {
-                const errorText = await uploadResponse.text();
-                if (!errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
-                    logger.apiError("_action/media/upload (category)", uploadResponse.status, {
-                        categoryId,
-                        error: errorText,
-                    });
-                    throw new Error(`Failed to upload category image: ${uploadResponse.status}`);
-                }
-            }
-        }
-
-        const updateResponse = await apiPost(context, "_action/sync", {
-            updateCategory: {
-                entity: "category",
+        const createMediaResponse = await apiPost(context, "_action/sync", {
+            createMedia: {
+                entity: "media",
                 action: "upsert",
-                payload: [{ id: categoryId, mediaId }],
+                payload: [
+                    {
+                        id: mediaId,
+                        private: false,
+                        ...(mediaFolderId && { mediaFolderId }),
+                        alt: banner.categoryName,
+                        title: banner.categoryName,
+                    },
+                ],
             },
         });
 
-        if (!updateResponse.ok) {
-            const errorText = await updateResponse.text();
-            logger.apiError("_action/sync (update category mediaId)", updateResponse.status, {
-                categoryId,
+        if (!createMediaResponse.ok) {
+            const errorText = await createMediaResponse.text();
+            logger.apiError("_action/sync (create category media)", createMediaResponse.status, {
+                categoryId: banner.categoryId,
                 error: errorText,
             });
-            throw new Error(`Failed to update category with image: ${updateResponse.status}`);
+            throw new Error(`Failed to create media entity: ${createMediaResponse.status}`);
         }
 
-        if (isExistingMedia) {
-            logger.info(`      ✓ Reused existing banner for "${categoryName}"`, {
-                cli: true,
-            });
-        } else {
-            logger.info(`      ✓ Uploaded banner for "${categoryName}"`, { cli: true });
-        }
-        return true;
+        await uploadBannerFile(context, mediaId, banner);
+        return mediaId;
     }
 
     /**
@@ -343,4 +306,65 @@ export class CategoryImageProcessor {
         });
         return categoriesWithMedia.length;
     }
+}
+
+/** Category banner image to upload */
+interface BannerSource {
+    categoryId: string;
+    categoryName: string;
+    fileName: string;
+    base64Data: string;
+}
+
+/**
+ * Upload banner image data to an existing media entity.
+ * A duplicated file name is not an error (the file is already there).
+ */
+async function uploadBannerFile(
+    context: PostProcessorContext,
+    mediaId: string,
+    banner: BannerSource
+): Promise<void> {
+    const imageBuffer = Buffer.from(banner.base64Data, "base64");
+    const format = detectImageFormat(imageBuffer);
+    const uploadResponse = await uploadImageWithRetry(
+        context,
+        mediaId,
+        banner.fileName,
+        imageBuffer,
+        format
+    );
+    if (uploadResponse.ok) return;
+
+    const errorText = await uploadResponse.text();
+    if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) return;
+
+    logger.apiError("_action/media/upload (category)", uploadResponse.status, {
+        categoryId: banner.categoryId,
+        error: errorText,
+    });
+    throw new Error(`Failed to upload category image: ${uploadResponse.status}`);
+}
+
+/** Link a media entity to a category as its banner */
+async function assignCategoryMedia(
+    context: PostProcessorContext,
+    categoryId: string,
+    mediaId: string
+): Promise<void> {
+    const updateResponse = await apiPost(context, "_action/sync", {
+        updateCategory: {
+            entity: "category",
+            action: "upsert",
+            payload: [{ id: categoryId, mediaId }],
+        },
+    });
+    if (updateResponse.ok) return;
+
+    const errorText = await updateResponse.text();
+    logger.apiError("_action/sync (update category mediaId)", updateResponse.status, {
+        categoryId,
+        error: errorText,
+    });
+    throw new Error(`Failed to update category with image: ${updateResponse.status}`);
 }

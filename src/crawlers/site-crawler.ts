@@ -128,6 +128,24 @@ async function fetchPages(urls: string[]): Promise<Array<FetchedPage | null>> {
     );
 }
 
+const NON_PAGE_HREF_PREFIXES = ["#", "mailto:", "tel:"];
+
+function isNonPageHref(href: string | undefined): boolean {
+    return !href || NON_PAGE_HREF_PREFIXES.some((prefix) => href.startsWith(prefix));
+}
+
+/** Absolute URL of a link when it stays on the origin and has no query or fragment. */
+function toSameOriginUrl(href: string, pageUrl: string, origin: string): string | null {
+    try {
+        const abs = new URL(href, pageUrl).href;
+        if (new URL(abs).origin !== origin) return null;
+        if (abs.includes("?") || abs.includes("#")) return null;
+        return abs;
+    } catch {
+        return null;
+    }
+}
+
 /** Collect internal links from a page for sitemap fallback. */
 function collectInternalLinks($: cheerio.CheerioAPI, baseUrl: string): string[] {
     const origin = new URL(baseUrl).origin;
@@ -137,18 +155,11 @@ function collectInternalLinks($: cheerio.CheerioAPI, baseUrl: string): string[] 
     $("a[href]").each((_, el) => {
         if (links.length >= 100) return false;
         const href = $(el).attr("href");
-        if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:"))
-            return;
-        try {
-            const abs = new URL(href, baseUrl).href;
-            if (new URL(abs).origin !== origin) return;
-            if (abs.includes("?") || abs.includes("#")) return;
-            if (seen.has(abs)) return;
-            seen.add(abs);
-            links.push(abs);
-        } catch {
-            /* ignore */
-        }
+        if (isNonPageHref(href)) return;
+        const abs = toSameOriginUrl(href ?? "", baseUrl, origin);
+        if (!abs || seen.has(abs)) return;
+        seen.add(abs);
+        links.push(abs);
     });
 
     return links;
@@ -165,61 +176,63 @@ function collectPageLinks(
 ): void {
     $("a[href]").each((_, el) => {
         if (out.size >= cap) return false;
-        const href = $(el).attr("href") ?? "";
-        try {
-            const abs = new URL(href, pageUrl).href;
-            if (new URL(abs).origin !== origin) return;
-            if (seen.has(abs) || out.has(abs)) return;
-            if (abs.includes("?") || abs.includes("#")) return;
-            out.add(abs);
-        } catch {
-            /* ignore */
-        }
+        const abs = toSameOriginUrl($(el).attr("href") ?? "", pageUrl, origin);
+        if (!abs || seen.has(abs) || out.has(abs)) return;
+        out.add(abs);
     });
 }
 
-function extractProduct($: cheerio.CheerioAPI): ExampleProduct | null {
-    // JSON-LD gives us name + description + properties in one go
-    const fromJsonLd = extractProductsFromJsonLd($);
-    const first = fromJsonLd[0];
-    if (first) {
-        if (!first.description) {
-            const metaDesc =
-                $('meta[property="og:description"]').attr("content")?.trim() ||
-                $('meta[name="description"]').attr("content")?.trim();
-            if (metaDesc) return { ...first, description: metaDesc.slice(0, 300) };
-        }
-        return first;
-    }
+function metaDescription($: cheerio.CheerioAPI): string | undefined {
+    return (
+        $('meta[property="og:description"]').attr("content")?.trim() ||
+        $('meta[name="description"]').attr("content")?.trim()
+    );
+}
 
+/** JSON-LD product without a description gets the page meta description instead. */
+function withMetaDescription(product: ExampleProduct, $: cheerio.CheerioAPI): ExampleProduct {
+    if (product.description) return product;
+    const metaDesc = metaDescription($);
+    return metaDesc ? { ...product, description: metaDesc.slice(0, 300) } : product;
+}
+
+function isProductNameLength(name: string): boolean {
+    return name.length >= 3 && name.length <= 120;
+}
+
+function singleH1Name($: cheerio.CheerioAPI): string | null {
+    const h1s = $("h1");
+    if (h1s.length !== 1) return null;
+    const h1 = h1s.first().text().trim().replace(/\s+/g, " ");
+    return isProductNameLength(h1) ? h1 : null;
+}
+
+function microdataProductName($: cheerio.CheerioAPI): string | null {
+    const itemprop = $('[itemtype*="schema.org/Product"] [itemprop="name"]').first().text().trim();
+    return isProductNameLength(itemprop) ? itemprop : null;
+}
+
+/** Product from page markup when there is no JSON-LD product. */
+function productFromPageMarkup($: cheerio.CheerioAPI): ExampleProduct | null {
     // Single h1 is the most reliable signal for the page title. Try it before scoped
     // microdata because some shops (e.g. Koro) wrap a huge section with
     // [itemtype="Product"] and the first [itemprop="name"] inside is a breadcrumb or
     // navigation label, not the actual product name.
-    let name: string | null = null;
-    const h1s = $("h1");
-    if (h1s.length === 1) {
-        const h1 = h1s.first().text().trim().replace(/\s+/g, " ");
-        if (h1.length >= 3 && h1.length <= 120) name = h1;
-    }
-
-    if (!name) {
-        const itemprop = $('[itemtype*="schema.org/Product"] [itemprop="name"]')
-            .first()
-            .text()
-            .trim();
-        if (itemprop.length >= 3 && itemprop.length <= 120) name = itemprop;
-    }
-
+    const name = singleH1Name($) ?? microdataProductName($);
     if (!name) return null;
 
     // Description: scoped microdata → og:description → meta description
     const rawDesc =
         $('[itemtype*="schema.org/Product"] [itemprop="description"]').first().text().trim() ||
-        $('meta[property="og:description"]').attr("content")?.trim() ||
-        $('meta[name="description"]').attr("content")?.trim();
+        metaDescription($);
 
     return { name, description: rawDesc ? rawDesc.slice(0, 300) : undefined };
+}
+
+function extractProduct($: cheerio.CheerioAPI): ExampleProduct | null {
+    // JSON-LD gives us name + description + properties in one go
+    const first = extractProductsFromJsonLd($)[0];
+    return first ? withMetaDescription(first, $) : productFromPageMarkup($);
 }
 
 /** Extract products from a classified category page using four fallback tiers. */
@@ -327,6 +340,40 @@ async function resolveBrandColors(
     return undefined;
 }
 
+function productFromPage(page: FetchedPage | null): ExampleProduct | null {
+    return page?.type === "product" ? extractProduct(page.$) : null;
+}
+
+function productsFromPages(pages: Array<FetchedPage | null>): ExampleProduct[] {
+    return pages
+        .map(productFromPage)
+        .filter((product): product is ExampleProduct => product !== null);
+}
+
+interface FollowLevelScan {
+    products: ExampleProduct[];
+    nextUrls: Set<string>;
+}
+
+/** Extract products from one follow level; category pages contribute links for the
+ * next level only while fewer than 5 products have been found so far. */
+function scanFollowLevel(
+    pages: Array<FetchedPage | null>,
+    origin: string,
+    seen: Set<string>
+): FollowLevelScan {
+    const products: ExampleProduct[] = [];
+    const nextUrls = new Set<string>();
+    for (const page of pages) {
+        const product = productFromPage(page);
+        if (product) products.push(product);
+        if (page?.type === "category" && products.length < 5) {
+            collectPageLinks(page.$, page.url, origin, nextUrls, seen, 60);
+        }
+    }
+    return { products, nextUrls };
+}
+
 /**
  * Phase 4: follow links from category pages to find products when the sitemap
  * sample yielded fewer than 5. Handles stores where product URLs are absent from
@@ -343,37 +390,83 @@ async function followUpCrawl(
     const followUrls = new Set<string>();
 
     for (const result of fetched) {
-        if (!result || result.type !== "category") continue;
+        if (result?.type !== "category") continue;
         collectPageLinks(result.$, result.url, origin, followUrls, sampledSet, 300);
     }
 
     if (followUrls.size === 0) return [];
 
     const followFetched = await fetchPages(sampleUrls([...followUrls], 20));
-    const products: ExampleProduct[] = [];
-    const level2Urls = new Set<string>();
     const seenUrls = new Set([...sampledSet, ...followUrls]);
+    const level1 = scanFollowLevel(followFetched, origin, seenUrls);
+    if (level1.nextUrls.size === 0 || level1.products.length >= 5) return level1.products;
 
-    for (const result of followFetched) {
-        if (!result) continue;
-        if (result.type === "product") {
-            const product = extractProduct(result.$);
-            if (product) products.push(product);
-        } else if (result.type === "category" && products.length < 5) {
-            collectPageLinks(result.$, result.url, origin, level2Urls, seenUrls, 60);
-        }
+    const level2Fetched = await fetchPages(sampleUrls([...level1.nextUrls], 20));
+    return [...level1.products, ...productsFromPages(level2Fetched)];
+}
+
+/** Phase 1: URL discovery — sitemap, fallback to homepage link extraction */
+async function discoverCandidateUrls(url: string, $home: cheerio.CheerioAPI): Promise<string[]> {
+    const fromSitemap = await discoverFromSitemap(url);
+    if (fromSitemap.length > 0) return fromSitemap;
+    console.warn(`[inspire] no sitemap URLs for ${url} — using homepage link discovery`);
+    return collectInternalLinks($home, url);
+}
+
+interface PageExtraction {
+    categories: string[];
+    products: ExampleProduct[];
+}
+
+function extractFromProductPage($: cheerio.CheerioAPI): PageExtraction {
+    const product = extractProduct($);
+    return {
+        // Breadcrumbs; home entries are dropped by uniqueCategories
+        categories: [...extractCategoriesFromJsonLd($), ...extractCategoriesFromMicrodata($)],
+        products: product ? [product] : [],
+    };
+}
+
+function extractFromCategoryPage($: cheerio.CheerioAPI): PageExtraction {
+    const catName = extractCategoryName($);
+    return {
+        categories: catName ? [catName] : [],
+        products: extractCategoryPageProducts($),
+    };
+}
+
+function extractFromPage(page: FetchedPage | null): PageExtraction {
+    if (page?.type === "product") return extractFromProductPage(page.$);
+    if (page?.type === "category") return extractFromCategoryPage(page.$);
+    return { categories: [], products: [] };
+}
+
+function isCategoryCandidate(key: string): boolean {
+    if (key.length < 2 || key.length > 60) return false;
+    return !CATEGORY_SKIP.has(key) && !HOME_NAMES.has(key);
+}
+
+/** Trimmed category names without skip/home entries, deduplicated case-insensitively. */
+function uniqueCategories(names: string[]): string[] {
+    const seen = new Set<string>();
+    const categories: string[] = [];
+    for (const name of names) {
+        const key = name.toLowerCase().trim();
+        if (!isCategoryCandidate(key) || seen.has(key)) continue;
+        seen.add(key);
+        categories.push(name.trim());
     }
+    return categories;
+}
 
-    if (level2Urls.size > 0 && products.length < 5) {
-        const level2Fetched = await fetchPages(sampleUrls([...level2Urls], 20));
-        for (const result of level2Fetched) {
-            if (!result || result.type !== "product") continue;
-            const product = extractProduct(result.$);
-            if (product) products.push(product);
-        }
-    }
-
-    return products;
+function uniqueProductsByName(products: ExampleProduct[]): ExampleProduct[] {
+    const seenNames = new Set<string>();
+    return products.filter((p) => {
+        const key = p.name.toLowerCase();
+        if (seenNames.has(key)) return false;
+        seenNames.add(key);
+        return true;
+    });
 }
 
 export async function crawlForInspiration(url: string): Promise<InspirationData> {
@@ -388,70 +481,22 @@ export async function crawlForInspiration(url: string): Promise<InspirationData>
         extractBrandDescriptionFromJsonLd($home) ?? extractBrandDescription($home);
     const brandColors = await resolveBrandColors($home, url);
 
-    // Phase 1: URL discovery — sitemap, fallback to homepage link extraction
-    let candidateUrls = await discoverFromSitemap(url);
-    if (candidateUrls.length === 0) {
-        console.warn(`[inspire] no sitemap URLs for ${url} — using homepage link discovery`);
-        candidateUrls = collectInternalLinks($home, url);
-    }
-
-    const sampled = sampleUrls(candidateUrls, MAX_SAMPLE_URLS);
+    const sampled = sampleUrls(await discoverCandidateUrls(url, $home), MAX_SAMPLE_URLS);
 
     // Phase 2+3: Fetch, classify, extract in parallel
     const fetched = await fetchPages(sampled);
-
-    const categories: string[] = [];
-    const categorySet = new Set<string>();
-    const products: ExampleProduct[] = [];
-
-    function addCategory(name: string) {
-        const key = name.toLowerCase().trim();
-        if (key.length < 2 || key.length > 60) return;
-        if (CATEGORY_SKIP.has(key) || HOME_NAMES.has(key)) return;
-        if (categorySet.has(key)) return;
-        categorySet.add(key);
-        categories.push(name.trim());
-    }
-
-    for (const result of fetched) {
-        if (!result || result.type === "cms" || result.type === "unknown") continue;
-
-        if (result.type === "product") {
-            const product = extractProduct(result.$);
-            if (product) products.push(product);
-
-            const breadcrumbs = [
-                ...extractCategoriesFromJsonLd(result.$),
-                ...extractCategoriesFromMicrodata(result.$),
-            ];
-            for (const cat of breadcrumbs) {
-                if (!HOME_NAMES.has(cat.toLowerCase().trim())) addCategory(cat);
-            }
-        }
-
-        if (result.type === "category") {
-            const catName = extractCategoryName(result.$);
-            if (catName) addCategory(catName);
-            for (const p of extractCategoryPageProducts(result.$)) products.push(p);
-        }
-    }
+    const extracted = fetched.map(extractFromPage);
+    const categories = uniqueCategories(extracted.flatMap((page) => page.categories));
+    const products = extracted.flatMap((page) => page.products);
 
     // Phase 4: follow category page links when few products found
     if (products.length < 5) {
-        for (const p of await followUpCrawl(fetched, url, sampled)) products.push(p);
+        products.push(...(await followUpCrawl(fetched, url, sampled)));
     }
 
     if (categories.length < 3) {
         console.warn(`[inspire] only ${categories.length} categories found for ${url}`);
     }
-
-    const seenNames = new Set<string>();
-    const uniqueProducts = products.filter((p) => {
-        const key = p.name.toLowerCase();
-        if (seenNames.has(key)) return false;
-        seenNames.add(key);
-        return true;
-    });
 
     return {
         sourceUrl: url,
@@ -459,7 +504,7 @@ export async function crawlForInspiration(url: string): Promise<InspirationData>
         brandDescription: brandDescription || undefined,
         brandColors,
         categories,
-        exampleProducts: uniqueProducts,
+        exampleProducts: uniqueProductsByName(products),
     };
 }
 

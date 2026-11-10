@@ -52,67 +52,84 @@ function hasType(block: JsonLdBlock, type: string): boolean {
     return types.some((t) => normalizeType(t) === target);
 }
 
+/** ProductGroup is Shopify's standard type for variant products (hasVariant[] of Products) */
+function isProductBlock(block: JsonLdBlock): boolean {
+    return hasType(block, "Product") || hasType(block, "ProductGroup");
+}
+
+function isCategoryNameLength(name: string): boolean {
+    return name.length > 1 && name.length < 60;
+}
+
+function categoryValues(category: JsonLdBlock["category"]): string[] {
+    if (typeof category === "string") return [category];
+    return Array.isArray(category) ? category : [];
+}
+
+function breadcrumbNames(block: JsonLdBlock): string[] {
+    if (!hasType(block, "BreadcrumbList")) return [];
+    return (block.itemListElement ?? [])
+        .map((item) => item.name ?? item.item?.name)
+        .filter((name): name is string => typeof name === "string")
+        .map((name) => name.trim())
+        .filter(isCategoryNameLength);
+}
+
+/** Shopify ProductGroup carries a `category` string (e.g. "shorts", "leggings")
+ * when there is no BreadcrumbList — use it as a fallback category signal. */
+function productCategoryNames(block: JsonLdBlock): string[] {
+    if (!isProductBlock(block)) return [];
+    return categoryValues(block.category)
+        .map((cat) => cat.trim())
+        .filter(isCategoryNameLength);
+}
+
 /** Extract category names from BreadcrumbList blocks and Product/ProductGroup.category */
 export function extractCategoriesFromJsonLd($: CheerioAPI): string[] {
-    const blocks = parseBlocks($);
-    const categories: string[] = [];
-
-    for (const block of blocks) {
-        if (hasType(block, "BreadcrumbList")) {
-            for (const item of block.itemListElement ?? []) {
-                const name = item.name ?? item.item?.name;
-                if (name && typeof name === "string") {
-                    const trimmed = name.trim();
-                    if (trimmed.length > 1 && trimmed.length < 60) {
-                        categories.push(trimmed);
-                    }
-                }
-            }
-        }
-
-        // Shopify ProductGroup carries a `category` string (e.g. "shorts", "leggings")
-        // when there is no BreadcrumbList — use it as a fallback category signal.
-        if (hasType(block, "Product") || hasType(block, "ProductGroup")) {
-            const cats = block.category;
-            const raw = typeof cats === "string" ? [cats] : Array.isArray(cats) ? cats : [];
-            for (const cat of raw) {
-                const trimmed = cat.trim();
-                if (trimmed.length > 1 && trimmed.length < 60) categories.push(trimmed);
-            }
-        }
-    }
-
+    const categories = parseBlocks($).flatMap((block) => [
+        ...breadcrumbNames(block),
+        ...productCategoryNames(block),
+    ]);
     return [...new Set(categories)];
 }
 
-function extractProductProperties(block: JsonLdBlock): Record<string, string> | undefined {
-    const props: Record<string, string> = {};
+function brandNameOf(brand: JsonLdBlock["brand"]): string | undefined {
+    if (!brand) return undefined;
+    return typeof brand === "string" ? brand : brand.name;
+}
 
-    if (block.brand) {
-        const brandName = typeof block.brand === "string" ? block.brand : block.brand.name;
-        if (brandName) props["brand"] = brandName;
-    }
+function basicProductProperties(block: JsonLdBlock): Record<string, string> {
+    const props: Record<string, string> = {};
+    const brandName = brandNameOf(block.brand);
+    if (brandName) props["brand"] = brandName;
     if (block.color && typeof block.color === "string") props["color"] = block.color;
     if (block.material && typeof block.material === "string") props["material"] = block.material;
+    return props;
+}
 
-    if (Array.isArray(block.additionalProperty)) {
-        for (const ap of block.additionalProperty) {
-            if (ap.name && ap.value != null) {
-                const key = ap.name.toLowerCase().replace(/\s+/g, "_");
-                if (!(key in props)) props[key] = String(ap.value);
-            }
-        }
+/** Add additionalProperty entries (snake_case keys) without overwriting existing keys. */
+function addAdditionalProperties(
+    props: Record<string, string>,
+    additional: JsonLdBlock["additionalProperty"]
+): void {
+    if (!Array.isArray(additional)) return;
+    for (const ap of additional) {
+        if (!ap.name || ap.value == null) continue;
+        const key = ap.name.toLowerCase().replace(/\s+/g, "_");
+        if (!(key in props)) props[key] = String(ap.value);
     }
+}
 
+function extractProductProperties(block: JsonLdBlock): Record<string, string> | undefined {
+    const props = basicProductProperties(block);
+    addAdditionalProperties(props, block.additionalProperty);
     return Object.keys(props).length > 0 ? props : undefined;
 }
 
 function productFromBlock(block: JsonLdBlock): ExampleProduct | null {
     const name = block.name?.trim();
     if (!name) return null;
-    const cats = block.category;
-    const category =
-        typeof cats === "string" ? cats.trim() : Array.isArray(cats) ? cats[0]?.trim() : undefined;
+    const category = categoryValues(block.category)[0]?.trim();
     const desc = typeof block.description === "string" ? block.description.trim() : "";
     return {
         name,
@@ -122,37 +139,28 @@ function productFromBlock(block: JsonLdBlock): ExampleProduct | null {
     };
 }
 
+/** Require explicit @type: "Product" — prevents category/navigation ItemLists
+ * (e.g. IKEA's "Produkte" list with room/category names) from leaking through */
+function itemListProduct(element: JsonLdBlock): JsonLdBlock | null {
+    if (element.item) return hasType(element.item, "Product") ? element.item : null;
+    return hasType(element, "Product") ? element : null;
+}
+
+function productBlocksOf(block: JsonLdBlock): JsonLdBlock[] {
+    const own = isProductBlock(block) ? [block] : [];
+    if (!hasType(block, "ItemList")) return own;
+    const listed = (block.itemListElement ?? [])
+        .map(itemListProduct)
+        .filter((candidate): candidate is JsonLdBlock => candidate !== null);
+    return [...own, ...listed];
+}
+
 /** Extract example products from Product / ProductGroup / ItemList blocks */
 export function extractProductsFromJsonLd($: CheerioAPI): ExampleProduct[] {
-    const blocks = parseBlocks($);
-    const products: ExampleProduct[] = [];
-
-    for (const block of blocks) {
-        // ProductGroup is Shopify's standard type for variant products (hasVariant[] of Products)
-        if (hasType(block, "Product") || hasType(block, "ProductGroup")) {
-            const p = productFromBlock(block);
-            if (p) products.push(p);
-        }
-
-        if (hasType(block, "ItemList")) {
-            for (const el of block.itemListElement ?? []) {
-                // Require explicit @type: "Product" — prevents category/navigation ItemLists
-                // (e.g. IKEA's "Produkte" list with room/category names) from leaking through
-                const candidate = el.item
-                    ? hasType(el.item, "Product")
-                        ? el.item
-                        : null
-                    : hasType(el, "Product")
-                      ? el
-                      : null;
-                if (!candidate) continue;
-                const p = productFromBlock(candidate);
-                if (p) products.push(p);
-            }
-        }
-    }
-
-    return products;
+    return parseBlocks($)
+        .flatMap(productBlocksOf)
+        .map(productFromBlock)
+        .filter((product): product is ExampleProduct => product !== null);
 }
 
 /** Extract category names from microdata BreadcrumbList (Shopware 5, older Magento/WooCommerce) */

@@ -307,6 +307,33 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - full payload", () => {
         });
     });
 
+    test("the visibility ID differs per SalesChannel", async () => {
+        const first = shop();
+        const second = shop();
+        await first.hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-1", "nav-1");
+        await second.hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-2", "nav-1");
+
+        const [a] = productPayloads(first.syncOps);
+        const [b] = productPayloads(second.syncOps);
+        expect(a?.visibilities?.[0]?.id).not.toBe(b?.visibilities?.[0]?.id);
+    });
+
+    test("a sale needs both the flag and a percentage", async () => {
+        const { hydrator, syncOps } = shop();
+        await hydrator.hydrateEnvWithProductsDirect(
+            [
+                baseProduct({ id: "0123456789abcdef0123456789abcde1", hasSalesPrice: true }),
+                baseProduct({ id: "0123456789abcdef0123456789abcde2", salePercentage: 0.2 }),
+            ],
+            "sc-1",
+            "nav-1"
+        );
+
+        for (const product of productPayloads(syncOps)) {
+            expect(product.price[0]).not.toHaveProperty("listPrice");
+        }
+    });
+
     test("the visibility ID is stable per product and SalesChannel", async () => {
         const first = shop();
         const second = shop();

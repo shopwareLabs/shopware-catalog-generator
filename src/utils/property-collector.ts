@@ -50,6 +50,98 @@ function addCaseInsensitive(values: Map<string, string>, value: string): void {
     if (!values.has(key)) values.set(key, value);
 }
 
+/** A property group collected from products: first casing seen + values by lowercase key */
+interface CollectedGroup {
+    name: string;
+    values: Map<string, string>;
+}
+
+/**
+ * Collect all property values from products, keyed by lowercase group name.
+ * Group names and values are matched case-insensitively ("Multicolor Floral" =
+ * "Multicolor floral"), the first casing wins. Otherwise both spellings would map
+ * to the same Shopware option ID.
+ */
+function collectProductPropertyValues(blueprint: HydratedBlueprint): Map<string, CollectedGroup> {
+    const groups = new Map<string, CollectedGroup>();
+    const properties = blueprint.products
+        .flatMap((product) => product.metadata.properties)
+        .map((prop) => ({ group: prop.group.trim(), value: prop.value.trim() }))
+        .filter((prop) => prop.group && prop.value);
+
+    for (const prop of properties) {
+        const key = prop.group.toLowerCase();
+        const group = groups.get(key) ?? { name: prop.group, values: new Map<string, string>() };
+        groups.set(key, group);
+        addCaseInsensitive(group.values, prop.value);
+    }
+    return groups;
+}
+
+/** Build one property group, reusing the IDs and casing of an existing Shopware group */
+function buildPropertyGroup(
+    normalizedName: string,
+    collected: CollectedGroup,
+    existingGroup: ExistingProperty | undefined
+): BlueprintPropertyGroup {
+    const isColorType = isColorGroup(normalizedName, existingGroup);
+    const existingOptions = existingGroup?.options ?? [];
+    const existingOptionByName = new Map(existingOptions.map((o) => [o.name.toLowerCase(), o]));
+    // Keep the options Shopware already has, even if no product uses them now
+    for (const option of existingOptions) addCaseInsensitive(collected.values, option.name);
+
+    return {
+        ...groupIdentity(collected.name, existingGroup),
+        displayType: isColorType ? "color" : "text",
+        options: [...collected.values.values()].map((value) =>
+            buildPropertyOption(value, existingOptionByName.get(value.toLowerCase()), isColorType)
+        ),
+    };
+}
+
+/**
+ * Color type: inherited from an existing group OR if the group name is "Color".
+ * This ensures fresh stores get color hex codes too
+ */
+function isColorGroup(
+    normalizedName: string,
+    existingGroup: ExistingProperty | undefined
+): boolean {
+    return existingGroup?.displayType === "color" || normalizedName === "color";
+}
+
+/** ID and name of an existing group (its casing wins), or a new ID */
+function groupIdentity(
+    name: string,
+    existingGroup: ExistingProperty | undefined
+): Pick<BlueprintPropertyGroup, "id" | "name"> {
+    if (!existingGroup) return { id: generateUUID(), name };
+    return { id: existingGroup.id, name: existingGroup.name };
+}
+
+function buildPropertyOption(
+    value: string,
+    existingOption: ExistingPropertyOption | undefined,
+    isColorType: boolean
+): BlueprintPropertyOption {
+    return {
+        id: existingOption?.id ?? generateUUID(),
+        name: existingOption?.name ?? value, // Prefer existing name casing
+        colorHexCode: optionHexCode(value, existingOption, isColorType),
+    };
+}
+
+/** Hex codes are generated for colour groups only; colours with images (Multicolor, ...) get none */
+function optionHexCode(
+    value: string,
+    existingOption: ExistingPropertyOption | undefined,
+    isColorType: boolean
+): string | undefined {
+    if (!isColorType) return existingOption?.colorHexCode;
+    if (colorHasImage(value)) return undefined;
+    return existingOption?.colorHexCode ?? getColorHex(value);
+}
+
 /**
  * Property Collector class
  */
@@ -62,81 +154,12 @@ export class PropertyCollector {
         blueprint: HydratedBlueprint,
         existingProperties: ExistingProperty[] = []
     ): BlueprintPropertyGroup[] {
-        // Collect all properties from products. Group names and values are matched
-        // case-insensitively ("Multicolor Floral" = "Multicolor floral"), the first
-        // casing wins. Otherwise both spellings map to the same Shopware option ID.
-        const propertyMap = new Map<string, { name: string; values: Map<string, string> }>();
-
-        for (const product of blueprint.products) {
-            for (const prop of product.metadata.properties) {
-                const groupName = prop.group.trim();
-                const value = prop.value.trim();
-
-                if (!groupName || !value) continue;
-
-                const group = propertyMap.get(groupName.toLowerCase()) ?? {
-                    name: groupName,
-                    values: new Map<string, string>(),
-                };
-                propertyMap.set(groupName.toLowerCase(), group);
-                addCaseInsensitive(group.values, value);
-            }
-        }
-
-        // Build lookup maps for existing groups and options by normalized name
-        const existingGroupByName = new Map<string, ExistingProperty>();
-        for (const prop of existingProperties) {
-            existingGroupByName.set(prop.name.toLowerCase(), prop);
-        }
-
-        // Build property groups, reusing existing IDs where available
-        const groups: BlueprintPropertyGroup[] = [];
-
-        for (const [normalizedGroupName, { name: groupName, values }] of propertyMap) {
-            const existingGroup = existingGroupByName.get(normalizedGroupName);
-
-            // Color type: inherited from existing groups OR if the group name is "Color"
-            // This ensures fresh stores get color hex codes too
-            const isColorType =
-                existingGroup?.displayType === "color" || normalizedGroupName === "color";
-
-            // Build option ID lookup for this group
-            const existingOptionByName = new Map<string, ExistingPropertyOption>();
-            if (existingGroup) {
-                for (const opt of existingGroup.options) {
-                    existingOptionByName.set(opt.name.toLowerCase(), opt);
-                }
-                // Also add any options from existing that aren't in the new set
-                for (const opt of existingGroup.options) {
-                    addCaseInsensitive(values, opt.name);
-                }
-            }
-
-            // Build options, reusing existing IDs
-            const options: BlueprintPropertyOption[] = [...values.values()].map((value: string) => {
-                const existingOption = existingOptionByName.get(value.toLowerCase());
-                // Colors with images (Multicolor, Rainbow, etc.) don't get hex codes
-                const hasImage = isColorType && colorHasImage(value);
-                return {
-                    id: existingOption?.id ?? generateUUID(),
-                    name: existingOption?.name ?? value, // Prefer existing name casing
-                    // Only generate hex codes for color-type groups without images
-                    colorHexCode: hasImage
-                        ? undefined
-                        : (existingOption?.colorHexCode ??
-                          (isColorType ? getColorHex(value) : undefined)),
-                };
-            });
-
-            groups.push({
-                id: existingGroup?.id ?? generateUUID(),
-                name: existingGroup?.name ?? groupName, // Prefer existing name casing
-                displayType: isColorType ? "color" : "text",
-                options,
-            });
-        }
-
-        return groups;
+        const existingGroupByName = new Map(
+            existingProperties.map((prop) => [prop.name.toLowerCase(), prop])
+        );
+        return [...collectProductPropertyValues(blueprint)].map(([normalizedName, collected]) =>
+            buildPropertyGroup(normalizedName, collected, existingGroupByName.get(normalizedName))
+        );
     }
 
     /**

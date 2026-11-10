@@ -5,8 +5,9 @@
  * Can auto-fix common issues like duplicate names.
  */
 
-import type { HydratedBlueprint } from "../types/index.js";
+import type { BlueprintPropertyGroup, HydratedBlueprint } from "../types/index.js";
 
+import { colorHasImage } from "../fixtures/index.js";
 import { logger } from "./logger.js";
 
 // =============================================================================
@@ -335,66 +336,47 @@ function getTopLevelCategoryIds(categories: HydratedBlueprint["categories"]): Se
  * - Products with empty categoryIds
  */
 function validateCategoryAssignments(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
-    const issues: BlueprintValidationIssue[] = [];
-
     const allCategoryIds = collectAllCategoryIds(blueprint.categories);
     const topLevelIds = getTopLevelCategoryIds(blueprint.categories);
+    const assigned = blueprint.products.filter((p) => p.categoryIds && p.categoryIds.length > 0);
+    const idsWhere = (check: (categoryIds: string[]) => boolean): string[] =>
+        assigned.filter((p) => check(p.categoryIds)).map((p) => p.id);
 
-    const productsWithInvalidCategories: string[] = [];
-    const productsOnlyInTopLevel: string[] = [];
-    const productsWithNoCategories: string[] = [];
+    return [
+        issueForAffected(
+            blueprint.products.filter((p) => !assigned.includes(p)).map((p) => p.id),
+            (count) => ({
+                type: "error",
+                code: "PRODUCTS_NO_CATEGORIES",
+                message: `${count} products have no category assignments`,
+            })
+        ),
+        issueForAffected(
+            idsWhere((ids) => ids.some((id) => !allCategoryIds.has(id))),
+            (count) => ({
+                type: "error",
+                code: "INVALID_CATEGORY_REFERENCE",
+                message: `${count} products reference non-existent categories`,
+            })
+        ),
+        issueForAffected(
+            idsWhere((ids) => ids.every((id) => topLevelIds.has(id))),
+            (count) => ({
+                type: "warning",
+                code: "PRODUCTS_ONLY_TOP_LEVEL",
+                message: `${count} products only assigned to top-level categories (missing subcategory assignment)`,
+            })
+        ),
+    ].flat();
+}
 
-    for (const product of blueprint.products) {
-        // Check for empty categoryIds
-        if (!product.categoryIds || product.categoryIds.length === 0) {
-            productsWithNoCategories.push(product.id);
-            continue;
-        }
-
-        // Check for invalid category references
-        const invalidCats = product.categoryIds.filter((id) => !allCategoryIds.has(id));
-        if (invalidCats.length > 0) {
-            productsWithInvalidCategories.push(product.id);
-        }
-
-        // Check if product is only in top-level categories
-        const hasSubcategory = product.categoryIds.some((id) => !topLevelIds.has(id));
-        if (!hasSubcategory && product.categoryIds.length > 0) {
-            productsOnlyInTopLevel.push(product.id);
-        }
-    }
-
-    if (productsWithNoCategories.length > 0) {
-        issues.push({
-            type: "error",
-            code: "PRODUCTS_NO_CATEGORIES",
-            message: `${productsWithNoCategories.length} products have no category assignments`,
-            field: "products[].categoryIds",
-            affectedIds: productsWithNoCategories,
-        });
-    }
-
-    if (productsWithInvalidCategories.length > 0) {
-        issues.push({
-            type: "error",
-            code: "INVALID_CATEGORY_REFERENCE",
-            message: `${productsWithInvalidCategories.length} products reference non-existent categories`,
-            field: "products[].categoryIds",
-            affectedIds: productsWithInvalidCategories,
-        });
-    }
-
-    if (productsOnlyInTopLevel.length > 0) {
-        issues.push({
-            type: "warning",
-            code: "PRODUCTS_ONLY_TOP_LEVEL",
-            message: `${productsOnlyInTopLevel.length} products only assigned to top-level categories (missing subcategory assignment)`,
-            field: "products[].categoryIds",
-            affectedIds: productsOnlyInTopLevel,
-        });
-    }
-
-    return issues;
+/** One issue for all affected products of a category assignment check, or none */
+function issueForAffected(
+    affectedIds: string[],
+    describe: (count: number) => Pick<BlueprintValidationIssue, "type" | "code" | "message">
+): BlueprintValidationIssue[] {
+    if (affectedIds.length === 0) return [];
+    return [{ ...describe(affectedIds.length), field: "products[].categoryIds", affectedIds }];
 }
 
 // =============================================================================
@@ -514,84 +496,73 @@ function validateProductMetadata(blueprint: HydratedBlueprint): BlueprintValidat
  * - Product properties reference valid groups
  */
 function validatePropertyGroups(blueprint: HydratedBlueprint): BlueprintValidationIssue[] {
-    const issues: BlueprintValidationIssue[] = [];
+    const groups = blueprint.propertyGroups ?? [];
+    if (groups.length === 0) return [];
 
-    // Skip if no property groups
-    if (!blueprint.propertyGroups || blueprint.propertyGroups.length === 0) {
-        return issues;
-    }
-
-    // 1. Check property groups have required fields
-    for (const group of blueprint.propertyGroups) {
-        if (!group.name || group.name.trim() === "") {
-            issues.push({
-                type: "error",
-                code: "MISSING_PROPERTY_GROUP_NAME",
-                message: "Property group is missing name",
-                field: "propertyGroups[].name",
-                affectedIds: [group.id],
-            });
-        }
-
-        if (!group.options || group.options.length === 0) {
-            issues.push({
-                type: "error",
-                code: "EMPTY_PROPERTY_OPTIONS",
-                message: `Property group "${group.name}" has no options`,
-                field: "propertyGroups[].options",
-                affectedIds: [group.id],
-            });
-        }
-    }
-
-    // 2. Check Color properties have hex codes (excluding image-based colors)
-    const imageColorNames = [
-        "multicolor",
-        "multi-color",
-        "rainbow",
-        "assorted",
-        "mixed",
-        "patterned",
-        "printed",
-        "gradient",
+    return [
+        ...groups.flatMap(validatePropertyGroupFields),
+        ...groups
+            .filter((g) => g.name.toLowerCase().includes("color"))
+            .flatMap(validateColorHexCodes),
+        ...validatePropertyReferences(blueprint.products, groups),
     ];
-    const colorGroups = blueprint.propertyGroups.filter((g) =>
-        g.name.toLowerCase().includes("color")
-    );
-    for (const colorGroup of colorGroups) {
-        const missingHex = colorGroup.options.filter(
-            (o) => !o.colorHexCode && !imageColorNames.includes(o.name.toLowerCase())
-        );
-        if (missingHex.length > 0) {
-            issues.push({
-                type: "warning",
-                code: "MISSING_COLOR_HEX",
-                message: `Color options missing hex codes: ${missingHex.map((o) => o.name).join(", ")}`,
-                field: "propertyGroups[].options[].colorHexCode",
-            });
-        }
+}
+
+/** A property group needs a name and at least one option */
+function validatePropertyGroupFields(group: BlueprintPropertyGroup): BlueprintValidationIssue[] {
+    const issues: BlueprintValidationIssue[] = [];
+    if (!group.name || group.name.trim() === "") {
+        issues.push({
+            type: "error",
+            code: "MISSING_PROPERTY_GROUP_NAME",
+            message: "Property group is missing name",
+            field: "propertyGroups[].name",
+            affectedIds: [group.id],
+        });
     }
-
-    // 3. Check product properties reference valid groups
-    const validGroupNames = new Set(blueprint.propertyGroups.map((g) => g.name.toLowerCase()));
-
-    for (const product of blueprint.products) {
-        if (!product.metadata.properties) continue;
-
-        for (const prop of product.metadata.properties) {
-            if (!validGroupNames.has(prop.group.toLowerCase())) {
-                issues.push({
-                    type: "warning",
-                    code: "ORPHAN_PROPERTY_REFERENCE",
-                    message: `Product "${product.name}" references non-existent property group "${prop.group}"`,
-                    field: "products[].metadata.properties",
-                    affectedIds: [product.id],
-                });
-            }
-        }
+    if (!group.options || group.options.length === 0) {
+        issues.push({
+            type: "error",
+            code: "EMPTY_PROPERTY_OPTIONS",
+            message: `Property group "${group.name}" has no options`,
+            field: "propertyGroups[].options",
+            affectedIds: [group.id],
+        });
     }
-
     return issues;
+}
+
+/** Colour options need a hex code, unless they are shown as an image (Multicolor, ...) */
+function validateColorHexCodes(colorGroup: BlueprintPropertyGroup): BlueprintValidationIssue[] {
+    const missingHex = colorGroup.options.filter((o) => !o.colorHexCode && !colorHasImage(o.name));
+    if (missingHex.length === 0) return [];
+    return [
+        {
+            type: "warning",
+            code: "MISSING_COLOR_HEX",
+            message: `Color options missing hex codes: ${missingHex.map((o) => o.name).join(", ")}`,
+            field: "propertyGroups[].options[].colorHexCode",
+        },
+    ];
+}
+
+/** Every product property must belong to a known property group (case-insensitive) */
+function validatePropertyReferences(
+    products: HydratedBlueprint["products"],
+    groups: BlueprintPropertyGroup[]
+): BlueprintValidationIssue[] {
+    const validGroupNames = new Set(groups.map((g) => g.name.toLowerCase()));
+    return products.flatMap((product) =>
+        (product.metadata.properties ?? [])
+            .filter((prop) => !validGroupNames.has(prop.group.toLowerCase()))
+            .map((prop) => ({
+                type: "warning" as const,
+                code: "ORPHAN_PROPERTY_REFERENCE",
+                message: `Product "${product.name}" references non-existent property group "${prop.group}"`,
+                field: "products[].metadata.properties",
+                affectedIds: [product.id],
+            }))
+    );
 }
 
 // =============================================================================

@@ -12,7 +12,12 @@
 import sharp from "sharp";
 
 import type { DataCache } from "../../cache.js";
-import type { HydratedBlueprint, ImageProvider } from "../../types/index.js";
+import type {
+    BlueprintCategory,
+    BlueprintProduct,
+    HydratedBlueprint,
+    ImageProvider,
+} from "../../types/index.js";
 
 import {
     buildImagePrompt,
@@ -560,101 +565,86 @@ export async function hydrateThemeMedia(
     return result;
 }
 
+/**
+ * Images still to generate: missing or stale product views, then missing category banners.
+ *
+ * Products are read from the in-memory blueprint, not from cache.loadProductMetadata:
+ * saveHydratedBlueprint (which writes the metadata files) runs AFTER hydrateProductImages
+ * in blueprint-service.ts.
+ */
 function collectImageTasks(
     cache: DataCache,
     salesChannelName: string,
     blueprint: HydratedBlueprint,
     result: ProductImageHydrationResult
 ): ImageTask[] {
-    const tasks: ImageTask[] = [];
+    const scope: TaskScope = { cache, salesChannelName, result };
+    return [
+        ...blueprint.products.flatMap((product) => productImageTasks(product, scope)),
+        ...flattenCategories(blueprint.categories).flatMap((category) =>
+            categoryBannerTasks(category, scope)
+        ),
+    ];
+}
 
-    // Product images from the in-memory blueprint metadata.
-    // We intentionally do NOT load from cache.loadProductMetadata here because
-    // saveHydratedBlueprint (which writes the metadata files) is called AFTER
-    // hydrateProductImages in blueprint-service.ts. Reading from the blueprint
-    // directly avoids the ordering dependency.
-    for (const product of blueprint.products) {
-        const { metadata } = product;
-        if (!metadata.imageDescriptions || metadata.imageDescriptions.length === 0) continue;
+/** Cache lookups and counters shared while collecting image tasks */
+interface TaskScope {
+    cache: DataCache;
+    salesChannelName: string;
+    result: ProductImageHydrationResult;
+}
 
-        for (const desc of metadata.imageDescriptions) {
-            const hasImage = cache.images.hasImageWithView(
-                salesChannelName,
-                product.id,
-                desc.view,
-                "product_media"
-            );
+function productImageTasks(product: BlueprintProduct, scope: TaskScope): ImageTask[] {
+    return (product.metadata.imageDescriptions ?? [])
+        .filter((desc) => needsProductImage(product, desc.view, scope))
+        .map((desc): ImageTask => ({
+            type: "product",
+            id: product.id,
+            name: product.name,
+            view: desc.view,
+            prompt: buildProductImagePrompt(product.metadata.baseImagePrompt, desc),
+        }));
+}
 
-            if (!hasImage) {
-                const prompt = buildProductImagePrompt(metadata.baseImagePrompt, desc);
-                tasks.push({
-                    type: "product",
-                    id: product.id,
-                    name: product.name,
-                    view: desc.view,
-                    prompt,
-                });
-                continue;
-            }
-
-            // Staleness check: prompt mismatch means product name changed
-            const basePrompt = metadata.baseImagePrompt || product.name;
-            const isStale = cache.images.isImageStale(
-                salesChannelName,
-                product.id,
-                desc.view,
-                basePrompt,
-                "product_media"
-            );
-
-            if (isStale) {
-                cache.images.deleteImageWithView(
-                    salesChannelName,
-                    product.id,
-                    desc.view,
-                    "product_media"
-                );
-                result.stale++;
-                const prompt = buildProductImagePrompt(metadata.baseImagePrompt, desc);
-                tasks.push({
-                    type: "product",
-                    id: product.id,
-                    name: product.name,
-                    view: desc.view,
-                    prompt,
-                });
-            } else {
-                result.skipped++;
-            }
-        }
+/**
+ * True when the view has no image or a stale one (deleted here, so it is made again).
+ * Stale means the cached prompt no longer matches: the product name changed.
+ */
+function needsProductImage(product: BlueprintProduct, view: string, scope: TaskScope): boolean {
+    const { cache, salesChannelName, result } = scope;
+    if (!cache.images.hasImageWithView(salesChannelName, product.id, view, "product_media")) {
+        return true;
     }
 
-    // Category banner images
-    const categories = flattenCategories(blueprint.categories);
-    for (const category of categories) {
-        if (!category.hasImage || !category.imageDescription) continue;
-
-        const hasImage = cache.images.hasImageWithView(
-            salesChannelName,
-            category.id,
-            "banner",
-            "category_media"
-        );
-
-        if (hasImage) {
-            result.skipped++;
-        } else {
-            tasks.push({
-                type: "category",
-                id: category.id,
-                name: category.name,
-                view: "banner",
-                prompt: withFictionalBranding(category.imageDescription),
-            });
-        }
+    const basePrompt = product.metadata.baseImagePrompt || product.name;
+    if (
+        !cache.images.isImageStale(salesChannelName, product.id, view, basePrompt, "product_media")
+    ) {
+        result.skipped++;
+        return false;
     }
 
-    return tasks;
+    cache.images.deleteImageWithView(salesChannelName, product.id, view, "product_media");
+    result.stale++;
+    return true;
+}
+
+function categoryBannerTasks(category: BlueprintCategory, scope: TaskScope): ImageTask[] {
+    const { cache, salesChannelName, result } = scope;
+    if (!category.hasImage || !category.imageDescription) return [];
+    if (cache.images.hasImageWithView(salesChannelName, category.id, "banner", "category_media")) {
+        result.skipped++;
+        return [];
+    }
+    return [
+        {
+            type: "category",
+            id: category.id,
+            name: category.name,
+            view: "banner",
+            prompt: withFictionalBranding(category.imageDescription),
+        },
+    ];
 }
 
 /** Spec copy whose prompt asks for fictional branding only (no real trademarks). */

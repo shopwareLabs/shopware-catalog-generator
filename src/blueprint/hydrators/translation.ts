@@ -257,24 +257,29 @@ export function validateTranslatedItem(
     if (!translated) return ["missing"];
 
     return Object.entries(source.fields).flatMap(([field, english]) => {
-        const value = translated[field];
         if (!english) return [];
-        if (!value?.trim()) return [`${field}: empty`];
-        if (tagSet(value) !== tagSet(english)) return [`${field}: HTML tags differ`];
-        if (placeholderSet(value) !== placeholderSet(english))
-            return [`${field}: placeholders differ`];
-        if (english.length >= LONG_TEXT_MIN_LENGTH && value.trim() === english.trim()) {
-            return [`${field}: identical to English`];
-        }
-        const ratio = value.length / english.length;
-        if (
-            english.length >= LONG_TEXT_MIN_LENGTH &&
-            (ratio < MIN_LENGTH_RATIO || ratio > MAX_LENGTH_RATIO)
-        ) {
-            return [`${field}: length ratio ${ratio.toFixed(2)}`];
-        }
-        return [];
+        const problem = translatedFieldProblem(english, translated[field]);
+        return problem ? [`${field}: ${problem}`] : [];
     });
+}
+
+/** First problem of one translated field, or null when it looks fine */
+function translatedFieldProblem(english: string, value: string | undefined): string | null {
+    if (!value?.trim()) return "empty";
+    if (tagSet(value) !== tagSet(english)) return "HTML tags differ";
+    if (placeholderSet(value) !== placeholderSet(english)) return "placeholders differ";
+    if (english.length < LONG_TEXT_MIN_LENGTH) return null;
+    return longTextProblem(english, value);
+}
+
+/** Long texts must not stay English and should keep a plausible length */
+function longTextProblem(english: string, value: string): string | null {
+    if (value.trim() === english.trim()) return "identical to English";
+    const ratio = value.length / english.length;
+    if (ratio < MIN_LENGTH_RATIO || ratio > MAX_LENGTH_RATIO) {
+        return `length ratio ${ratio.toFixed(2)}`;
+    }
+    return null;
 }
 
 /** Hash of the English source of an entry (detects stale translations) */

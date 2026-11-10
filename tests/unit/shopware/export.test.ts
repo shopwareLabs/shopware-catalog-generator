@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ExportValidation, SalesChannelFull } from "../../../src/types/index.js";
 
 import { ShopwareExporter } from "../../../src/shopware/export.js";
+import { createEmptyValidation } from "../../../src/types/index.js";
 
 /**
  * Create a mock AdminApiClient with invoke() support.
@@ -680,5 +681,194 @@ describe("ShopwareExporter", () => {
             expect(result.validation.productsWithDefaultPrice).toBe(1);
             expect(result.validation.propertyGroupsWithoutOptions).toBe(1);
         });
+    });
+});
+
+describe("ShopwareExporter — category tree details", () => {
+    test("searches categories below the root, sorted by level", async () => {
+        const exporter = new TestableExporter();
+        exporter.setMockResponse({ data: [] });
+
+        await exporter.exportCategories("root-1", createEmptyValidation());
+
+        expect(exporter.mockAdminClient.invoke).toHaveBeenCalledWith(
+            "searchCategory post /search/category",
+            {
+                body: {
+                    limit: 500,
+                    filter: [{ type: "contains", field: "path", value: "root-1" }],
+                    sort: [{ field: "level", order: "ASC" }],
+                },
+            }
+        );
+    });
+
+    test("builds full nodes and counts images and missing descriptions", async () => {
+        const exporter = new TestableExporter();
+        const validation = createEmptyValidation();
+        exporter.setMockResponse({
+            data: [
+                { id: "a", name: "  Alpha  ", description: "   ", parentId: "root", mediaId: "m" },
+                { id: "b", name: "Beta", description: "<p>Text</p>", parentId: "a" },
+                { id: "c", parentId: "a", mediaId: null },
+            ],
+        });
+
+        const tree = await exporter.exportCategories("root", validation);
+
+        expect(tree).toEqual([
+            {
+                id: "a",
+                name: "Alpha",
+                description: "Browse our Alpha collection.",
+                children: [
+                    {
+                        id: "b",
+                        name: "Beta",
+                        description: "Text",
+                        children: [],
+                        productCount: 0,
+                        hasImage: false,
+                    },
+                    {
+                        id: "c",
+                        name: "",
+                        description: "Browse our collection.",
+                        children: [],
+                        productCount: 0,
+                        hasImage: false,
+                    },
+                ],
+                productCount: 0,
+                hasImage: true,
+            },
+        ]);
+        expect(validation.categoriesWithImages).toBe(1);
+        expect(validation.categoriesWithoutDescription).toBe(2);
+    });
+
+    test("drops categories whose parent is missing or unknown", async () => {
+        const exporter = new TestableExporter();
+        exporter.setMockResponse({
+            data: [
+                { id: "a", name: "A", description: "d", parentId: "root" },
+                { id: "orphan", name: "Orphan", description: "d", parentId: "unknown" },
+                { id: "top", name: "Top", description: "d", parentId: null },
+                { id: "none", name: "None", description: "d" },
+            ],
+        });
+
+        const tree = await exporter.exportCategories("root", createEmptyValidation());
+
+        expect(tree.map((n) => n.id)).toEqual(["a"]);
+        expect(tree[0]?.children).toEqual([]);
+    });
+
+    test("keeps the response order for siblings and nests deeper levels", async () => {
+        const exporter = new TestableExporter();
+        exporter.setMockResponse({
+            data: [
+                { id: "a", name: "A", description: "d", parentId: "root" },
+                { id: "b", name: "B", description: "d", parentId: "root" },
+                { id: "a1", name: "A1", description: "d", parentId: "a" },
+                { id: "a1x", name: "A1x", description: "d", parentId: "a1" },
+            ],
+        });
+
+        const tree = await exporter.exportCategories("root", createEmptyValidation());
+
+        expect(tree.map((n) => n.id)).toEqual(["a", "b"]);
+        expect(tree[0]?.children[0]?.children.map((n) => n.id)).toEqual(["a1x"]);
+    });
+});
+
+describe("ShopwareExporter — product export details", () => {
+    test("searches products of the category with their options", async () => {
+        const exporter = new TestableExporter();
+        exporter.setMockResponse({ data: [] });
+
+        await exporter.exportProductsInCategory("cat-9", "Cat", createEmptyValidation());
+
+        expect(exporter.mockAdminClient.invoke).toHaveBeenCalledWith(
+            "searchProduct post /search/product",
+            {
+                body: {
+                    limit: 500,
+                    filter: [{ type: "equals", field: "categories.id", value: "cat-9" }],
+                    associations: { options: {} },
+                },
+            }
+        );
+    });
+
+    test("maps a product with missing fields to placeholders and defaults", async () => {
+        const exporter = new TestableExporter();
+        const validation = createEmptyValidation();
+        exporter.setMockResponse({
+            data: [
+                { id: "p1", options: [] },
+                { id: "p2", price: [] },
+            ],
+        });
+
+        const products = await exporter.exportProductsInCategory("c", "Lamps", validation);
+
+        const expected = {
+            name: "",
+            description: "High-quality from our Lamps collection.",
+            stock: 0,
+            price: 29.99,
+            options: undefined,
+        };
+        expect(products).toEqual([
+            { id: "p1", ...expected },
+            { id: "p2", ...expected },
+        ]);
+        expect(validation.productsWithoutDescription).toBe(2);
+        expect(validation.productsWithDefaultPrice).toBe(2);
+    });
+
+    test("treats a whitespace description as missing and keeps a positive price", async () => {
+        const exporter = new TestableExporter();
+        const validation = createEmptyValidation();
+        exporter.setMockResponse({
+            data: [
+                {
+                    id: "p",
+                    name: " Lamp  One ",
+                    description: "  ",
+                    stock: 3,
+                    price: [{ gross: 0.014 }],
+                    options: [{ id: "o", name: " Red  Dark ", colorHexCode: "#f00" }],
+                },
+            ],
+        });
+
+        const [product] = await exporter.exportProductsInCategory("c", "Lamps", validation);
+
+        expect(product).toEqual({
+            id: "p",
+            name: "Lamp One",
+            description: "High-quality Lamp One from our Lamps collection.",
+            stock: 3,
+            price: 0.01,
+            options: [{ id: "o", name: "Red Dark", colorHexCode: "#f00" }],
+        });
+        expect(validation.productsWithoutDescription).toBe(1);
+        expect(validation.productsWithDefaultPrice).toBe(0);
+    });
+
+    test("treats a negative price as missing", async () => {
+        const exporter = new TestableExporter();
+        const validation = createEmptyValidation();
+        exporter.setMockResponse({
+            data: [{ id: "p", name: "P", description: "d", price: [{ gross: -5 }] }],
+        });
+
+        const [product] = await exporter.exportProductsInCategory("c", "C", validation);
+
+        expect(product?.price).toBe(29.99);
+        expect(validation.productsWithDefaultPrice).toBe(1);
+        expect(validation.productsWithoutDescription).toBe(0);
     });
 });

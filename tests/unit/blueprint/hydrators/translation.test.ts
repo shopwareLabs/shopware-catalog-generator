@@ -162,6 +162,40 @@ describe("validateTranslatedItem", () => {
         ).toContain("length ratio");
     });
 
+    test("skips empty source fields and lets short texts stay unchanged", () => {
+        const short = { key: "s", fields: { name: "Sofa", note: "" } };
+        expect(validateTranslatedItem(short, { name: "Sofa" })).toEqual([]);
+        expect(validateTranslatedItem(short, { name: "Ein sehr, sehr langer Sofaname" })).toEqual(
+            []
+        );
+    });
+
+    test("checks the length ratio from 40 characters, with limits 0.3 and 3", () => {
+        const english = "x".repeat(40);
+        const fields = { key: "r", fields: { text: english } };
+        const check = (length: number): string[] =>
+            validateTranslatedItem(fields, { text: "y".repeat(length) });
+
+        expect(check(12)).toEqual([]);
+        expect(check(11)).toEqual(["text: length ratio 0.28"]);
+        expect(check(120)).toEqual([]);
+        expect(check(121)).toEqual(["text: length ratio 3.02"]);
+        expect(
+            validateTranslatedItem({ key: "r", fields: { text: "x".repeat(39) } }, { text: "y" })
+        ).toEqual([]);
+        expect(validateTranslatedItem(fields, { text: ` ${english} ` })).toEqual([
+            "text: identical to English",
+        ]);
+    });
+
+    test("reports one problem per field", () => {
+        const two = { key: "t", fields: { a: "<b>A</b>", b: "{x}" } };
+        expect(validateTranslatedItem(two, { a: "A", b: "" })).toEqual([
+            "a: HTML tags differ",
+            "b: empty",
+        ]);
+    });
+
     test("rejects lost placeholders", () => {
         const fixture = { key: "f", fields: { text: "{name} makes products." } };
         expect(validateTranslatedItem(fixture, { text: "Stellt Produkte her." })).toEqual([

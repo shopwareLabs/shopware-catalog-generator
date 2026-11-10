@@ -1177,3 +1177,512 @@ describe("syncProducts — upload result", () => {
         expect(result).toEqual({ synced: 1, failed: 2 });
     });
 });
+
+describe("syncPropertyGroups — sync payload", () => {
+    type ExistingGroup = {
+        id: string;
+        name: string;
+        displayType: string;
+        filterable?: boolean;
+        options: Array<{ id: string; name: string; colorHexCode?: string }>;
+    };
+
+    const blueprintWith = (propertyGroups: BlueprintPropertyGroup[]): HydratedBlueprint => ({
+        version: "1.0",
+        createdAt: "2024-01-01",
+        hydratedAt: "2024-01-01",
+        salesChannel: { name: "test", description: "Test" },
+        categories: [],
+        products: [],
+        propertyGroups,
+    });
+
+    async function runSync(
+        existing: ExistingGroup[],
+        blueprint: HydratedBlueprint
+    ): Promise<PropertyGroup[] | undefined> {
+        logger.setMcpMode(true);
+        const dataHydrator = createMockDataHydrator();
+        (dataHydrator.getExistingPropertyGroups as ReturnType<typeof mock>).mockImplementation(
+            async () => existing
+        );
+        await syncPropertyGroups(dataHydrator, blueprint);
+        logger.setMcpMode(false);
+        const calls = (dataHydrator.hydrateEnvWithPropertyGroups as ReturnType<typeof mock>).mock
+            .calls;
+        expect(calls.length).toBeLessThanOrEqual(1);
+        return calls[0]?.[0];
+    }
+
+    test("creates a new non-colour group with blueprint IDs and without hex codes", async () => {
+        const synced = await runSync(
+            [],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S", colorHexCode: "#000000" }],
+                },
+            ])
+        );
+
+        expect(synced).toEqual([
+            {
+                id: "pg-size",
+                name: "Size",
+                description: "Properties for Size",
+                displayType: "text",
+                filterable: undefined,
+                options: [{ id: "opt-s", name: "S", colorHexCode: undefined }],
+            },
+        ]);
+    });
+
+    test("keeps hex codes for a new colour group", async () => {
+        const synced = await runSync(
+            [],
+            blueprintWith([
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ])
+        );
+
+        expect(synced?.[0]?.options).toEqual([
+            { id: "opt-red", name: "Red", colorHexCode: "#FF0000" },
+        ]);
+    });
+
+    test("matches existing groups and options case-insensitively", async () => {
+        const blueprint = blueprintWith([
+            {
+                id: "pg-size",
+                name: "size",
+                displayType: "text",
+                options: [
+                    { id: "opt-s", name: "s" },
+                    { id: "opt-m", name: "M" },
+                ],
+            },
+        ]);
+
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "sw-s", name: "S" }],
+                },
+            ],
+            blueprint
+        );
+
+        expect(blueprint.propertyGroups[0]?.id).toBe("sw-size");
+        expect(blueprint.propertyGroups[0]?.options.map((o) => o.id)).toEqual(["sw-s", "opt-m"]);
+        expect(synced).toEqual([
+            {
+                id: "sw-size",
+                name: "Size",
+                description: "Properties for Size",
+                displayType: "text",
+                filterable: undefined,
+                options: [{ id: "opt-m", name: "M", colorHexCode: undefined }],
+            },
+        ]);
+    });
+
+    test("drops hex codes of missing options for an existing non-colour group", async () => {
+        const synced = await runSync(
+            [{ id: "sw-size", name: "Size", displayType: "select", options: [] }],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S", colorHexCode: "#000000" }],
+                },
+            ])
+        );
+
+        expect(synced?.[0]).toMatchObject({
+            displayType: "select",
+            options: [{ id: "opt-s", name: "S", colorHexCode: undefined }],
+        });
+    });
+
+    test("updates hex codes of existing colour options that differ or are missing", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [
+                        { id: "sw-red", name: "Red" },
+                        { id: "sw-blue", name: "Blue", colorHexCode: "#0000FF" },
+                        { id: "sw-green", name: "Green", colorHexCode: "#000000" },
+                        { id: "sw-black", name: "Black", colorHexCode: "#111111" },
+                    ],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [
+                        { id: "opt-red", name: "Red", colorHexCode: "#FF0000" },
+                        { id: "opt-blue", name: "Blue", colorHexCode: "#0000FF" },
+                        { id: "opt-green", name: "Green", colorHexCode: "#00FF00" },
+                        { id: "opt-black", name: "Black" },
+                        { id: "opt-pink", name: "Pink", colorHexCode: "#FFC0CB" },
+                    ],
+                },
+            ])
+        );
+
+        expect(synced).toEqual([
+            {
+                id: "sw-color",
+                name: "Color",
+                description: "Properties for Color",
+                displayType: "color",
+                filterable: undefined,
+                options: [
+                    { id: "opt-pink", name: "Pink", colorHexCode: "#FFC0CB" },
+                    { id: "sw-red", name: "Red", colorHexCode: "#FF0000" },
+                    { id: "sw-green", name: "Green", colorHexCode: "#00FF00" },
+                ],
+            },
+        ]);
+    });
+
+    test("skips a colour group whose hex codes already match", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "sw-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ])
+        );
+
+        expect(synced).toBeUndefined();
+    });
+
+    test("switches an existing group to colour and resends every option with hex codes", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-color",
+                    name: "Color",
+                    displayType: "text",
+                    options: [{ id: "sw-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [
+                        { id: "opt-red", name: "Red", colorHexCode: "#FF0000" },
+                        { id: "opt-blue", name: "Blue", colorHexCode: "#0000FF" },
+                    ],
+                },
+            ])
+        );
+
+        expect(synced?.[0]).toMatchObject({
+            id: "sw-color",
+            displayType: "color",
+            options: [
+                { id: "sw-red", name: "Red", colorHexCode: "#FF0000" },
+                { id: "opt-blue", name: "Blue", colorHexCode: "#0000FF" },
+            ],
+        });
+    });
+
+    test("does not switch a colour group back to another display type", async () => {
+        const synced = await runSync(
+            [{ id: "sw-size", name: "Size", displayType: "color", options: [] }],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S" }],
+                },
+            ])
+        );
+
+        expect(synced?.[0]?.displayType).toBe("color");
+    });
+
+    test("sends only changed groups, in blueprint order, in one call", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "sw-s", name: "S" }],
+                },
+            ],
+            blueprintWith([
+                { id: "pg-material", name: "Material", displayType: "text", options: [] },
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S" }],
+                },
+                { id: "pg-fit", name: "Fit", displayType: "text", options: [] },
+            ])
+        );
+
+        expect(synced?.map((g) => g.id)).toEqual(["pg-material", "pg-fit"]);
+    });
+
+    test("syncs a colour group whose only change is a hex code", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "sw-red", name: "Red", colorHexCode: "#EE0000" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ])
+        );
+
+        expect(synced?.[0]?.options).toEqual([
+            { id: "sw-red", name: "Red", colorHexCode: "#FF0000" },
+        ]);
+    });
+
+    test("skips a non-colour group even when its hex codes differ", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "sw-s", name: "S", colorHexCode: "#EE0000" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S", colorHexCode: "#FF0000" }],
+                },
+            ])
+        );
+
+        expect(synced).toBeUndefined();
+    });
+
+    test("leaves the filter flag alone when the blueprint does not set it", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    filterable: true,
+                    options: [{ id: "sw-s", name: "S" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "opt-s", name: "S" }],
+                },
+            ])
+        );
+
+        expect(synced).toBeUndefined();
+    });
+
+    test("syncs a group whose only change is the filter flag", async () => {
+        const synced = await runSync(
+            [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    filterable: true,
+                    options: [{ id: "sw-s", name: "S" }],
+                },
+            ],
+            blueprintWith([
+                {
+                    id: "pg-size",
+                    name: "Size",
+                    displayType: "text",
+                    filterable: false,
+                    options: [{ id: "opt-s", name: "S" }],
+                },
+            ])
+        );
+
+        expect(synced?.[0]).toMatchObject({ id: "sw-size", filterable: false, options: [] });
+    });
+});
+
+describe("syncPropertyGroups — colour images", () => {
+    interface ColorImageMocks {
+        getOrCreateMediaFolder: ReturnType<typeof mock>;
+        createMedia: ReturnType<typeof mock>;
+        uploadMediaFile: ReturnType<typeof mock>;
+        updatePropertyOptionMedia: ReturnType<typeof mock>;
+    }
+
+    function colorImageHydrator(overrides: Partial<ColorImageMocks> = {}): {
+        dataHydrator: DataHydrator;
+        mocks: ColorImageMocks;
+    } {
+        let mediaCounter = 0;
+        const mocks: ColorImageMocks = {
+            getOrCreateMediaFolder: mock(async () => "folder-1"),
+            createMedia: mock(async () => `media-${++mediaCounter}`),
+            uploadMediaFile: mock(async () => {}),
+            updatePropertyOptionMedia: mock(async () => {}),
+            ...overrides,
+        };
+        const dataHydrator = Object.assign(createMockDataHydrator(), mocks);
+        return { dataHydrator, mocks };
+    }
+
+    function colorBlueprint(groupName: string, optionNames: string[]): HydratedBlueprint {
+        return {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [],
+            propertyGroups: [
+                {
+                    id: "pg-color",
+                    name: groupName,
+                    displayType: "color",
+                    options: optionNames.map((name) => ({
+                        id: `opt-${name.toLowerCase()}`,
+                        name,
+                    })),
+                },
+            ],
+        };
+    }
+
+    async function sync(dataHydrator: DataHydrator, blueprint: HydratedBlueprint): Promise<void> {
+        logger.setMcpMode(true);
+        await syncPropertyGroups(dataHydrator, blueprint);
+        logger.setMcpMode(false);
+    }
+
+    test("does nothing without a colour group", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator();
+        await sync(dataHydrator, colorBlueprint("Size", ["Rainbow"]));
+        expect(mocks.getOrCreateMediaFolder).not.toHaveBeenCalled();
+    });
+
+    test("does nothing when no colour option needs an image", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator();
+        await sync(dataHydrator, colorBlueprint("Color", ["Red", "Blue"]));
+        expect(mocks.getOrCreateMediaFolder).not.toHaveBeenCalled();
+    });
+
+    test("stops when the media folder cannot be created", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator({
+            getOrCreateMediaFolder: mock(async () => null),
+        });
+        await sync(dataHydrator, colorBlueprint("Color", ["Rainbow"]));
+        expect(mocks.getOrCreateMediaFolder).toHaveBeenCalledWith("Property Images");
+        expect(mocks.createMedia).not.toHaveBeenCalled();
+    });
+
+    test("uploads a PNG per image colour and links it to the option", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator();
+        await sync(dataHydrator, colorBlueprint("COLOR", ["Red", "Rainbow", "Multi-Color"]));
+
+        expect(mocks.createMedia.mock.calls).toEqual([
+            ["folder-1", "color-rainbow"],
+            ["folder-1", "color-multi-color"],
+        ]);
+        expect(mocks.uploadMediaFile).toHaveBeenCalledTimes(2);
+        const [mediaId, buffer, extension] = mocks.uploadMediaFile.mock.calls[0] ?? [];
+        expect(mediaId).toBe("media-1");
+        expect(Buffer.isBuffer(buffer)).toBe(true);
+        expect(String(buffer).length).toBeGreaterThan(0);
+        expect(extension).toBe("png");
+        expect(mocks.updatePropertyOptionMedia.mock.calls).toEqual([
+            ["opt-rainbow", "media-1"],
+            ["opt-multi-color", "media-2"],
+        ]);
+    });
+
+    test("skips an option when the media entity cannot be created", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator({
+            createMedia: mock(async (_folder: string, name: string) =>
+                name === "color-rainbow" ? null : "media-x"
+            ),
+        });
+        await sync(dataHydrator, colorBlueprint("Color", ["Rainbow", "Gradient"]));
+
+        expect(mocks.uploadMediaFile).toHaveBeenCalledTimes(1);
+        expect(mocks.updatePropertyOptionMedia.mock.calls).toEqual([["opt-gradient", "media-x"]]);
+    });
+
+    test("continues with the next option when an upload fails", async () => {
+        let call = 0;
+        const { dataHydrator, mocks } = colorImageHydrator({
+            uploadMediaFile: mock(async () => {
+                call++;
+                if (call === 1) throw new Error("upload failed");
+            }),
+        });
+        await sync(dataHydrator, colorBlueprint("Color", ["Rainbow", "Gradient"]));
+
+        expect(mocks.uploadMediaFile).toHaveBeenCalledTimes(2);
+        expect(mocks.updatePropertyOptionMedia.mock.calls).toEqual([["opt-gradient", "media-2"]]);
+    });
+
+    test("continues when an upload throws a non-Error value", async () => {
+        const { dataHydrator, mocks } = colorImageHydrator({
+            updatePropertyOptionMedia: mock(async () => {
+                throw "boom";
+            }),
+        });
+        await sync(dataHydrator, colorBlueprint("Color", ["Rainbow", "Gradient"]));
+        expect(mocks.updatePropertyOptionMedia).toHaveBeenCalledTimes(2);
+    });
+});

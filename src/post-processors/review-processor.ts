@@ -29,6 +29,7 @@ import {
     planReviewLanguages,
 } from "../shopware/languages.js";
 import { apiPost, deterministicUUID, logger } from "../utils/index.js";
+import { errorMessage } from "./processor-utils.js";
 
 interface ReviewPayload {
     id: string;
@@ -97,8 +98,52 @@ export function hasForeignReviews(existingIds: string[], payload: Array<{ id: st
     return existingIds.some((id) => !ours.has(id));
 }
 
-function errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+/** Result of handling one product */
+type ReviewOutcome =
+    | { kind: "skipped"; legacy: boolean }
+    | { kind: "written"; reviews: number; error?: string }
+    | { kind: "failed"; error: string };
+
+interface ReviewTally {
+    processed: number;
+    skipped: number;
+    totalReviews: number;
+    legacyProducts: number;
+    errors: string[];
+}
+
+/** Count one product outcome into the run totals */
+export function addReviewOutcome(tally: ReviewTally, outcome: ReviewOutcome): void {
+    if (outcome.kind === "failed") {
+        tally.errors.push(outcome.error);
+        return;
+    }
+    if (outcome.kind === "skipped") {
+        tally.skipped++;
+        if (outcome.legacy) tally.legacyProducts++;
+        return;
+    }
+    tally.processed++;
+    tally.totalReviews += outcome.reviews;
+    if (outcome.error) tally.errors.push(outcome.error);
+}
+
+function logReviewLanguages(languages: LanguageContent[]): void {
+    if (languages.length <= 1) return;
+    const locales = languages.map((l) => l.language.locale).join(", ");
+    logger.info(`    Reviews spread across ${locales}`, { cli: true });
+}
+
+function logReviewSummary(salesChannelName: string, tally: ReviewTally): void {
+    logger.info(`    Wrote ${tally.totalReviews} reviews for ${tally.processed} products`, {
+        cli: true,
+    });
+    if (tally.legacyProducts === 0) return;
+    logger.warn(
+        `    ⚠ ${tally.legacyProducts} products keep reviews from an older run (English only). ` +
+            `Replace them: bun run cleanup -- --salesChannel="${salesChannelName}" --processors=reviews`,
+        { cli: true }
+    );
 }
 
 /**
@@ -110,82 +155,79 @@ class ReviewProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = []; // No dependencies
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { blueprint, cache, options } = context;
+        const languages = context.options.dryRun ? [] : await resolveReviewLanguages(context);
+        logReviewLanguages(languages);
 
-        let processed = 0;
-        let skipped = 0;
-        const errors: string[] = [];
-        let totalReviews = 0;
-        let legacyProducts = 0;
-
-        const languages = options.dryRun ? [] : await resolveReviewLanguages(context);
-        if (languages.length > 1) {
-            const locales = languages.map((l) => l.language.locale).join(", ");
-            logger.info(`    Reviews spread across ${locales}`, { cli: true });
+        const tally: ReviewTally = {
+            processed: 0,
+            skipped: 0,
+            totalReviews: 0,
+            legacyProducts: 0,
+            errors: [],
+        };
+        for (const product of context.blueprint.products) {
+            addReviewOutcome(tally, await this.processProduct(context, product, languages));
         }
 
-        for (const product of blueprint.products) {
-            try {
-                const metadata = cache.loadProductMetadata(context.salesChannelName, product.id);
-                const reviewCount = metadata?.reviewCount || 0;
-
-                if (reviewCount === 0) {
-                    skipped++;
-                    continue;
-                }
-
-                if (options.dryRun) {
-                    logger.info(
-                        `    [DRY RUN] Would generate ${reviewCount} reviews for ${product.name}`,
-                        { cli: true }
-                    );
-                    totalReviews += reviewCount;
-                    processed++;
-                    continue;
-                }
-
-                const payload = buildReviewPayload(
-                    product,
-                    reviewCount,
-                    context.salesChannelId,
-                    languages
-                );
-                const existingIds = await this.existingReviewIds(context, product.id);
-                if (hasForeignReviews(existingIds, payload)) {
-                    legacyProducts++;
-                    skipped++;
-                    continue;
-                }
-                totalReviews += payload.length;
-
-                const error = await this.createReviews(context, payload);
-                if (error) errors.push(`Failed to create reviews for ${product.name}: ${error}`);
-
-                processed++;
-            } catch (error) {
-                errors.push(
-                    `Failed to process reviews for ${product.name}: ${errorMessage(error)}`
-                );
-            }
-        }
-
-        logger.info(`    Wrote ${totalReviews} reviews for ${processed} products`, {
-            cli: true,
-        });
-        if (legacyProducts > 0) {
-            logger.warn(
-                `    ⚠ ${legacyProducts} products keep reviews from an older run (English only). ` +
-                    `Replace them: bun run cleanup -- --salesChannel="${context.salesChannelName}" --processors=reviews`,
-                { cli: true }
-            );
-        }
+        logReviewSummary(context.salesChannelName, tally);
 
         return {
             name: this.name,
-            processed,
-            skipped,
-            errors,
+            processed: tally.processed,
+            skipped: tally.skipped,
+            errors: tally.errors,
             durationMs: 0,
+        };
+    }
+
+    /** Reviews of one product: skip, dry-run, or write them */
+    private async processProduct(
+        context: PostProcessorContext,
+        product: BlueprintProduct,
+        languages: LanguageContent[]
+    ): Promise<ReviewOutcome> {
+        try {
+            const metadata = context.cache.loadProductMetadata(
+                context.salesChannelName,
+                product.id
+            );
+            const reviewCount = metadata?.reviewCount || 0;
+            if (reviewCount === 0) return { kind: "skipped", legacy: false };
+
+            if (context.options.dryRun) {
+                logger.info(
+                    `    [DRY RUN] Would generate ${reviewCount} reviews for ${product.name}`,
+                    { cli: true }
+                );
+                return { kind: "written", reviews: reviewCount };
+            }
+
+            return await this.writeProductReviews(context, product, reviewCount, languages);
+        } catch (error) {
+            return {
+                kind: "failed",
+                error: `Failed to process reviews for ${product.name}: ${errorMessage(error)}`,
+            };
+        }
+    }
+
+    /** Upsert the reviews of one product unless it keeps reviews from an older run */
+    private async writeProductReviews(
+        context: PostProcessorContext,
+        product: BlueprintProduct,
+        reviewCount: number,
+        languages: LanguageContent[]
+    ): Promise<ReviewOutcome> {
+        const payload = buildReviewPayload(product, reviewCount, context.salesChannelId, languages);
+        const existingIds = await this.existingReviewIds(context, product.id);
+        if (hasForeignReviews(existingIds, payload)) return { kind: "skipped", legacy: true };
+
+        const error = await this.createReviews(context, payload);
+        if (!error) return { kind: "written", reviews: payload.length };
+        return {
+            kind: "written",
+            reviews: payload.length,
+            error: `Failed to create reviews for ${product.name}: ${error}`,
         };
     }
 
@@ -265,9 +307,7 @@ class ReviewProcessorImpl implements PostProcessor {
 
             deleted = reviewIds.length;
         } catch (error) {
-            errors.push(
-                `Review cleanup failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Review cleanup failed: ${errorMessage(error)}`);
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };

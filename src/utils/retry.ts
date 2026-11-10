@@ -91,50 +91,49 @@ export async function executeWithRetry<T>(
     options: RetryOptions = {}
 ): Promise<T> {
     const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-    const baseDelay = options.baseDelay ?? DEFAULT_BASE_DELAY_MS;
     const timeout = options.timeout ?? 0; // Default: no timeout (0 = disabled)
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-            // Execute with optional timeout
-            if (timeout > 0) {
-                return await withTimeout(fn, timeout);
-            }
-            return await fn();
+            return await (timeout > 0 ? withTimeout(fn, timeout) : fn());
         } catch (error) {
             lastError = error as Error;
-
-            // Check if it's a rate limit error or timeout error (retriable)
-            const isRetriable = isRateLimitError(error) || error instanceof TimeoutError;
-
-            if (isRetriable && attempt < maxRetries) {
-                // Try to get retry-after from error, otherwise use exponential backoff
-                const retryAfterMs = getRetryAfterMs(error);
-                const exponentialDelay = baseDelay * Math.pow(2, attempt);
-                // Use retry-after if valid, otherwise exponential backoff
-                const delay = retryAfterMs > 0 ? retryAfterMs : exponentialDelay;
-
-                if (options.onRetry) {
-                    options.onRetry(attempt + 1, delay, lastError);
-                } else {
-                    const reason = error instanceof TimeoutError ? "Timeout" : "Rate limit hit";
-                    logger.warn(
-                        `${reason}, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`,
-                        { cli: true }
-                    );
-                }
-
-                await sleep(delay);
-                continue;
-            }
-
-            // For non-retriable errors, don't retry
-            throw error;
+            // Only rate limits and timeouts are retried
+            if (!isRetriableError(error) || attempt >= maxRetries) throw error;
+            await waitBeforeRetry(lastError, attempt, maxRetries, options);
         }
     }
 
     throw lastError;
+}
+
+function isRetriableError(error: unknown): boolean {
+    return isRateLimitError(error) || error instanceof TimeoutError;
+}
+
+/** Wait for retry-after when the error has a valid one, otherwise back off exponentially */
+async function waitBeforeRetry(
+    error: Error,
+    attempt: number,
+    maxRetries: number,
+    options: RetryOptions
+): Promise<void> {
+    const retryAfterMs = getRetryAfterMs(error);
+    const baseDelay = options.baseDelay ?? DEFAULT_BASE_DELAY_MS;
+    const delay = retryAfterMs > 0 ? retryAfterMs : baseDelay * Math.pow(2, attempt);
+
+    if (options.onRetry) {
+        options.onRetry(attempt + 1, delay, error);
+    } else {
+        const reason = error instanceof TimeoutError ? "Timeout" : "Rate limit hit";
+        logger.warn(
+            `${reason}, waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries}...`,
+            { cli: true }
+        );
+    }
+
+    await sleep(delay);
 }
 
 /**

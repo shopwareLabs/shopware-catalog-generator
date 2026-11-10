@@ -21,6 +21,7 @@ import type {
 } from "../types/index.js";
 import type { Schemas } from "./admin-client.js";
 import type { SearchResult, SyncOperation } from "./api-types.js";
+import type { SalesChannelCloneSource } from "./client.js";
 
 import {
     buildCustomFieldConfig,
@@ -38,7 +39,7 @@ import {
     logger,
     validateSubdomainName,
 } from "../utils/index.js";
-import { ShopwareClient } from "./client.js";
+import { ShopwareClient, toCloneSource } from "./client.js";
 
 interface SalesChannelDomainPayload {
     id: string;
@@ -81,6 +82,74 @@ export function domainUrlSuffix(locale: string, allLocales: readonly string[]): 
 
 function uniqueIds(ids: string[]): Array<{ id: string }> {
     return [...new Set(ids)].map((id) => ({ id }));
+}
+
+function isNonEmptyId(id: string | undefined): id is string {
+    return Boolean(id);
+}
+
+/** Validated, subdomain-safe SalesChannel name (throws on invalid input) */
+function sanitizeSalesChannelName(name: string): string {
+    const validation = validateSubdomainName(name);
+    if (!validation.valid) {
+        throw new Error(`Invalid SalesChannel name: ${validation.error}`);
+    }
+    if (validation.warning) {
+        logger.warn(validation.warning, { cli: true });
+    }
+    return validation.sanitized;
+}
+
+function primaryCurrencyId(usdCurrencyId: string | null, storefrontCurrencyId: string): string {
+    if (usdCurrencyId) {
+        return usdCurrencyId;
+    }
+    logger.warn("USD currency not found in Shopware - using storefront default currency");
+    return storefrontCurrencyId;
+}
+
+type ClonedSalesChannelFields = Omit<
+    SalesChannelCloneSource,
+    "id" | "name" | "navigationCategoryId"
+>;
+
+/** A freshly created SalesChannel as returned by createSalesChannel */
+type NewSalesChannel = SalesChannelCloneSource & { accessKey: string; isNew: boolean };
+
+/** Settings a new SalesChannel copies from the Storefront */
+function newSalesChannelFrom(
+    storefront: SalesChannelCloneSource,
+    currencyId: string
+): ClonedSalesChannelFields & { isNew: boolean } {
+    return {
+        typeId: storefront.typeId,
+        languageId: storefront.languageId,
+        currencyId,
+        paymentMethodId: storefront.paymentMethodId,
+        shippingMethodId: storefront.shippingMethodId,
+        countryId: storefront.countryId,
+        customerGroupId: storefront.customerGroupId,
+        snippetSetId: storefront.snippetSetId,
+        isNew: true,
+    };
+}
+
+/** Sync payload for a new SalesChannel with its domains, languages and currencies */
+function salesChannelPayload(
+    salesChannel: NewSalesChannel,
+    domains: SalesChannelDomainPayload[]
+): Record<string, unknown> {
+    const { snippetSetId: _snippetSetId, isNew: _isNew, ...fields } = salesChannel;
+    return {
+        ...fields,
+        active: true,
+        languages: uniqueIds(domains.map((d) => d.languageId)),
+        currencies: uniqueIds(domains.map((d) => d.currencyId)),
+        paymentMethods: [{ id: salesChannel.paymentMethodId }],
+        shippingMethods: [{ id: salesChannel.shippingMethodId }],
+        countries: [{ id: salesChannel.countryId }],
+        domains,
+    };
 }
 
 /**
@@ -167,76 +236,36 @@ export class ShopwareHydrator extends ShopwareClient {
             return false;
         }
 
-        // Collect group IDs and option IDs
-        const groupIds: string[] = [];
-        const optionIds: string[] = [];
-
-        for (const group of propertyGroups) {
-            if (group.id) {
-                groupIds.push(group.id);
-            }
-            for (const option of group.options) {
-                if (option.id) {
-                    optionIds.push(option.id);
-                }
-            }
-        }
+        const groupIds = propertyGroups.map((g) => g.id).filter(isNonEmptyId);
+        const optionIds = propertyGroups
+            .flatMap((g) => g.options.map((o) => o.id))
+            .filter(isNonEmptyId);
 
         if (groupIds.length === 0 && optionIds.length === 0) {
             return false;
         }
 
         try {
-            // Check if property groups exist
-            if (groupIds.length > 0) {
-                const { data: groupData } = await this.getClient().invoke(
-                    "searchPropertyGroup post /search/property-group",
-                    {
-                        body: {
-                            limit: groupIds.length,
-                            filter: [{ type: "equalsAny", field: "id", value: groupIds.join("|") }],
-                        },
-                    }
-                );
-                const groupResult = groupData as SearchResult<Schemas["PropertyGroup"]>;
-
-                const foundGroups = groupResult.total ?? 0;
-                if (foundGroups !== groupIds.length) {
-                    logger.debug("Property groups verification failed", {
-                        data: {
-                            requestedGroups: groupIds.length,
-                            foundGroups,
-                        },
-                    });
-                    return false;
-                }
+            const foundGroups = await this.countExistingIds(
+                "searchPropertyGroup post /search/property-group",
+                groupIds
+            );
+            if (foundGroups !== groupIds.length) {
+                logger.debug("Property groups verification failed", {
+                    data: { requestedGroups: groupIds.length, foundGroups },
+                });
+                return false;
             }
 
-            // Check if options exist
-            if (optionIds.length > 0) {
-                const { data: optionData } = await this.getClient().invoke(
-                    "searchPropertyGroupOption post /search/property-group-option",
-                    {
-                        body: {
-                            limit: optionIds.length,
-                            filter: [
-                                { type: "equalsAny", field: "id", value: optionIds.join("|") },
-                            ],
-                        },
-                    }
-                );
-                const optionResult = optionData as SearchResult<Schemas["PropertyGroupOption"]>;
-
-                const foundOptions = optionResult.total ?? 0;
-                if (foundOptions !== optionIds.length) {
-                    logger.debug("Property options verification failed", {
-                        data: {
-                            requestedOptions: optionIds.length,
-                            foundOptions,
-                        },
-                    });
-                    return false;
-                }
+            const foundOptions = await this.countExistingIds(
+                "searchPropertyGroupOption post /search/property-group-option",
+                optionIds
+            );
+            if (foundOptions !== optionIds.length) {
+                logger.debug("Property options verification failed", {
+                    data: { requestedOptions: optionIds.length, foundOptions },
+                });
+                return false;
             }
 
             logger.debug("Property groups and options verified", {
@@ -251,6 +280,25 @@ export class ShopwareHydrator extends ShopwareClient {
             logger.error("Failed to verify property groups", { data: error });
             return false;
         }
+    }
+
+    /** Count how many of the given IDs exist (0 without a request when the list is empty) */
+    private async countExistingIds(
+        operation:
+            | "searchPropertyGroup post /search/property-group"
+            | "searchPropertyGroupOption post /search/property-group-option",
+        ids: string[]
+    ): Promise<number> {
+        if (ids.length === 0) {
+            return 0;
+        }
+        const { data } = await this.getClient().invoke(operation, {
+            body: {
+                limit: ids.length,
+                filter: [{ type: "equalsAny", field: "id", value: ids.join("|") }],
+            },
+        });
+        return (data as SearchResult<unknown>).total ?? 0;
     }
 
     /**
@@ -755,16 +803,7 @@ export class ShopwareHydrator extends ShopwareClient {
             throw new Error("Client is not authenticated");
         }
 
-        // Validate and sanitize the name
-        const validation = validateSubdomainName(input.name);
-        if (!validation.valid) {
-            throw new Error(`Invalid SalesChannel name: ${validation.error}`);
-        }
-
-        const sanitizedName = validation.sanitized;
-        if (validation.warning) {
-            logger.warn(validation.warning, { cli: true });
-        }
+        const sanitizedName = sanitizeSalesChannelName(input.name);
 
         // Check if SalesChannel already exists
         const existing = await this.findSalesChannelByName(sanitizedName);
@@ -782,81 +821,28 @@ export class ShopwareHydrator extends ShopwareClient {
             this.createRootCategory(sanitizedName),
         ]);
 
-        // If reusing existing root, clean up old children
-        if (!rootCategory.isNew) {
-            const deletedCount = await this.deleteChildCategories(rootCategory.id);
-            if (deletedCount > 0) {
-                logger.info(`Cleaned up ${deletedCount} old categories from existing root`);
-            }
-        }
+        await this.clearReusedRootCategory(rootCategory);
 
-        // Primary (English) domain uses USD when available
-        const usdCurrencyId = usdResult ?? storefront.currencyId;
-        if (!usdResult) {
-            logger.warn("USD currency not found in Shopware - using storefront default currency");
-        }
-
-        const host = this.envPath?.replace(/^https?:\/\//, "") || "localhost:8000";
-        const baseUrl = input.baseUrl || generateSubdomainUrl(sanitizedName, host);
-        const localeDomains = await this.resolveLocaleDomains(
-            domainLocales(input.locales),
+        const salesChannel: NewSalesChannel = {
+            // Primary (English) domain uses USD when available
+            ...newSalesChannelFrom(storefront, primaryCurrencyId(usdResult, storefront.currencyId)),
+            accessKey: this.generateAccessKey(),
+            id: generateUUID(),
+            name: capitalizeString(sanitizedName),
+            navigationCategoryId: rootCategory.id,
+        };
+        const domains = await this.buildSalesChannelDomains(
+            input,
+            sanitizedName,
+            salesChannel,
             storefront.currencyId
         );
-
-        const accessKey = this.generateAccessKey();
-        const salesChannelId = generateUUID();
-
-        const domains: SalesChannelDomainPayload[] = [
-            {
-                id: generateUUID(),
-                url: baseUrl,
-                languageId: storefront.languageId,
-                currencyId: usdCurrencyId,
-                snippetSetId: storefront.snippetSetId,
-                // USD domain shows inches/pounds; the other domains keep Shopware's metric default
-                ...(input.imperialEnglishDomain && {
-                    measurementUnits: IMPERIAL_MEASUREMENT_UNITS,
-                }),
-            },
-            ...localeDomains
-                .filter((d) => d.languageId !== storefront.languageId)
-                .map((d) => ({
-                    id: generateUUID(),
-                    url: generateSubdomainUrl(`${sanitizedName}-${d.urlSuffix}`, host),
-                    languageId: d.languageId,
-                    currencyId: d.currencyId,
-                    snippetSetId: d.snippetSetId,
-                })),
-        ];
-        const languages = uniqueIds(domains.map((d) => d.languageId));
-        const currencies = uniqueIds(domains.map((d) => d.currencyId));
-
-        const payload = {
-            id: salesChannelId,
-            name: capitalizeString(sanitizedName),
-            typeId: storefront.typeId,
-            languageId: storefront.languageId,
-            currencyId: usdCurrencyId,
-            paymentMethodId: storefront.paymentMethodId,
-            shippingMethodId: storefront.shippingMethodId,
-            countryId: storefront.countryId,
-            customerGroupId: storefront.customerGroupId,
-            navigationCategoryId: rootCategory.id,
-            accessKey,
-            active: true,
-            languages,
-            currencies,
-            paymentMethods: [{ id: storefront.paymentMethodId }],
-            shippingMethods: [{ id: storefront.shippingMethodId }],
-            countries: [{ id: storefront.countryId }],
-            domains,
-        };
 
         await this.sync([
             {
                 entity: "sales_channel",
                 action: "upsert",
-                payload: [payload],
+                payload: [salesChannelPayload(salesChannel, domains)],
             },
         ]);
 
@@ -865,31 +851,70 @@ export class ShopwareHydrator extends ShopwareClient {
             cli: true,
         });
 
-        // Assign the same theme as Storefront
-        const storefrontThemeId = await this.getThemeForSalesChannel(storefront.id);
-        if (storefrontThemeId) {
-            await this.assignThemeToSalesChannel(salesChannelId, storefrontThemeId);
-        } else {
+        await this.assignStorefrontTheme(storefront.id, salesChannel.id);
+        return salesChannel;
+    }
+
+    /** A reused root category keeps no children from an earlier run */
+    private async clearReusedRootCategory(root: { id: string; isNew: boolean }): Promise<void> {
+        if (root.isNew) {
+            return;
+        }
+        const deletedCount = await this.deleteChildCategories(root.id);
+        if (deletedCount > 0) {
+            logger.info(`Cleaned up ${deletedCount} old categories from existing root`);
+        }
+    }
+
+    /**
+     * English domain (the SalesChannel's language and currency) plus one domain per extra
+     * locale that is installed and differs from the Storefront language.
+     */
+    private async buildSalesChannelDomains(
+        input: SalesChannelInput,
+        sanitizedName: string,
+        salesChannel: NewSalesChannel,
+        fallbackCurrencyId: string
+    ): Promise<SalesChannelDomainPayload[]> {
+        const host = this.envPath?.replace(/^https?:\/\//, "") || "localhost:8000";
+        const localeDomains = await this.resolveLocaleDomains(
+            domainLocales(input.locales),
+            fallbackCurrencyId
+        );
+        const primary: SalesChannelDomainPayload = {
+            id: generateUUID(),
+            url: input.baseUrl || generateSubdomainUrl(sanitizedName, host),
+            languageId: salesChannel.languageId,
+            currencyId: salesChannel.currencyId,
+            snippetSetId: salesChannel.snippetSetId,
+            // USD domain shows inches/pounds; the other domains keep Shopware's metric default
+            ...(input.imperialEnglishDomain && { measurementUnits: IMPERIAL_MEASUREMENT_UNITS }),
+        };
+        const extra = localeDomains
+            .filter((d) => d.languageId !== salesChannel.languageId)
+            .map((d) => ({
+                id: generateUUID(),
+                url: generateSubdomainUrl(`${sanitizedName}-${d.urlSuffix}`, host),
+                languageId: d.languageId,
+                currencyId: d.currencyId,
+                snippetSetId: d.snippetSetId,
+            }));
+        return [primary, ...extra];
+    }
+
+    /** Assign the same theme as the Storefront SalesChannel */
+    private async assignStorefrontTheme(
+        storefrontId: string,
+        salesChannelId: string
+    ): Promise<void> {
+        const storefrontThemeId = await this.getThemeForSalesChannel(storefrontId);
+        if (!storefrontThemeId) {
             logger.warn(
                 "No theme found for Storefront - new SalesChannel may not display correctly"
             );
+            return;
         }
-
-        return {
-            id: salesChannelId,
-            name: capitalizeString(sanitizedName),
-            typeId: storefront.typeId,
-            languageId: storefront.languageId,
-            currencyId: usdCurrencyId,
-            paymentMethodId: storefront.paymentMethodId,
-            shippingMethodId: storefront.shippingMethodId,
-            countryId: storefront.countryId,
-            customerGroupId: storefront.customerGroupId,
-            navigationCategoryId: rootCategory.id,
-            accessKey,
-            snippetSetId: storefront.snippetSetId,
-            isNew: true,
-        };
+        await this.assignThemeToSalesChannel(salesChannelId, storefrontThemeId);
     }
 
     /**
@@ -942,31 +967,19 @@ export class ShopwareHydrator extends ShopwareClient {
                 },
             }
         );
-        const result = searchData as SearchResult<Schemas["SalesChannel"]>;
-
-        if (result.data?.[0]) {
-            // Fetch full details including snippetSetId
-            try {
-                return await this.getFullSalesChannel(capitalizedName);
-            } catch {
-                // If we can't get full details, return what we have
-                const sc = result.data[0];
-                return {
-                    id: sc.id ?? "",
-                    name: sc.name ?? capitalizedName,
-                    typeId: sc.typeId ?? "",
-                    languageId: sc.languageId ?? "",
-                    currencyId: sc.currencyId ?? "",
-                    paymentMethodId: sc.paymentMethodId ?? "",
-                    shippingMethodId: sc.shippingMethodId ?? "",
-                    countryId: sc.countryId ?? "",
-                    customerGroupId: sc.customerGroupId ?? "",
-                    navigationCategoryId: sc.navigationCategoryId ?? "",
-                };
-            }
+        const found = (searchData as SearchResult<Schemas["SalesChannel"]>).data?.[0];
+        if (!found) {
+            return null;
         }
 
-        return null;
+        // Fetch full details including snippetSetId
+        try {
+            return await this.getFullSalesChannel(capitalizedName);
+        } catch {
+            // If we can't get full details, return what we have (without a snippet set)
+            const { snippetSetId: _snippetSetId, ...basics } = toCloneSource(found);
+            return { ...basics, name: found.name ?? capitalizedName };
+        }
     }
 
     /**
@@ -1615,12 +1628,47 @@ function deliveryTimeId(p: DirectProductInput, deliveryTimeIds: string[]): strin
     return deliveryTimeIds[p.deliveryTimeIndex % deliveryTimeIds.length];
 }
 
+/** Product type, custom fields and Open Graph texts, only when set */
+function typeAndMetaFields(p: DirectProductInput): Partial<ProductSyncPayload> {
+    return {
+        ...(p.type && { type: p.type }),
+        ...(p.customFields && { customFields: p.customFields }),
+        ...(p.ogTitle && { ogTitle: p.ogTitle }),
+        ...(p.ogDescription && { ogDescription: p.ogDescription }),
+    };
+}
+
+/** Packaging, "New" badge and delivery time, only when set */
+function packagingAndDeliveryFields(
+    p: DirectProductInput,
+    ctx: ProductUploadContext
+): Partial<ProductSyncPayload> {
+    const delivery = deliveryTimeId(p, ctx.deliveryTimeIds);
+    return {
+        ...(p.packaging && packagingFields(p.packaging, ctx.unitIds)),
+        // "New" badge: always the upload time, so the badge never ages out on the storefront
+        ...(p.isNew && { releaseDate: new Date().toISOString() }),
+        ...(delivery && { deliveryTimeId: delivery }),
+    };
+}
+
+/** Property options and tiered prices (tiers need the rule ID) */
+function propertyAndTierFields(
+    p: DirectProductInput,
+    ctx: ProductUploadContext
+): Partial<ProductSyncPayload> {
+    return {
+        ...(p.options?.length && { properties: p.options.map((option) => ({ id: option.id })) }),
+        ...(p.hasTieredPricing &&
+            ctx.ruleId && { prices: tieredPrices(p, ctx.ruleId, ctx.currencyId) }),
+    };
+}
+
 function buildDirectProductPayload(
     p: DirectProductInput,
     ctx: ProductUploadContext
 ): ProductSyncPayload {
-    const delivery = deliveryTimeId(p, ctx.deliveryTimeIds);
-    const product: ProductSyncPayload = {
+    return {
         id: p.id,
         productNumber: `AI-${p.id}`,
         name: p.name,
@@ -1646,18 +1694,9 @@ function buildDirectProductPayload(
         length: p.length,
         ean: p.ean,
         manufacturerNumber: p.manufacturerNumber,
-        ...(p.type && { type: p.type }),
-        ...(p.customFields && { customFields: p.customFields }),
-        ...(p.ogTitle && { ogTitle: p.ogTitle }),
-        ...(p.ogDescription && { ogDescription: p.ogDescription }),
-        ...(p.packaging && packagingFields(p.packaging, ctx.unitIds)),
-        // "New" badge: always the upload time, so the badge never ages out on the storefront
-        ...(p.isNew && { releaseDate: new Date().toISOString() }),
-        ...(delivery && { deliveryTimeId: delivery }),
+        ...typeAndMetaFields(p),
+        ...packagingAndDeliveryFields(p, ctx),
         ...purchaseAndSeoFields(p),
-        ...(p.options?.length && { properties: p.options.map((option) => ({ id: option.id })) }),
-        ...(p.hasTieredPricing &&
-            ctx.ruleId && { prices: tieredPrices(p, ctx.ruleId, ctx.currencyId) }),
+        ...propertyAndTierFields(p, ctx),
     };
-    return product;
 }

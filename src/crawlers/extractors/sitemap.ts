@@ -66,157 +66,222 @@ function looksLikeSitemap(xml: string): boolean {
     return xml.includes("<loc>") || xml.includes("<urlset") || xml.includes("<sitemapindex");
 }
 
+interface SitemapScope {
+    origin: string;
+    /** Only URLs starting with this prefix are collected (null: whole origin). */
+    pathPrefix: string | null;
+    /** Locale code from the base URL path (e.g. "de-de"), used to rank sub-sitemaps. */
+    localeCode: string;
+}
+
+function isValidUrl(url: string): boolean {
+    try {
+        new URL(url);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function isInScope(loc: string, scope: SitemapScope): boolean {
+    try {
+        if (new URL(loc).origin !== scope.origin) return false;
+    } catch {
+        return false;
+    }
+    return !scope.pathPrefix || loc.startsWith(scope.pathPrefix);
+}
+
+function collectLocs(locs: string[], scope: SitemapScope, out: string[]): void {
+    for (const loc of locs) {
+        if (out.length >= MAX_SITEMAP_URLS) return;
+        if (isInScope(loc, scope)) out.push(loc);
+    }
+}
+
+function contentScore(url: string): number {
+    if (/\bprod\b|product|produkt|artikel/i.test(url)) return 0;
+    if (/categor|kategorie|collection/i.test(url)) return 10;
+    return 20;
+}
+
+/** Lower is better: product/category content first, locale match gets a bonus. */
+function subSitemapScore(url: string, localeCode: string): number {
+    const localeBonus = localeCode.length >= 4 && url.toLowerCase().includes(localeCode) ? 15 : 0;
+    return contentScore(url) - localeBonus;
+}
+
+function sortSubSitemaps(urls: string[], localeCode: string): string[] {
+    return [...urls].sort(
+        (a, b) => subSitemapScore(a, localeCode) - subSitemapScore(b, localeCode)
+    );
+}
+
+/** Fetch one sub-sitemap of an index; returns true when it added URLs. */
+async function processSubSitemap(
+    subUrl: string,
+    scope: SitemapScope,
+    out: string[],
+    depth: number
+): Promise<boolean> {
+    const subXml = await fetchText(subUrl);
+    if (!subXml || !looksLikeSitemap(subXml)) return false;
+    const before = out.length;
+    if (!isSitemapIndex(subXml)) {
+        collectLocs(extractLocsFromXml(subXml), scope, out);
+    } else if (depth < 2) {
+        await processSitemap(subUrl, scope, out, depth + 1);
+    }
+    return out.length > before;
+}
+
+/**
+ * Iterate sorted sub-sitemaps with two separate limits:
+ * - validCount: stop after 5 sub-sitemaps that actually added URLs
+ * - attempts:   safety cap of 50 total fetches (handles stores like Foot Locker
+ *   that have 30+ product sitemaps returning empty JSON before the real ones)
+ */
+async function processSitemapIndex(
+    xml: string,
+    scope: SitemapScope,
+    out: string[],
+    depth: number
+): Promise<void> {
+    const subUrls = extractLocsFromXml(xml).filter(isValidUrl);
+    let validCount = 0;
+    let attempts = 0;
+    for (const subUrl of sortSubSitemaps(subUrls, scope.localeCode)) {
+        if (attempts >= 50 || out.length >= MAX_SITEMAP_URLS || validCount >= 5) return;
+        attempts++;
+        if (await processSubSitemap(subUrl, scope, out, depth)) validCount++;
+    }
+}
+
 /** Fetch and process one sitemap (or sitemap index), collecting matching URLs. */
 async function processSitemap(
     sitemapUrl: string,
-    origin: string,
-    pathPrefix: string | null,
-    localeCode: string,
+    scope: SitemapScope,
     out: string[],
     depth = 0
 ): Promise<void> {
     const xml = await fetchText(sitemapUrl);
     if (!xml || !looksLikeSitemap(xml)) return;
-
-    function collect(locs: string[]) {
-        for (const loc of locs) {
-            if (out.length >= MAX_SITEMAP_URLS) break;
-            try {
-                if (new URL(loc).origin !== origin) continue;
-                if (pathPrefix && !loc.startsWith(pathPrefix)) continue;
-            } catch {
-                continue;
-            }
-            out.push(loc);
-        }
-    }
-
     if (isSitemapIndex(xml)) {
-        const subUrls = extractLocsFromXml(xml).filter((u) => {
-            try {
-                new URL(u);
-                return true;
-            } catch {
-                return false;
-            }
-        });
+        await processSitemapIndex(xml, scope, out, depth);
+        return;
+    }
+    collectLocs(extractLocsFromXml(xml), scope, out);
+}
 
-        // Score sub-sitemaps: prefer product/category content AND locale match.
-        const sorted = [...subUrls].sort((a, b) => {
-            const score = (u: string) => {
-                const ul = u.toLowerCase();
-                let s = /\bprod\b|product|produkt|artikel/i.test(u)
-                    ? 0
-                    : /categor|kategorie|collection/i.test(u)
-                      ? 10
-                      : 20;
-                if (localeCode.length >= 4 && ul.includes(localeCode)) s -= 15;
-                return s;
-            };
-            return score(a) - score(b);
-        });
+/** Base path of the URL with a trailing slash (e.g. "/de/de/"). */
+function basePathOf(baseUrl: string): string {
+    return new URL(baseUrl).pathname.replace(/\/?$/, "/");
+}
 
-        // Iterate sorted sub-sitemaps with two separate limits:
-        // - validCount: stop after 5 sub-sitemaps that actually added URLs
-        // - attempts:   safety cap of 50 total fetches (handles stores like Foot Locker
-        //   that have 30+ product sitemaps returning empty JSON before the real ones)
-        let validCount = 0;
-        let attempts = 0;
-        for (const subUrl of sorted) {
-            if (attempts >= 50 || out.length >= MAX_SITEMAP_URLS || validCount >= 5) break;
-            attempts++;
-            const subXml = await fetchText(subUrl);
-            if (!subXml || !looksLikeSitemap(subXml)) continue;
-            const before = out.length;
-            if (isSitemapIndex(subXml) && depth < 2) {
-                await processSitemap(subUrl, origin, pathPrefix, localeCode, out, depth + 1);
-            } else if (!isSitemapIndex(subXml)) {
-                collect(extractLocsFromXml(subXml));
-            }
-            if (out.length > before) validCount++;
-        }
-    } else {
-        collect(extractLocsFromXml(xml));
+/** If baseUrl has a non-trivial path (e.g. /de/de/), restrict to that prefix so
+ * multi-locale sitemaps (IKEA, Zara, etc.) don't bleed in other locales. */
+function buildSitemapScope(baseUrl: string, origin: string): SitemapScope {
+    const basePath = basePathOf(baseUrl);
+    const pathSegments = new URL(baseUrl).pathname.split("/").filter(Boolean);
+    return {
+        origin,
+        pathPrefix: basePath.length > 1 ? `${origin}${basePath}` : null,
+        localeCode: pathSegments.join("-").toLowerCase(),
+    };
+}
+
+function editorialScore(url: string): number {
+    return /magazin|magazine|blog|news|press|presse/i.test(url) ? 1 : 0;
+}
+
+/**
+ * Build candidate sitemap URLs to try in priority order:
+ * 1. robots.txt Sitemap directives (all of them — some sites list several)
+ * 2. Root /sitemap.xml (conventional)
+ * 3. Locale-specific /path/sitemap.xml (Shopware/locale shops like STABILO at /com/)
+ *
+ * Candidates are sorted so that magazine/blog-named sitemaps come last; this prevents
+ * stores like bergzeit.de (whose robots.txt lists magazin/sitemap_index.xml first) from
+ * returning only editorial content instead of products.
+ */
+async function collectSitemapCandidates(baseUrl: string, origin: string): Promise<string[]> {
+    const robotsTxt = await fetchText(`${origin}/robots.txt`);
+    const robotsSitemaps = [...(robotsTxt ?? "").matchAll(/^Sitemap:\s*(\S+)/gim)]
+        .map((m) => m[1])
+        .filter((url): url is string => !!url);
+    const basePath = basePathOf(baseUrl);
+    const localeSitemaps = basePath.length > 1 ? [`${origin}${basePath}sitemap.xml`] : [];
+    const candidates = [
+        ...new Set([...robotsSitemaps, `${origin}/sitemap.xml`, ...localeSitemaps]),
+    ];
+    return candidates.sort((a, b) => editorialScore(a) - editorialScore(b));
+}
+
+async function firstSitemapWithUrls(candidates: string[], scope: SitemapScope): Promise<string[]> {
+    for (const candidate of candidates) {
+        const urls: string[] = [];
+        await processSitemap(candidate, scope, urls);
+        if (urls.length > 0) return urls;
+    }
+    return [];
+}
+
+function originOf(url: string): string | null {
+    try {
+        return new URL(url).origin;
+    } catch {
+        return null;
     }
 }
 
 /** Fetch and parse sitemap.xml, returning up to MAX_SITEMAP_URLS discovered URLs.
  * No URL classification — the page classifier handles that at fetch time. */
 export async function discoverFromSitemap(baseUrl: string): Promise<string[]> {
-    let origin: string;
-    try {
-        origin = new URL(baseUrl).origin;
-    } catch {
-        return [];
-    }
+    const origin = originOf(baseUrl);
+    if (!origin) return [];
 
-    // If baseUrl has a non-trivial path (e.g. /de/de/), restrict to that prefix so
-    // multi-locale sitemaps (IKEA, Zara, etc.) don't bleed in other locales.
-    const basePath = new URL(baseUrl).pathname.replace(/\/?$/, "/");
-    const pathPrefix = basePath.length > 1 ? `${origin}${basePath}` : null;
-    const pathSegments = new URL(baseUrl).pathname.split("/").filter(Boolean);
-    const localeCode = pathSegments.join("-").toLowerCase();
+    const scope = buildSitemapScope(baseUrl, origin);
+    const candidates = await collectSitemapCandidates(baseUrl, origin);
 
-    // Build candidate sitemap URLs to try in priority order:
-    // 1. robots.txt Sitemap directives (all of them — some sites list several)
-    // 2. Root /sitemap.xml (conventional)
-    // 3. Locale-specific /path/sitemap.xml (Shopware/locale shops like STABILO at /com/)
-    //
-    // Candidates are sorted so that magazine/blog-named sitemaps come last; this prevents
-    // stores like bergzeit.de (whose robots.txt lists magazin/sitemap_index.xml first) from
-    // returning only editorial content instead of products.
-    const seen = new Set<string>();
-    const candidates: string[] = [];
-
-    const robotsTxt = await fetchText(`${origin}/robots.txt`);
-    if (robotsTxt) {
-        for (const m of robotsTxt.matchAll(/^Sitemap:\s*(\S+)/gim)) {
-            if (m[1] && !seen.has(m[1])) {
-                seen.add(m[1]);
-                candidates.push(m[1]);
-            }
-        }
-    }
-    for (const url of [`${origin}/sitemap.xml`]) {
-        if (!seen.has(url)) {
-            seen.add(url);
-            candidates.push(url);
-        }
-    }
-    if (basePath.length > 1) {
-        const localeSitemap = `${origin}${basePath}sitemap.xml`;
-        if (!seen.has(localeSitemap)) {
-            seen.add(localeSitemap);
-            candidates.push(localeSitemap);
-        }
-    }
-
-    // Deprioritize clearly editorial sitemaps so product/shop sitemaps are tried first.
-    candidates.sort((a, b) => {
-        const editScore = (u: string) =>
-            /magazin|magazine|blog|news|press|presse/i.test(u) ? 1 : 0;
-        return editScore(a) - editScore(b);
-    });
-
-    for (const candidate of candidates) {
-        const urls: string[] = [];
-        await processSitemap(candidate, origin, pathPrefix, localeCode, urls);
-        if (urls.length > 0) return urls;
-    }
+    const urls = await firstSitemapWithUrls(candidates, scope);
+    if (urls.length > 0) return urls;
 
     // Fallback: if pathPrefix rejected every URL (base URL has a path component that
     // doesn't match actual page paths — e.g. /de-eu landing page on a single-locale site),
     // retry without the prefix constraint to collect all same-origin URLs.
-    if (pathPrefix) {
-        for (const candidate of candidates) {
-            const urls: string[] = [];
-            await processSitemap(candidate, origin, null, localeCode, urls);
-            if (urls.length > 0) return urls;
-        }
+    if (scope.pathPrefix) {
+        const unscoped = await firstSitemapWithUrls(candidates, { ...scope, pathPrefix: null });
+        if (unscoped.length > 0) return unscoped;
     }
 
     console.warn(`[sitemap] no sitemap found for ${origin}`);
     return [];
+}
+
+/** Group URLs by their first `depth` path segments ("root" for the homepage). */
+function groupByBranch(urls: string[], depth: number): string[][] {
+    const byBranch = new Map<string, string[]>();
+    for (const url of urls) {
+        if (!isValidUrl(url)) continue;
+        const segs = new URL(url).pathname.split("/").filter(Boolean);
+        const branch = segs.slice(0, depth).join("/") || "root";
+        byBranch.set(branch, [...(byBranch.get(branch) ?? []), url]);
+    }
+    return [...byBranch.values()];
+}
+
+/** Take one URL per group per round until n URLs are picked or all groups are empty. */
+function roundRobin(groups: string[][], n: number): string[] {
+    const result: string[] = [];
+    const longest = Math.max(0, ...groups.map((group) => group.length));
+    for (let round = 0; round < longest; round++) {
+        for (const group of groups) {
+            if (result.length >= n) return result;
+            const url = group[round];
+            if (url) result.push(url);
+        }
+    }
+    return result;
 }
 
 /** Sample up to n URLs, picking one from each path branch for diversity.
@@ -226,51 +291,12 @@ export async function discoverFromSitemap(baseUrl: string): Promise<string[]> {
 export function sampleUrls(urls: string[], n: number): string[] {
     if (urls.length <= n) return urls;
 
-    const byBranch = new Map<string, string[]>();
-    for (const url of urls) {
-        try {
-            const segs = new URL(url).pathname.split("/").filter(Boolean);
-            const branch = segs[0] ?? "root";
-            if (!byBranch.has(branch)) byBranch.set(branch, []);
-            byBranch.get(branch)!.push(url);
-        } catch {
-            /* ignore */
-        }
-    }
-
     // If one first-segment bucket holds the vast majority (>80%) of URLs,
     // group by two segments so distinct subtrees (e.g. /catalogue/category/... vs
     // /catalogue/book-name/...) each get representation in the sample.
-    const maxBucketSize = Math.max(...[...byBranch.values()].map((v) => v.length));
-    if (maxBucketSize / urls.length > 0.8) {
-        byBranch.clear();
-        for (const url of urls) {
-            try {
-                const segs = new URL(url).pathname.split("/").filter(Boolean);
-                const branch = segs.slice(0, 2).join("/") || "root";
-                if (!byBranch.has(branch)) byBranch.set(branch, []);
-                byBranch.get(branch)!.push(url);
-            } catch {
-                /* ignore */
-            }
-        }
-    }
+    const byFirstSegment = groupByBranch(urls, 1);
+    const maxBucketSize = Math.max(...byFirstSegment.map((group) => group.length));
+    const groups = maxBucketSize / urls.length > 0.8 ? groupByBranch(urls, 2) : byFirstSegment;
 
-    const result: string[] = [];
-    const iters = [...byBranch.values()].map((arr) => arr[Symbol.iterator]());
-
-    while (result.length < n) {
-        let added = 0;
-        for (const it of iters) {
-            if (result.length >= n) break;
-            const { value, done } = it.next();
-            if (!done && value) {
-                result.push(value);
-                added++;
-            }
-        }
-        if (added === 0) break;
-    }
-
-    return result;
+    return roundRobin(groups, n);
 }

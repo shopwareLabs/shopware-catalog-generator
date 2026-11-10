@@ -87,6 +87,9 @@ const VariantColorsResponseSchema = z.object({
 type ProductResponse = z.infer<typeof ProductResponseSchema>;
 type PropertyOnlyResponse = z.infer<typeof PropertyOnlyResponseSchema>;
 
+/** New properties (and variant suggestions) for one product in properties-only mode */
+export type PropertyUpdate = PropertyOnlyResponse["products"][number];
+
 // =============================================================================
 // Token Estimation
 // =============================================================================
@@ -196,8 +199,9 @@ export class ProductHydrator {
     }
 
     /**
-     * Hydrate products with AI
-     * Uses parallel processing when the provider supports concurrency
+     * Hydrate products with AI, one task per top-level category branch.
+     * Uses parallel processing when the provider supports concurrency. Failed branches are
+     * dropped (with a warning) unless every branch failed.
      */
     async hydrateProducts(
         products: BlueprintProduct[],
@@ -206,30 +210,35 @@ export class ProductHydrator {
         existingProperties: ExistingProperty[],
         storeContext: StoreContext
     ): Promise<BlueprintProduct[]> {
-        const productsByBranch = new Map<string, BlueprintProduct[]>();
+        const categoryNameMap = new Map(hydratedCategories.map((c) => [c.id, c.name]));
+        const context: BranchContext = {
+            existingProperties,
+            categoryNameMap,
+            categoryIdByName: new Map(hydratedCategories.map((c) => [c.name.toLowerCase(), c.id])),
+            storeContext,
+        };
+        const subcategories = this.buildBranchSubcategoryMap(categoryTree, categoryNameMap);
+        const branches = [...groupProductsByBranch(products)].map(
+            ([branchId, branchProducts], index): ProductBranch => ({
+                products: branchProducts,
+                name: categoryNameMap.get(branchId) || `Branch ${index + 1}`,
+                subcategories: subcategories.get(branchId) || [],
+            })
+        );
+        this.logBranchProcessingMode(branches.length);
 
-        for (const product of products) {
-            const branch = product.primaryCategoryId;
-            const existing = productsByBranch.get(branch);
-            if (existing) {
-                existing.push(product);
-            } else {
-                productsByBranch.set(branch, [product]);
-            }
-        }
+        const limiter = new ConcurrencyLimiter(this.textProvider.maxConcurrency);
+        const progress = { completed: 0, total: branches.length };
+        const settled = await Promise.allSettled(
+            branches.map((branch, index) =>
+                limiter.schedule(() => this.hydrateBranch(branch, index, progress, context))
+            )
+        );
+        return collectBranchResults(settled, branches, storeContext.name);
+    }
 
-        const categoryNameMap = new Map<string, string>();
-        const categoryIdByName = new Map<string, string>();
-        for (const cat of hydratedCategories) {
-            categoryNameMap.set(cat.id, cat.name);
-            categoryIdByName.set(cat.name.toLowerCase(), cat.id);
-        }
-
-        const branchSubcategories = this.buildBranchSubcategoryMap(categoryTree, categoryNameMap);
-
-        const totalBranches = productsByBranch.size;
+    private logBranchProcessingMode(totalBranches: number): void {
         const maxConcurrency = this.textProvider.maxConcurrency;
-
         if (maxConcurrency > 1) {
             logger.info(
                 `    Using parallel processing (max ${maxConcurrency} concurrent branches)`,
@@ -238,108 +247,44 @@ export class ProductHydrator {
             logger.info(`Parallel branch processing enabled`, {
                 data: { maxConcurrency, totalBranches },
             });
-        } else {
-            logger.info(`    Using sequential processing (provider: ${this.textProvider.name})`, {
-                cli: true,
-            });
-            logger.info(`Sequential branch processing`, {
-                data: { provider: this.textProvider.name },
-            });
+            return;
         }
-
-        const limiter = new ConcurrencyLimiter(maxConcurrency);
-        const branches = Array.from(productsByBranch.entries());
-        let completedBranches = 0;
-
-        const branchTasks = branches.map(([branchId, branchProducts], index) => {
-            const branchName = categoryNameMap.get(branchId) || `Branch ${index + 1}`;
-            const availableSubcategories = branchSubcategories.get(branchId) || [];
-            const subCatPreview = availableSubcategories.slice(0, 3).join(", ");
-
-            return limiter.schedule(async () => {
-                const branchNum = index + 1;
-                const subCatText = subCatPreview
-                    ? ` → ${subCatPreview}${availableSubcategories.length > 3 ? "..." : ""}`
-                    : "";
-                logger.info(
-                    `    [Branch ${branchNum}/${totalBranches}] ${storeContext.name} > ${branchName}${subCatText} (${branchProducts.length} products)`,
-                    { cli: true }
-                );
-
-                const hydrated = await this.hydrateBranchProducts(
-                    branchProducts,
-                    branchName,
-                    existingProperties,
-                    categoryNameMap,
-                    categoryIdByName,
-                    availableSubcategories,
-                    storeContext
-                );
-
-                completedBranches++;
-                logger.info(
-                    `    ✓ ${storeContext.name} > ${branchName} complete (${completedBranches}/${totalBranches} branches)`,
-                    { cli: true }
-                );
-
-                return hydrated;
-            });
+        logger.info(`    Using sequential processing (provider: ${this.textProvider.name})`, {
+            cli: true,
         });
+        logger.info(`Sequential branch processing`, {
+            data: { provider: this.textProvider.name },
+        });
+    }
 
-        const settledResults = await Promise.allSettled(branchTasks);
+    private async hydrateBranch(
+        branch: ProductBranch,
+        index: number,
+        progress: { completed: number; total: number },
+        context: BranchContext
+    ): Promise<BlueprintProduct[]> {
+        const store = context.storeContext.name;
+        logger.info(
+            `    [Branch ${index + 1}/${progress.total}] ${store} > ${branch.name}${formatSubcategoryPreview(branch.subcategories)} (${branch.products.length} products)`,
+            { cli: true }
+        );
 
-        const fulfilledProducts: BlueprintProduct[] = [];
-        const failedBranches: { branchIndex: number; error: Error }[] = [];
+        const hydrated = await this.hydrateBranchProducts(
+            branch.products,
+            branch.name,
+            context.existingProperties,
+            context.categoryNameMap,
+            context.categoryIdByName,
+            branch.subcategories,
+            context.storeContext
+        );
 
-        for (const [i, result] of settledResults.entries()) {
-            if (result.status === "fulfilled") {
-                fulfilledProducts.push(...result.value);
-            } else {
-                const branchEntry = branches[i];
-                const branchName = branchEntry
-                    ? categoryNameMap.get(branchEntry[0]) || `Branch ${i + 1}`
-                    : `Branch ${i + 1}`;
-                const error =
-                    result.reason instanceof Error
-                        ? result.reason
-                        : new Error(String(result.reason));
-                failedBranches.push({ branchIndex: i, error });
-                logger.error(
-                    `    ✗ ${storeContext.name} > ${branchName} failed: ${error.message}`,
-                    { cli: true }
-                );
-                logger.error(`Branch ${branchName} failed`, {
-                    data: { error: error.message, branchIndex: i },
-                });
-            }
-        }
-
-        if (failedBranches.length > 0) {
-            const successCount = settledResults.length - failedBranches.length;
-
-            if (fulfilledProducts.length === 0) {
-                const reason = failedBranches[0]?.error.message ?? "Unknown error";
-                throw new Error(
-                    `All ${failedBranches.length} hydration branches failed — no products were generated. ` +
-                        `Reason: ${reason}`
-                );
-            }
-
-            logger.warn(
-                `\n    ⚠ ${failedBranches.length}/${settledResults.length} branches failed. ` +
-                    `${fulfilledProducts.length} products from ${successCount} successful branches will be used.`,
-                { cli: true }
-            );
-            logger.warn(`Partial hydration: ${failedBranches.length} branches failed`, {
-                data: {
-                    failedCount: failedBranches.length,
-                    successCount,
-                    productsHydrated: fulfilledProducts.length,
-                },
-            });
-        }
-
-        return fulfilledProducts;
+        progress.completed++;
+        logger.info(
+            `    ✓ ${store} > ${branch.name} complete (${progress.completed}/${progress.total} branches)`,
+            { cli: true }
+        );
+        return hydrated;
     }
 
     /**
@@ -350,7 +295,7 @@ export class ProductHydrator {
         branchName: string,
         existingProperties: ExistingProperty[],
         storeContext: StoreContext
-    ): Promise<Map<string, PropertyOnlyResponse["products"][0]>> {
+    ): Promise<Map<string, PropertyUpdate>> {
         const prompt = this.buildPropertyOnlyPrompt(
             products,
             branchName,
@@ -963,84 +908,204 @@ Return JSON in this exact format:
         branchName: string
     ): Promise<BlueprintProduct[]> {
         const hydratedMap = new Map(hydrated.map((p) => [p.id, p]));
+        const categories: CategoryLookup = {
+            nameById: categoryNameMap,
+            idByName: categoryIdByName,
+            branchId: categoryIdByName.get(branchName.toLowerCase()),
+        };
+
+        // Sequential on purpose: the variant resolver shares its property cache
         const results: BlueprintProduct[] = [];
-
-        const branchCategoryId = categoryIdByName.get(branchName.toLowerCase());
-
         for (const product of original) {
-            const h = hydratedMap.get(product.id);
-            if (!h) {
-                results.push(product);
-                continue;
-            }
-
-            const baseImagePrompt = this.generateBaseImagePrompt(h.name, h.properties);
-
-            let variantConfigs: VariantConfig[] | undefined;
-            if (
-                product.metadata.isVariant &&
-                h.suggestedVariantGroups &&
-                h.suggestedVariantGroups.length > 0
-            ) {
-                const categoryName = categoryNameMap.get(product.primaryCategoryId) || "Unknown";
-                variantConfigs = await this.variantResolver.resolveVariantConfigs(
-                    h.suggestedVariantGroups,
-                    {
-                        name: h.name,
-                        category: categoryName,
-                        productId: product.id,
-                        colors: productColorPreferences(h.properties, h.variantColors),
-                    }
-                );
-            }
-
-            let categoryIds = product.categoryIds;
-            let primaryCategoryId = product.primaryCategoryId;
-
-            if (h.assignedCategories && h.assignedCategories.length > 0) {
-                const newCategoryIds: string[] = [];
-                if (branchCategoryId) {
-                    newCategoryIds.push(branchCategoryId);
-                    primaryCategoryId = branchCategoryId;
-                }
-
-                for (const catName of h.assignedCategories) {
-                    const catId = categoryIdByName.get(catName.toLowerCase());
-                    if (catId && !newCategoryIds.includes(catId)) {
-                        newCategoryIds.push(catId);
-                    }
-                }
-
-                if (newCategoryIds.length > 0) {
-                    categoryIds = newCategoryIds;
-                }
-            }
-
-            // Derive SEO metadata from AI-generated content (no extra AI call)
-            const { metaTitle, metaDescription } = deriveProductSeoMeta(h.name, h.description);
-
-            results.push({
-                ...product,
-                name: h.name,
-                description: h.description,
-                categoryIds,
-                primaryCategoryId,
-                metaTitle,
-                metaDescription,
-                metadata: {
-                    ...product.metadata,
-                    properties: h.properties as ProductProperty[],
-                    manufacturerName: h.manufacturerName,
-                    imageDescriptions: h.imageDescriptions as ImageDescription[],
-                    baseImagePrompt,
-                    variantConfigs:
-                        variantConfigs && variantConfigs.length > 0 ? variantConfigs : undefined,
-                },
-            });
+            const content = hydratedMap.get(product.id);
+            results.push(
+                content ? await this.applyProductContent(product, content, categories) : product
+            );
         }
-
         return results;
     }
+
+    /** Merge the AI content into one product (SEO meta is derived, no extra AI call) */
+    private async applyProductContent(
+        product: BlueprintProduct,
+        content: HydratedProductContent,
+        categories: CategoryLookup
+    ): Promise<BlueprintProduct> {
+        const variantConfigs = await this.resolveProductVariants(product, content, categories);
+        const { metaTitle, metaDescription } = deriveProductSeoMeta(
+            content.name,
+            content.description
+        );
+
+        return {
+            ...product,
+            name: content.name,
+            description: content.description,
+            ...assignCategories(product, content.assignedCategories, categories),
+            metaTitle,
+            metaDescription,
+            metadata: {
+                ...product.metadata,
+                properties: content.properties as ProductProperty[],
+                manufacturerName: content.manufacturerName,
+                imageDescriptions: content.imageDescriptions as ImageDescription[],
+                baseImagePrompt: this.generateBaseImagePrompt(content.name, content.properties),
+                variantConfigs,
+            },
+        };
+    }
+
+    /** Variant configs for a variant product with AI-suggested groups (undefined when none) */
+    private async resolveProductVariants(
+        product: BlueprintProduct,
+        content: HydratedProductContent,
+        categories: CategoryLookup
+    ): Promise<VariantConfig[] | undefined> {
+        const groups = content.suggestedVariantGroups;
+        if (!product.metadata.isVariant || !groups || groups.length === 0) return undefined;
+
+        const configs = await this.variantResolver.resolveVariantConfigs(groups, {
+            name: content.name,
+            category: categories.nameById.get(product.primaryCategoryId) || "Unknown",
+            productId: product.id,
+            colors: productColorPreferences(content.properties, content.variantColors),
+        });
+        return configs.length > 0 ? configs : undefined;
+    }
+}
+
+/** Products of one top-level category branch, hydrated in one task */
+interface ProductBranch {
+    products: BlueprintProduct[];
+    name: string;
+    subcategories: string[];
+}
+
+/** Lookups shared by all branch tasks of one hydrateProducts() run */
+interface BranchContext {
+    existingProperties: ExistingProperty[];
+    categoryNameMap: Map<string, string>;
+    categoryIdByName: Map<string, string>;
+    storeContext: StoreContext;
+}
+
+/** Category lookups for applying the AI response of one branch */
+interface CategoryLookup {
+    nameById: Map<string, string>;
+    idByName: Map<string, string>;
+    /** ID of the branch category, matched by name */
+    branchId: string | undefined;
+}
+
+type HydratedProductContent = ProductResponse["products"][number];
+
+/** Products grouped by their primary (top-level) category, in first-seen order */
+export function groupProductsByBranch(
+    products: BlueprintProduct[]
+): Map<string, BlueprintProduct[]> {
+    const byBranch = new Map<string, BlueprintProduct[]>();
+    for (const product of products) {
+        const branch = byBranch.get(product.primaryCategoryId) ?? [];
+        branch.push(product);
+        byBranch.set(product.primaryCategoryId, branch);
+    }
+    return byBranch;
+}
+
+/** " → A, B, C..." for the branch log line, or "" without subcategories */
+function formatSubcategoryPreview(subcategories: string[]): string {
+    if (subcategories.length === 0) return "";
+    const more = subcategories.length > 3 ? "..." : "";
+    return ` → ${subcategories.slice(0, 3).join(", ")}${more}`;
+}
+
+/**
+ * Products of all successful branches. Logs each failed branch, warns on a partial result
+ * and throws when no branch succeeded.
+ */
+function collectBranchResults(
+    settled: PromiseSettledResult<BlueprintProduct[]>[],
+    branches: ProductBranch[],
+    storeName: string
+): BlueprintProduct[] {
+    const failures = settled.flatMap((result, index) =>
+        result.status === "rejected"
+            ? [
+                  {
+                      index,
+                      name: branches[index]?.name ?? `Branch ${index + 1}`,
+                      error: toError(result.reason),
+                  },
+              ]
+            : []
+    );
+    for (const failure of failures) logBranchFailure(storeName, failure);
+
+    const products = settled.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : []
+    );
+    if (failures.length === 0) return products;
+    if (products.length === 0) {
+        const reason = failures[0]?.error.message ?? "Unknown error";
+        throw new Error(
+            `All ${failures.length} hydration branches failed — no products were generated. ` +
+                `Reason: ${reason}`
+        );
+    }
+    warnPartialHydration(failures.length, settled.length, products.length);
+    return products;
+}
+
+function toError(reason: unknown): Error {
+    return reason instanceof Error ? reason : new Error(String(reason));
+}
+
+function logBranchFailure(
+    storeName: string,
+    failure: { index: number; name: string; error: Error }
+): void {
+    logger.error(`    ✗ ${storeName} > ${failure.name} failed: ${failure.error.message}`, {
+        cli: true,
+    });
+    logger.error(`Branch ${failure.name} failed`, {
+        data: { error: failure.error.message, branchIndex: failure.index },
+    });
+}
+
+function warnPartialHydration(failedCount: number, totalCount: number, productCount: number): void {
+    const successCount = totalCount - failedCount;
+    logger.warn(
+        `\n    ⚠ ${failedCount}/${totalCount} branches failed. ` +
+            `${productCount} products from ${successCount} successful branches will be used.`,
+        { cli: true }
+    );
+    logger.warn(`Partial hydration: ${failedCount} branches failed`, {
+        data: { failedCount, successCount, productsHydrated: productCount },
+    });
+}
+
+/**
+ * Categories from the AI: the branch category first (also the new primary category), then
+ * the known assigned names. Keeps the current categories when nothing is assigned or known.
+ */
+function assignCategories(
+    product: BlueprintProduct,
+    assignedNames: string[] | null,
+    categories: CategoryLookup
+): Pick<BlueprintProduct, "categoryIds" | "primaryCategoryId"> {
+    if (!assignedNames || assignedNames.length === 0) {
+        return { categoryIds: product.categoryIds, primaryCategoryId: product.primaryCategoryId };
+    }
+    const ids = [
+        categories.branchId,
+        ...assignedNames.map((name) => categories.idByName.get(name.toLowerCase())),
+    ].filter((id): id is string => Boolean(id));
+    const uniqueIds = [...new Set(ids)];
+
+    return {
+        categoryIds: uniqueIds.length > 0 ? uniqueIds : product.categoryIds,
+        primaryCategoryId: categories.branchId ?? product.primaryCategoryId,
+    };
 }
 
 /** Parse a JSON response, also when the model wrapped it in a Markdown code fence */

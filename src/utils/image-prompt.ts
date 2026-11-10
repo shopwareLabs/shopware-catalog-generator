@@ -1,6 +1,10 @@
 /**
- * Image prompt guards shared by every image generation call.
+ * Image prompt helpers shared by every image generation call.
  */
+
+import type { ProductProperty } from "../types/index.js";
+
+import { normalizeColorName } from "./color-normalize.js";
 
 /**
  * Instruction appended to every image prompt. Image models tend to put real brand
@@ -25,4 +29,35 @@ export function withFictionalBranding(prompt: string): string {
     if (trimmed.endsWith(FICTIONAL_BRANDING_INSTRUCTION)) return trimmed;
     const separator = /[.!?]$/.test(trimmed) ? " " : ". ";
     return `${trimmed}${separator}${FICTIONAL_BRANDING_INSTRUCTION}`;
+}
+
+/** Value of a property group (case-insensitive), or undefined */
+function propertyValue(properties: ProductProperty[], group: string): string | undefined {
+    return properties.find((p) => p.group.toLowerCase() === group)?.value;
+}
+
+/** The value when the product name does not already mention it */
+function missingFromName(productName: string, value: string | undefined): string | undefined {
+    if (!value || productName.toLowerCase().includes(value.toLowerCase())) return undefined;
+    return value;
+}
+
+/**
+ * Consistent base image prompt from the product name and its material, colour and
+ * style, e.g. "Lounge Chair, Oak construction, Navy finish, Modern design".
+ * Values the name already mentions are left out.
+ */
+export function buildBaseImagePrompt(productName: string, properties: ProductProperty[]): string {
+    const material = missingFromName(productName, propertyValue(properties, "material"));
+    const color = missingFromName(productName, propertyValue(properties, "color"));
+    const style = missingFromName(productName, propertyValue(properties, "style"));
+
+    return [
+        productName,
+        material && `${material} construction`,
+        color && `${normalizeColorName(color) || color} finish`,
+        style && `${style} design`,
+    ]
+        .filter(Boolean)
+        .join(", ");
 }

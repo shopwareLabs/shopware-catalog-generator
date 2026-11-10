@@ -240,56 +240,63 @@ async function cleanupProcessorEntities(
     ];
 }
 
+/** Lines that are only shown when `enabled` */
+function when(enabled: boolean, ...lines: string[]): string[] {
+    return enabled ? lines : [];
+}
+
+const yesNo = (value: boolean): string => (value ? "Yes" : "No");
+
+function coreDryRunLines(options: SalesChannelCleanupOptions): string[] {
+    return [
+        "[DRY RUN] Would delete:",
+        `  - Products in SalesChannel "${options.salesChannel}"`,
+        "  - Categories under its root category",
+        ...when(options.deleteProps, "  - All property groups"),
+        ...when(options.deleteSalesChannel, "  - The SalesChannel and its root category"),
+        "",
+    ];
+}
+
+function coreResultLines(result: CoreCleanupResult, options: SalesChannelCleanupOptions): string[] {
+    return [
+        "=== Core Cleanup Complete ===",
+        `Products deleted: ${result.products}`,
+        `Categories deleted: ${result.categories}`,
+        ...when(options.deleteProps, `Property groups deleted: ${result.propertyGroups}`),
+        ...when(
+            options.deleteSalesChannel,
+            `SalesChannel deleted: ${yesNo(result.salesChannelDeleted)}`,
+            `Root category deleted: ${yesNo(result.rootCategoryDeleted)}`
+        ),
+        ...when(
+            result.errors.length > 0,
+            `Error: Core cleanup errors: ${result.errors.join("; ")}`
+        ),
+        "",
+    ];
+}
+
 async function cleanupCoreData(
     shopware: CleanupShopware,
     options: SalesChannelCleanupOptions
 ): Promise<string[]> {
-    const { salesChannel, deleteProps, deleteSalesChannel } = options;
     const header = [
         "=== Core Cleanup ===",
-        `Delete SalesChannel: ${deleteSalesChannel ? "Yes" : "No"}`,
-        `Delete property groups: ${deleteProps ? "Yes" : "No"}`,
+        `Delete SalesChannel: ${yesNo(options.deleteSalesChannel)}`,
+        `Delete property groups: ${yesNo(options.deleteProps)}`,
     ];
+    if (options.dryRun) return [...header, ...coreDryRunLines(options)];
 
-    if (options.dryRun) {
-        return [
-            ...header,
-            "[DRY RUN] Would delete:",
-            `  - Products in SalesChannel "${salesChannel}"`,
-            "  - Categories under its root category",
-            ...(deleteProps ? ["  - All property groups"] : []),
-            ...(deleteSalesChannel ? ["  - The SalesChannel and its root category"] : []),
-            "",
-        ];
-    }
-
-    let result: CoreCleanupResult;
     try {
-        result = await shopware.cleanupCore(salesChannel, {
-            deletePropertyGroups: deleteProps,
-            deleteSalesChannel,
+        const result = await shopware.cleanupCore(options.salesChannel, {
+            deletePropertyGroups: options.deleteProps,
+            deleteSalesChannel: options.deleteSalesChannel,
         });
+        return [...header, ...coreResultLines(result, options)];
     } catch (error) {
         return [...header, `Error: Core cleanup failed: ${errorMessage(error)}`];
     }
-
-    return [
-        ...header,
-        "=== Core Cleanup Complete ===",
-        `Products deleted: ${result.products}`,
-        `Categories deleted: ${result.categories}`,
-        ...(deleteProps ? [`Property groups deleted: ${result.propertyGroups}`] : []),
-        ...(deleteSalesChannel
-            ? [
-                  `SalesChannel deleted: ${result.salesChannelDeleted ? "Yes" : "No"}`,
-                  `Root category deleted: ${result.rootCategoryDeleted ? "Yes" : "No"}`,
-              ]
-            : []),
-        ...(result.errors.length > 0
-            ? [`Error: Core cleanup errors: ${result.errors.join("; ")}`]
-            : []),
-        "",
-    ];
 }
 
 function processorHint(salesChannel: string): string[] {

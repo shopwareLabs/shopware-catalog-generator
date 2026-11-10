@@ -7,28 +7,44 @@ export interface ImageFormat {
     mimeType: string;
 }
 
+interface ImageSignature {
+    format: ImageFormat;
+    /** Byte sequences that must all match, each at its own offset */
+    parts: Array<{ offset: number; bytes: number[] }>;
+}
+
+const JPEG: ImageFormat = { extension: "jpg", mimeType: "image/jpeg" };
+
+const IMAGE_SIGNATURES: ImageSignature[] = [
+    { format: JPEG, parts: [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }] },
+    {
+        format: { extension: "png", mimeType: "image/png" },
+        parts: [{ offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47] }],
+    },
+    {
+        format: { extension: "gif", mimeType: "image/gif" },
+        parts: [{ offset: 0, bytes: [0x47, 0x49, 0x46] }],
+    },
+    {
+        // "RIFF" container with "WEBP" form type
+        format: { extension: "webp", mimeType: "image/webp" },
+        parts: [
+            { offset: 0, bytes: [0x52, 0x49, 0x46, 0x46] },
+            { offset: 8, bytes: [0x57, 0x45, 0x42, 0x50] },
+        ],
+    },
+];
+
+function matchesSignature(buffer: Buffer, signature: ImageSignature): boolean {
+    return signature.parts.every(({ offset, bytes }) =>
+        bytes.every((byte, index) => buffer[offset + index] === byte)
+    );
+}
+
 /**
- * Detect image format from magic bytes
+ * Detect image format from magic bytes (falls back to JPEG)
  */
 export function detectImageFormat(buffer: Buffer): ImageFormat {
-    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-        return { extension: "jpg", mimeType: "image/jpeg" };
-    }
-    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-        return { extension: "png", mimeType: "image/png" };
-    }
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
-        return { extension: "gif", mimeType: "image/gif" };
-    }
-    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
-        if (
-            buffer[8] === 0x57 &&
-            buffer[9] === 0x45 &&
-            buffer[10] === 0x42 &&
-            buffer[11] === 0x50
-        ) {
-            return { extension: "webp", mimeType: "image/webp" };
-        }
-    }
-    return { extension: "jpg", mimeType: "image/jpeg" };
+    const signature = IMAGE_SIGNATURES.find((candidate) => matchesSignature(buffer, candidate));
+    return { ...(signature?.format ?? JPEG) };
 }

@@ -296,3 +296,112 @@ describe("extractProductsFromJsonLd — ProductGroup.category", () => {
         expect(cats).toContain("Trail Running");
     });
 });
+
+function jsonLd(data: unknown): ReturnType<typeof load> {
+    return load(`<script type="application/ld+json">${JSON.stringify(data)}</script>`);
+}
+
+describe("extractCategoriesFromJsonLd — edge cases", () => {
+    test("reads nested item.name, trims names and skips non-string names", () => {
+        const $ = jsonLd({
+            "@type": "https://schema.org/BreadcrumbList",
+            itemListElement: [
+                { item: { name: "  Lighting  " } },
+                { name: 42 },
+                { position: 3 },
+                { name: "Desk Lamps", item: { name: "Ignored" } },
+            ],
+        });
+        expect(extractCategoriesFromJsonLd($)).toEqual(["Lighting", "Desk Lamps"]);
+    });
+
+    test("combines breadcrumbs and product categories in block order, deduplicated", () => {
+        const $ = jsonLd([
+            { "@type": "BreadcrumbList", itemListElement: [{ name: "Shoes" }] },
+            { "@type": ["Product"], name: "Runner", category: ["Shoes", " ", "Running"] },
+            { "@type": "ProductGroup", name: "Group", category: 7 },
+            { "@type": "Product", name: "No category" },
+        ]);
+        expect(extractCategoriesFromJsonLd($)).toEqual(["Shoes", "Running"]);
+    });
+
+    test("ignores malformed JSON-LD blocks", () => {
+        const $ = load(`
+            <script type="application/ld+json">{ not json</script>
+            <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[{"name":"Bags"}]}</script>
+        `);
+        expect(extractCategoriesFromJsonLd($)).toEqual(["Bags"]);
+    });
+});
+
+describe("extractProductsFromJsonLd — edge cases", () => {
+    test("builds properties from brand, color, material and additionalProperty", () => {
+        const $ = jsonLd({
+            "@type": "Product",
+            name: "Lamp",
+            brand: { name: "Lumo" },
+            color: "Blue",
+            material: "Steel",
+            additionalProperty: [
+                { name: "Color", value: "Red" },
+                { name: "Pack Size", value: 6 },
+                { name: "Weight", value: 0 },
+                { name: "Empty" },
+                { value: "no name" },
+            ],
+        });
+        expect(extractProductsFromJsonLd($)[0]?.properties).toEqual({
+            brand: "Lumo",
+            color: "Blue",
+            material: "Steel",
+            pack_size: "6",
+            weight: "0",
+        });
+    });
+
+    test("omits brand without a name and non-string color or material", () => {
+        const $ = jsonLd({
+            "@type": "Product",
+            name: "Lamp",
+            brand: {},
+            color: 5,
+            material: ["Steel"],
+            additionalProperty: "not an array",
+        });
+        expect(extractProductsFromJsonLd($)[0]?.properties).toBeUndefined();
+    });
+
+    test("takes the first trimmed category of an array and drops an empty one", () => {
+        const $ = jsonLd([
+            { "@type": "Product", name: " Chair ", category: [" Seating ", "Other"] },
+            { "@type": "Product", name: "Stool", category: "  " },
+            { "@type": "Product", name: "   " },
+        ]);
+        const products = extractProductsFromJsonLd($);
+        expect(products.map((p) => [p.name, p.category])).toEqual([
+            ["Chair", "Seating"],
+            ["Stool", undefined],
+        ]);
+    });
+
+    test("ItemList: uses item when present and requires @type Product on it", () => {
+        const $ = jsonLd({
+            "@type": "ItemList",
+            itemListElement: [
+                { position: 1, item: { "@type": "Product", name: "Nested Product" } },
+                { "@type": "Product", position: 2, item: { "@type": "Thing", name: "Thing" } },
+                { "@type": "Product", position: 3, name: "Direct Product" },
+                { "@type": "Product", position: 4, name: " " },
+                { position: 5, name: "Untyped" },
+            ],
+        });
+        expect(extractProductsFromJsonLd($).map((p) => p.name)).toEqual([
+            "Nested Product",
+            "Direct Product",
+        ]);
+    });
+
+    test("ItemList without itemListElement yields nothing", () => {
+        expect(extractProductsFromJsonLd(jsonLd({ "@type": "ItemList" }))).toEqual([]);
+    });
+});

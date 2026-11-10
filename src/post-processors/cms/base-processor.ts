@@ -7,8 +7,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { CmsPageFixture } from "../../fixtures/index.js";
-import type { CmsBlueprintPage } from "../../types/index.js";
+import type {
+    CmsBlockConfig,
+    CmsPageFixture,
+    CmsSectionConfig,
+    CmsSlotConfig,
+} from "../../fixtures/index.js";
+import type {
+    CmsBlueprintBlock,
+    CmsBlueprintPage,
+    CmsBlueprintSection,
+} from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -29,6 +38,106 @@ import { uploadImageWithRetry } from "../image-utils.js";
 
 /** Filename for storing CMS landing page IDs */
 const CMS_LANDING_PAGES_FILE = "cms-landing-pages.json";
+
+/** Log lines for a created or reused CMS layout */
+export interface CmsLayoutLogs {
+    created: string;
+    reused: string;
+}
+
+/** Fixture to create the CMS layout from, with its log lines */
+export interface PreparedCmsPage {
+    fixture: CmsPageFixture;
+    logs: CmsLayoutLogs;
+}
+
+/** Image slider or gallery item that shows a media entity */
+export interface CmsSliderItem {
+    mediaId: string;
+    url: null;
+    newTab: boolean;
+}
+
+/** One store-scoped page that cleanup deletes */
+interface StorePageDeletion {
+    entity: "landing-page" | "cms-page";
+    findId: () => Promise<string | null>;
+    deletedLog: string;
+    failedError: string;
+    lookupLabel: string;
+    missingLog?: string;
+}
+
+interface LandingPageItem {
+    id: string;
+    attributes?: { salesChannels?: Array<{ id: string }> };
+    relationships?: { salesChannels?: { data?: Array<{ id: string }> } };
+    salesChannels?: Array<{ id: string }>;
+}
+
+interface LandingPageResponse {
+    data?: LandingPageItem | LandingPageItem[];
+}
+
+/** Slider items (image-slider, image-gallery) for the given media IDs */
+export function toSliderItems(mediaIds: string[]): CmsSliderItem[] {
+    return mediaIds.map((mediaId) => ({ mediaId, url: null, newTab: false }));
+}
+
+/** All blocks of a fixture, in page order */
+export function fixtureBlocks(fixture: CmsPageFixture): CmsBlockConfig[] {
+    return fixture.sections.flatMap((section) => section.blocks);
+}
+
+/** All slots of a fixture, in page order */
+export function fixtureSlots(fixture: CmsPageFixture): CmsSlotConfig[] {
+    return fixtureBlocks(fixture).flatMap((block) => block.slots);
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+/** Copy hydrated text into the block's text slots that have content, in slot order */
+function applyHydratedBlockText(block: CmsBlockConfig, hydratedBlock: CmsBlueprintBlock): void {
+    block.slots
+        .filter((slot) => slot.type === "text" && slot.config.content)
+        .forEach((slot, index) => {
+            const textContent = hydratedBlock.slots[index]?.textContent;
+            if (!textContent) return;
+            slot.config.content = { source: "static", value: textContent };
+        });
+}
+
+/** Apply hydrated text block by block (matched by position in the section) */
+function applyHydratedSectionText(
+    section: CmsSectionConfig,
+    hydratedSection: CmsBlueprintSection
+): void {
+    section.blocks.forEach((block, index) => {
+        const hydratedBlock = hydratedSection.blocks[index];
+        if (hydratedBlock) applyHydratedBlockText(block, hydratedBlock);
+    });
+}
+
+/** IDs of the entities that have one (non-arrays count as empty) */
+function entityIds(entities: Array<{ id: string }> | undefined): string[] {
+    if (!Array.isArray(entities)) return [];
+    return entities.map((entity) => entity.id).filter((id) => Boolean(id));
+}
+
+/**
+ * SalesChannel IDs of a landing page: relationship data first, then the unique
+ * IDs from attributes and the entity itself (the API returns any of these shapes)
+ */
+function landingPageSalesChannelIds(landingPage: LandingPageItem): string[] {
+    const relationIds = entityIds(landingPage.relationships?.salesChannels?.data);
+    const otherIds = [
+        ...entityIds(landingPage.attributes?.salesChannels),
+        ...entityIds(landingPage.salesChannels),
+    ];
+    return otherIds.reduce((ids, id) => (ids.includes(id) ? ids : [...ids, id]), relationIds);
+}
 
 /**
  * Abstract base class for CMS element processors
@@ -92,37 +201,10 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         if (!hydratedPage) return fixture;
 
         const cloned = cloneDeep(fixture);
-
-        for (let si = 0; si < cloned.sections.length && si < hydratedPage.sections.length; si++) {
-            const fixtureSection = cloned.sections[si];
-            const hydratedSection = hydratedPage.sections[si];
-            if (!fixtureSection || !hydratedSection) continue;
-
-            for (
-                let bi = 0;
-                bi < fixtureSection.blocks.length && bi < hydratedSection.blocks.length;
-                bi++
-            ) {
-                const fixtureBlock = fixtureSection.blocks[bi];
-                const hydratedBlock = hydratedSection.blocks[bi];
-                if (!fixtureBlock || !hydratedBlock) continue;
-
-                let hydratedSlotIdx = 0;
-                for (const slot of fixtureBlock.slots) {
-                    if (slot.type !== "text" || !slot.config.content) continue;
-
-                    const hydratedSlot = hydratedBlock.slots[hydratedSlotIdx];
-                    if (hydratedSlot?.textContent) {
-                        slot.config.content = {
-                            source: "static",
-                            value: hydratedSlot.textContent,
-                        };
-                    }
-                    hydratedSlotIdx++;
-                }
-            }
-        }
-
+        cloned.sections.forEach((section, index) => {
+            const hydratedSection = hydratedPage.sections[index];
+            if (hydratedSection) applyHydratedSectionText(section, hydratedSection);
+        });
         return cloned;
     }
 
@@ -130,75 +212,51 @@ export abstract class BaseCmsProcessor implements PostProcessor {
      * Process: Create CMS page and landing page
      */
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { options } = context;
-        const errors: string[] = [];
-        const cmsPageName = this.getCmsPageName(context);
-        const landingPageName = this.getLandingPageName(context);
-
-        if (options.dryRun) {
-            logger.info(`    [DRY RUN] Would create CMS layout "${cmsPageName}"`, { cli: true });
-            logger.info(`    [DRY RUN] Would create Landing Page "${landingPageName}"`, {
-                cli: true,
-            });
-            return {
-                name: this.name,
-                processed: 1,
-                skipped: 0,
-                errors: [],
-                durationMs: 0,
-            };
+        if (context.options.dryRun) {
+            return this.dryRunResult(
+                this.getCmsPageName(context),
+                this.getLandingPageName(context)
+            );
         }
 
+        return this.processPage(context, async () => ({
+            fixture: this.applyHydratedText(this.pageFixture, this.getHydratedCmsPage(context)),
+            logs: {
+                created: `    ✓ Created CMS layout "${this.pageFixture.name}"`,
+                reused: `    ✓ Reusing CMS layout "${this.pageFixture.name}"`,
+            },
+        }));
+    }
+
+    /** Log lines for processors that report what they put into a new layout */
+    protected layoutLogs(createdDetail: string): CmsLayoutLogs {
+        return {
+            created: `    ✓ Created CMS layout "${this.pageFixture.name}" ${createdDetail}`,
+            reused: `    ⊘ CMS layout "${this.pageFixture.name}" already exists`,
+        };
+    }
+
+    /** Log the pages a dry run would create. The page counts as processed */
+    protected dryRunResult(cmsPageLabel: string, landingPageLabel: string): PostProcessorResult {
+        logger.info(`    [DRY RUN] Would create CMS layout "${cmsPageLabel}"`, { cli: true });
+        logger.info(`    [DRY RUN] Would create Landing Page "${landingPageLabel}"`, { cli: true });
+        return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
+    }
+
+    /**
+     * Prepare the fixture, create or reuse the CMS layout and landing page,
+     * then store the landing page ID. A thrown error fails the page.
+     */
+    protected async processPage(
+        context: PostProcessorContext,
+        prepare: () => Promise<PreparedCmsPage>
+    ): Promise<PostProcessorResult> {
+        const errors: string[] = [];
         try {
-            // Apply hydrated CMS text from blueprint if available
-            const hydratedPage = this.getHydratedCmsPage(context);
-            const fixtureToUse = this.applyHydratedText(this.pageFixture, hydratedPage);
-
-            // Step 1: Check if CMS page already exists for this SalesChannel
-            let cmsPageId = await this.findCmsPageByName(context, cmsPageName);
-
-            if (!cmsPageId) {
-                // Create the CMS page layout with store-scoped name
-                cmsPageId = await this.createCmsPage(context, fixtureToUse, cmsPageName);
-                if (!cmsPageId) {
-                    errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-                }
-                logger.info(`    ✓ Created CMS layout "${this.pageFixture.name}"`, { cli: true });
-            } else {
-                logger.info(`    ✓ Reusing CMS layout "${this.pageFixture.name}"`, {
-                    cli: true,
-                });
-            }
-
-            // Step 2: Check if Landing Page already exists for this SalesChannel
-            let landingPageId = await this.findLandingPageByName(context, landingPageName);
-
-            if (!landingPageId) {
-                // Create the Landing Page with store-scoped name
-                landingPageId = await this.createLandingPage(context, landingPageName, cmsPageId);
-                if (!landingPageId) {
-                    errors.push(`Failed to create Landing Page "${landingPageName}"`);
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-                }
-                logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, {
-                    cli: true,
-                });
-            } else {
-                await this.ensureSalesChannelAssociated(
-                    context,
-                    landingPageId,
-                    this.pageFixture.name,
-                    errors
-                );
-            }
-
-            // Step 3: Store landing page ID for orchestrator
-            await this.storeLandingPageId(context, landingPageId);
+            const { fixture, logs } = await prepare();
+            await this.createOrReusePages(context, fixture, logs, errors);
         } catch (error) {
-            errors.push(
-                `CMS processing failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`CMS processing failed: ${errorMessage(error)}`);
         }
 
         return {
@@ -210,6 +268,72 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         };
     }
 
+    private async createOrReusePages(
+        context: PostProcessorContext,
+        fixture: CmsPageFixture,
+        logs: CmsLayoutLogs,
+        errors: string[]
+    ): Promise<void> {
+        const cmsPageId = await this.ensureCmsPage(context, fixture, logs, errors);
+        if (!cmsPageId) return;
+
+        const landingPageId = await this.ensureLandingPage(context, cmsPageId, errors);
+        if (!landingPageId) return;
+
+        // Store landing page ID for the orchestrator
+        await this.storeLandingPageId(context, landingPageId);
+    }
+
+    /** Reuse the store's CMS layout or create it from the fixture. Returns its ID */
+    private async ensureCmsPage(
+        context: PostProcessorContext,
+        fixture: CmsPageFixture,
+        logs: CmsLayoutLogs,
+        errors: string[]
+    ): Promise<string | null> {
+        const cmsPageName = this.getCmsPageName(context);
+        const existingId = await this.findCmsPageByName(context, cmsPageName);
+        if (existingId) {
+            logger.info(logs.reused, { cli: true });
+            return existingId;
+        }
+
+        const cmsPageId = await this.createCmsPage(context, fixture, cmsPageName);
+        if (!cmsPageId) {
+            errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
+            return null;
+        }
+        logger.info(logs.created, { cli: true });
+        return cmsPageId;
+    }
+
+    /** Reuse the store's landing page (and link the SalesChannel) or create it. Returns its ID */
+    private async ensureLandingPage(
+        context: PostProcessorContext,
+        cmsPageId: string,
+        errors: string[]
+    ): Promise<string | null> {
+        const landingPageName = this.getLandingPageName(context);
+        const existingId = await this.findLandingPageByName(context, landingPageName);
+        if (existingId) {
+            await this.ensureSalesChannelAssociated(
+                context,
+                existingId,
+                this.pageFixture.name,
+                errors
+            );
+            return existingId;
+        }
+
+        const landingPageId = await this.createLandingPage(context, landingPageName, cmsPageId);
+        if (!landingPageId) {
+            errors.push(`Failed to create Landing Page "${landingPageName}"`);
+            return null;
+        }
+        logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, { cli: true });
+        return landingPageId;
+    }
+
     /**
      * Cleanup: Delete store-scoped landing page and CMS page
      *
@@ -217,67 +341,75 @@ export abstract class BaseCmsProcessor implements PostProcessor {
      * without checking for other SalesChannel associations.
      */
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
-        const landingPageName = this.getLandingPageName(context);
-        const cmsPageName = this.getCmsPageName(context);
-
+        const pageName = this.pageFixture.name;
         if (context.options.dryRun) {
-            logger.info(`    [DRY RUN] Would delete "${this.pageFixture.name}" landing page`, {
-                cli: true,
-            });
-            logger.info(`    [DRY RUN] Would delete "${this.pageFixture.name}" CMS layout`, {
-                cli: true,
-            });
+            logger.info(`    [DRY RUN] Would delete "${pageName}" landing page`, { cli: true });
+            logger.info(`    [DRY RUN] Would delete "${pageName}" CMS layout`, { cli: true });
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
-        let deleted = 0;
         const errors: string[] = [];
+        const landingPageName = this.getLandingPageName(context);
+        const deletedLandingPages = await this.deleteStorePage(
+            context,
+            {
+                entity: "landing-page",
+                findId: () => this.findLandingPageByName(context, landingPageName),
+                deletedLog: `    ✓ Deleted "${pageName}" landing page`,
+                failedError: `Failed to delete landing page "${landingPageName}"`,
+                lookupLabel: "Landing page",
+                missingLog: `    ⊘ "${pageName}" landing page not found, skipping`,
+            },
+            errors
+        );
 
-        // Delete the store-scoped landing page
+        const cmsPageName = this.getCmsPageName(context);
+        const deletedCmsPages = await this.deleteStorePage(
+            context,
+            {
+                entity: "cms-page",
+                findId: () => this.findCmsPageByName(context, cmsPageName),
+                deletedLog: `    ✓ Deleted "${pageName}" CMS layout`,
+                failedError: `Failed to delete CMS page "${cmsPageName}"`,
+                lookupLabel: "CMS page",
+            },
+            errors
+        );
+
+        return {
+            name: this.name,
+            deleted: deletedLandingPages + deletedCmsPages,
+            errors,
+            durationMs: 0,
+        };
+    }
+
+    /** Find and delete one store-scoped page. Returns the number of deleted pages (0 or 1) */
+    private async deleteStorePage(
+        context: PostProcessorContext,
+        page: StorePageDeletion,
+        errors: string[]
+    ): Promise<number> {
         try {
-            const landingPageId = await this.findLandingPageByName(context, landingPageName);
-            if (landingPageId) {
-                const lpSuccess = await this.deleteEntity(context, "landing-page", landingPageId);
-                if (lpSuccess) {
-                    logger.info(`    ✓ Deleted "${this.pageFixture.name}" landing page`, {
-                        cli: true,
-                    });
-                    deleted++;
-                } else {
-                    errors.push(`Failed to delete landing page "${landingPageName}"`);
-                }
-            } else {
-                logger.info(`    ⊘ "${this.pageFixture.name}" landing page not found, skipping`, {
-                    cli: true,
-                });
+            const pageId = await page.findId();
+            if (!pageId) {
+                if (page.missingLog) logger.info(page.missingLog, { cli: true });
+                return 0;
             }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            errors.push(`Landing page lookup failed: ${message}`);
-            logger.error(`    ✗ ${message}`, { cli: true });
-        }
 
-        // Delete the store-scoped CMS page
-        try {
-            const cmsPageId = await this.findCmsPageByName(context, cmsPageName);
-            if (cmsPageId) {
-                const cmsSuccess = await this.deleteEntity(context, "cms-page", cmsPageId);
-                if (cmsSuccess) {
-                    logger.info(`    ✓ Deleted "${this.pageFixture.name}" CMS layout`, {
-                        cli: true,
-                    });
-                    deleted++;
-                } else {
-                    errors.push(`Failed to delete CMS page "${cmsPageName}"`);
-                }
+            const deleted = await this.deleteEntity(context, page.entity, pageId);
+            if (!deleted) {
+                errors.push(page.failedError);
+                return 0;
             }
+            logger.info(page.deletedLog, { cli: true });
+            return 1;
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            errors.push(`CMS page lookup failed: ${message}`);
+            const message = errorMessage(error);
+            errors.push(`${page.lookupLabel} lookup failed: ${message}`);
             logger.error(`    ✗ ${message}`, { cli: true });
+            return 0;
         }
-
-        return { name: this.name, deleted, errors, durationMs: 0 };
     }
 
     // =========================================================================
@@ -476,63 +608,33 @@ export abstract class BaseCmsProcessor implements PostProcessor {
         landingPageId: string
     ): Promise<{ id: string; salesChannelIds: string[] } | null> {
         try {
-            interface LandingPageItem {
-                id: string;
-                attributes?: { salesChannels?: Array<{ id: string }> };
-                relationships?: { salesChannels?: { data?: Array<{ id: string }> } };
-                salesChannels?: Array<{ id: string }>;
-            }
-
-            interface LandingPageResponse {
-                data?: LandingPageItem | LandingPageItem[];
-            }
-
-            const response = await apiPost(context, `search/landing-page`, {
-                ids: [landingPageId],
-                associations: { salesChannels: {} },
-            });
-
-            if (response.ok) {
-                const responseData = (await response.json()) as LandingPageResponse;
-                const landingPage = Array.isArray(responseData.data)
-                    ? responseData.data[0]
-                    : responseData.data;
-
-                if (landingPage) {
-                    const salesChannelIds: string[] = [];
-
-                    const relData = landingPage.relationships?.salesChannels?.data;
-                    if (Array.isArray(relData)) {
-                        for (const sc of relData) {
-                            if (sc.id) salesChannelIds.push(sc.id);
-                        }
-                    }
-
-                    const attrData = landingPage.attributes?.salesChannels;
-                    if (Array.isArray(attrData)) {
-                        for (const sc of attrData) {
-                            if (sc.id && !salesChannelIds.includes(sc.id)) {
-                                salesChannelIds.push(sc.id);
-                            }
-                        }
-                    }
-
-                    if (Array.isArray(landingPage.salesChannels)) {
-                        for (const sc of landingPage.salesChannels) {
-                            if (sc.id && !salesChannelIds.includes(sc.id)) {
-                                salesChannelIds.push(sc.id);
-                            }
-                        }
-                    }
-
-                    return { id: landingPage.id, salesChannelIds };
-                }
-            }
+            const landingPage = await this.searchLandingPageWithSalesChannels(
+                context,
+                landingPageId
+            );
+            if (!landingPage) return null;
+            return { id: landingPage.id, salesChannelIds: landingPageSalesChannelIds(landingPage) };
         } catch (error) {
             logger.warn(`Failed to get Landing Page with associations`, { data: error });
+            return null;
         }
+    }
 
-        return null;
+    private async searchLandingPageWithSalesChannels(
+        context: PostProcessorContext,
+        landingPageId: string
+    ): Promise<LandingPageItem | null> {
+        const response = await apiPost(context, `search/landing-page`, {
+            ids: [landingPageId],
+            associations: { salesChannels: {} },
+        });
+        if (!response.ok) return null;
+
+        const responseData = (await response.json()) as LandingPageResponse;
+        const landingPage = Array.isArray(responseData.data)
+            ? responseData.data[0]
+            : responseData.data;
+        return landingPage ?? null;
     }
 
     /**

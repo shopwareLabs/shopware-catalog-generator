@@ -24,6 +24,7 @@ import {
     logger,
 } from "../utils/index.js";
 import { uploadImageWithRetry } from "./image-utils.js";
+import { errorMessage } from "./processor-utils.js";
 
 interface ThemeMediaIds {
     logo?: string;
@@ -49,7 +50,6 @@ class ThemeProcessorImpl implements PostProcessor {
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         this.resetCaches();
         const startTime = Date.now();
-        const errors: string[] = [];
 
         if (context.options.dryRun) {
             logger.info(`  [DRY RUN] Would customize theme for ${context.salesChannelName}`, {
@@ -58,15 +58,15 @@ class ThemeProcessorImpl implements PostProcessor {
             return { name: this.name, processed: 0, skipped: 1, errors: [], durationMs: 0 };
         }
 
+        const outcome = await this.customizeTheme(context);
+        return { name: this.name, ...outcome, durationMs: Date.now() - startTime };
+    }
+
+    /** Child theme with brand colors and media, assigned to the SalesChannel */
+    private async customizeTheme(context: PostProcessorContext): Promise<ThemeOutcome> {
         const storefrontThemeId = await this.getStorefrontThemeId(context);
         if (!storefrontThemeId) {
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: 1,
-                errors: ["No Storefront theme found"],
-                durationMs: Date.now() - startTime,
-            };
+            return { processed: 0, skipped: 1, errors: ["No Storefront theme found"] };
         }
 
         const childThemeId = await this.getOrCreateChildTheme(
@@ -75,52 +75,36 @@ class ThemeProcessorImpl implements PostProcessor {
             context.salesChannelName
         );
         if (!childThemeId) {
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: 0,
-                errors: ["Failed to create child theme"],
-                durationMs: Date.now() - startTime,
-            };
+            return { processed: 0, skipped: 0, errors: ["Failed to create child theme"] };
         }
 
         const mediaIds = await this.uploadThemeMedia(context);
-
         const themeConfig = buildThemeConfig(context.blueprint.brandColors, mediaIds);
-
         if (Object.keys(themeConfig).length === 0) {
             logger.info("  ⊘ No brand colors or theme media to apply", { cli: true });
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: 1,
-                errors,
-                durationMs: Date.now() - startTime,
-            };
+            return { processed: 0, skipped: 1, errors: [] };
         }
 
+        return this.applyThemeConfig(context, childThemeId, themeConfig);
+    }
+
+    /** Write the config to the child theme and assign it to the SalesChannel */
+    private async applyThemeConfig(
+        context: PostProcessorContext,
+        childThemeId: string,
+        themeConfig: Record<string, { value: string }>
+    ): Promise<ThemeOutcome> {
+        const errors: string[] = [];
         const configUpdated = await this.updateThemeConfig(context, childThemeId, themeConfig);
-        if (!configUpdated) {
-            errors.push("Failed to update theme config");
-        }
+        if (!configUpdated) errors.push("Failed to update theme config");
 
         const assigned = await this.assignTheme(context, childThemeId, context.salesChannelId);
-        if (!assigned) {
-            errors.push("Failed to assign theme to SalesChannel");
-        }
+        if (!assigned) errors.push("Failed to assign theme to SalesChannel");
 
         if (this.replacedMediaFiles > 0) await this.clearShopCache(context);
 
-        const processed = configUpdated || assigned ? 1 : 0;
         logger.info(`  ✓ Theme customized for ${context.salesChannelName}`, { cli: true });
-
-        return {
-            name: this.name,
-            processed,
-            skipped: 0,
-            errors,
-            durationMs: Date.now() - startTime,
-        };
+        return { processed: configUpdated || assigned ? 1 : 0, skipped: 0, errors };
     }
 
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
@@ -159,9 +143,7 @@ class ThemeProcessorImpl implements PostProcessor {
             deleted++;
             logger.info(`  ✓ Deleted child theme "${themeName}"`, { cli: true });
         } catch (error) {
-            errors.push(
-                `Failed to delete theme: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Failed to delete theme: ${errorMessage(error)}`);
         }
 
         const mediaDeleted = await this.deleteThemeMedia(context);
@@ -348,30 +330,8 @@ class ThemeProcessorImpl implements PostProcessor {
         const mediaId = existing?.id ?? generateUUID();
         const field = fileName.slice(context.salesChannelName.length + 1);
         try {
-            if (!existing) {
-                await apiPost(context, "_action/sync", {
-                    createMedia: {
-                        entity: "media",
-                        action: "upsert",
-                        payload: [
-                            {
-                                id: mediaId,
-                                private: false,
-                                ...(folderId && { mediaFolderId: folderId }),
-                            },
-                        ],
-                    },
-                });
-            }
-            const format = detectImageFormat(imageBuffer);
-            const response = await uploadImageWithRetry(
-                context,
-                mediaId,
-                fileName,
-                imageBuffer,
-                format
-            );
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (!existing) await createThemeMediaEntity(context, mediaId, folderId);
+            await uploadThemeMediaContent(context, mediaId, fileName, imageBuffer);
             this.mediaFileNameCache.set(fileName, { id: mediaId, fileSize: imageBuffer.length });
             if (existing) this.replacedMediaFiles++;
             logger.info(`  ✓ ${existing ? "Replaced" : "Uploaded"} theme ${field}`, { cli: true });
@@ -490,6 +450,42 @@ class ThemeProcessorImpl implements PostProcessor {
 interface ThemeMediaFile {
     id: string;
     fileSize: number | null;
+}
+
+/** Result counts of one theme run */
+interface ThemeOutcome {
+    processed: number;
+    skipped: number;
+    errors: string[];
+}
+
+/** Create the public media entity a theme image is uploaded into */
+async function createThemeMediaEntity(
+    context: PostProcessorContext,
+    mediaId: string,
+    folderId: string | null
+): Promise<void> {
+    await apiPost(context, "_action/sync", {
+        createMedia: {
+            entity: "media",
+            action: "upsert",
+            payload: [
+                { id: mediaId, private: false, ...(folderId && { mediaFolderId: folderId }) },
+            ],
+        },
+    });
+}
+
+/** Upload the image file into a media entity, throws when Shopware rejects it */
+async function uploadThemeMediaContent(
+    context: PostProcessorContext,
+    mediaId: string,
+    fileName: string,
+    imageBuffer: Buffer
+): Promise<void> {
+    const format = detectImageFormat(imageBuffer);
+    const response = await uploadImageWithRetry(context, mediaId, fileName, imageBuffer, format);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }
 
 function buildThemeName(salesChannelName: string): string {

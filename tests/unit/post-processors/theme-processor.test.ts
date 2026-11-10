@@ -158,6 +158,129 @@ describe("ThemeProcessor theme media upload", () => {
 
         expect(uploads(mockApi)).toHaveLength(1);
         expect(uploads(mockApi)[0]).not.toContain(LOGO_MEDIA_ID);
+        const createMedia = mockApi
+            .getCallsByEndpoint("_action/sync")
+            .map((c) => c.body)
+            .find((body) => JSON.stringify(body).includes("createMedia"));
+        expect(createMedia).toEqual({
+            createMedia: {
+                entity: "media",
+                action: "upsert",
+                payload: [{ id: expect.any(String), private: false }],
+            },
+        });
+    });
+
+    test("uses the logo media ID in the theme config", async () => {
+        const { context, mockApi } = setup({ fileSize: CACHED_LOGO_SIZE });
+
+        await ThemeProcessor.process(context);
+
+        const patch = mockApi.getCallsByMethod("patch")[0];
+        expect(JSON.stringify(patch?.body)).toContain(
+            `"sw-logo-desktop":{"value":"${LOGO_MEDIA_ID}"}`
+        );
+    });
+});
+
+describe("ThemeProcessor process outcomes", () => {
+    const CHILD_THEME_ID = "child-theme-id";
+
+    function setup(brandColors?: BrandColors) {
+        const { context, mockApi } = createTestContext({
+            blueprint: createTestBlueprint({ brandColors }),
+        });
+        mockApi.mockPostResponse("search/theme", {
+            data: [{ id: CHILD_THEME_ID, name: "Test-store Theme" }],
+            total: 1,
+        });
+        return { context, mockApi };
+    }
+
+    const colors: BrandColors = { primary: "#FF0000", secondary: "#0000FF" };
+
+    test("applies the config and assigns the theme", async () => {
+        const { context, mockApi } = setup(colors);
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({ name: "theme", processed: 1, skipped: 0, errors: [] });
+        const patches = mockApi.getCallsByMethod("patch");
+        expect(patches.map((c) => c.endpoint)).toEqual([`_action/theme/${CHILD_THEME_ID}`]);
+        expect(patches[0]?.body).toEqual({ config: buildThemeConfig(colors, {}) });
+        expect(
+            mockApi
+                .getCallsByEndpoint(`_action/theme/${CHILD_THEME_ID}/assign/`)
+                .map((c) => c.endpoint)
+        ).toEqual([`_action/theme/${CHILD_THEME_ID}/assign/${context.salesChannelId}`]);
+        expect(mockApi.getCallsByEndpoint("_action/cache")).toEqual([]);
+    });
+
+    test("skips when there are no brand colors and no theme media", async () => {
+        const { context, mockApi } = setup(undefined);
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({ processed: 0, skipped: 1, errors: [] });
+        expect(mockApi.getCallsByMethod("patch")).toEqual([]);
+        expect(mockApi.getCallsByEndpoint("/assign/")).toEqual([]);
+    });
+
+    test("reports a failed child theme creation", async () => {
+        const { context, mockApi } = setup(colors);
+        let calls = 0;
+        mockApi.postMock.mockImplementation(() => {
+            calls++;
+            if (calls >= 2) throw new Error("down");
+            return Promise.resolve({});
+        });
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({
+            processed: 0,
+            skipped: 0,
+            errors: ["Failed to create child theme"],
+        });
+    });
+
+    test("reports a failed config update but still assigns", async () => {
+        const { context, mockApi } = setup(colors);
+        mockApi.patchMock.mockImplementation(() => {
+            throw new Error("patch broke");
+        });
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({ processed: 1, errors: ["Failed to update theme config"] });
+    });
+
+    test("reports a failed assignment", async () => {
+        const { context, mockApi } = setup(colors);
+        mockApi.mockPostFailure("/assign/", new Error("assign broke"));
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({
+            processed: 1,
+            errors: ["Failed to assign theme to SalesChannel"],
+        });
+    });
+
+    test("processes nothing when update and assignment both fail", async () => {
+        const { context, mockApi } = setup(colors);
+        mockApi.patchMock.mockImplementation(() => {
+            throw new Error("patch broke");
+        });
+        mockApi.mockPostFailure("/assign/", new Error("assign broke"));
+
+        const result = await ThemeProcessor.process(context);
+
+        expect(result).toMatchObject({
+            processed: 0,
+            skipped: 0,
+            errors: ["Failed to update theme config", "Failed to assign theme to SalesChannel"],
+        });
     });
 });
 

@@ -294,30 +294,28 @@ export function flattenCategories(
     return result;
 }
 
-export function resolveCmsProcessors(searchTerm: string): string[] {
-    if (searchTerm === "all" || searchTerm === "cms") {
-        return ["cms-home", "cms-images", "cms-text-images"];
-    }
+const ALL_CMS_IMAGE_PROCESSORS = ["cms-home", "cms-images", "cms-text-images"];
 
-    const selected = new Set<string>();
-    if (searchTerm.includes("home") || searchTerm.includes("listing")) {
-        selected.add("cms-home");
-    }
-    if (
-        searchTerm.includes("text & images") ||
-        searchTerm.includes("text-images") ||
-        (searchTerm.includes("text") && searchTerm.includes("image"))
-    ) {
-        selected.add("cms-text-images");
-    }
-    if (
-        searchTerm.includes("image elements") ||
-        searchTerm === "images" ||
-        searchTerm === "cms-images"
-    ) {
-        selected.add("cms-images");
-    }
-    return Array.from(selected);
+const isHomePage = (term: string): boolean => term.includes("home") || term.includes("listing");
+
+const isTextImagesPage = (term: string): boolean =>
+    term.includes("text & images") ||
+    term.includes("text-images") ||
+    (term.includes("text") && term.includes("image"));
+
+const isImageElementsPage = (term: string): boolean =>
+    term.includes("image elements") || term === "images" || term === "cms-images";
+
+/** CMS processor per page matcher, in the order they are returned */
+const CMS_PAGE_MATCHERS: ReadonlyArray<[string, (term: string) => boolean]> = [
+    ["cms-home", isHomePage],
+    ["cms-text-images", isTextImagesPage],
+    ["cms-images", isImageElementsPage],
+];
+
+export function resolveCmsProcessors(searchTerm: string): string[] {
+    if (searchTerm === "all" || searchTerm === "cms") return [...ALL_CMS_IMAGE_PROCESSORS];
+    return CMS_PAGE_MATCHERS.filter(([, matches]) => matches(searchTerm)).map(([name]) => name);
 }
 
 async function uploadViaProcessors(params: ImageFixUploadParams): Promise<void> {

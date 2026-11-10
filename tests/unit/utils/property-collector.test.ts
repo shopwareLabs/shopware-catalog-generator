@@ -368,6 +368,85 @@ describe("PropertyCollector", () => {
             expect(groups[0]?.options.length).toBe(1);
             expect(groups[0]?.options[0]?.name).toBe("Blue");
         });
+
+        test("trims group names and values", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: " Size ", value: " XL " }] },
+            ]);
+
+            const groups = collector.collectFromBlueprint(blueprint);
+
+            expect(groups.map((g) => g.name)).toEqual(["Size"]);
+            expect(groups[0]?.options.map((o) => o.name)).toEqual(["XL"]);
+        });
+
+        test("colours shown as an image get no hex code", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Color", value: "Multicolor" }] },
+            ]);
+
+            const groups = collector.collectFromBlueprint(blueprint, [
+                {
+                    id: "sw-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "sw-multi", name: "Multicolor", colorHexCode: "#123456" }],
+                },
+            ]);
+
+            expect(groups[0]?.options).toEqual([
+                { id: "sw-multi", name: "Multicolor", colorHexCode: undefined },
+            ]);
+        });
+
+        test("non-colour groups keep an existing hex code but never get a new one", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                {
+                    id: "1",
+                    properties: [
+                        { group: "Finish", value: "Red" },
+                        { group: "Finish", value: "Blue" },
+                    ],
+                },
+            ]);
+
+            const groups = collector.collectFromBlueprint(blueprint, [
+                {
+                    id: "sw-finish",
+                    name: "Finish",
+                    displayType: "text",
+                    options: [{ id: "sw-red", name: "Red", colorHexCode: "#FF0000" }],
+                },
+            ]);
+
+            expect(groups[0]?.displayType).toBe("text");
+            expect(groups[0]?.options.map((o) => [o.name, o.colorHexCode])).toEqual([
+                ["Red", "#FF0000"],
+                ["Blue", undefined],
+            ]);
+        });
+
+        test("keeps existing options that no product uses", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Size", value: "S" }] },
+            ]);
+
+            const groups = collector.collectFromBlueprint(blueprint, [
+                {
+                    id: "sw-size",
+                    name: "Size",
+                    displayType: "text",
+                    options: [{ id: "sw-xl", name: "XL" }],
+                },
+            ]);
+
+            expect(groups[0]?.options.map((o) => o.name)).toEqual(["S", "XL"]);
+            expect(groups[0]?.options[1]?.id).toBe("sw-xl");
+        });
     });
 
     describe("collectManufacturers", () => {

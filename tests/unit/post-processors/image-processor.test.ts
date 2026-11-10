@@ -403,6 +403,248 @@ describe("ImageProcessor - accessibility and social sharing", () => {
         expect(cover?.openGraphMediaId).toBeUndefined();
     });
 
+    test("product media are linked in view order with the first one as cover", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "p-order",
+                    name: "Oak Shelf",
+                    metadata: createMockProductMetadata({
+                        imageDescriptions: [
+                            { view: "front", prompt: "a" },
+                            { view: "side", prompt: "b" },
+                        ],
+                    }),
+                }),
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map([
+                [
+                    "p-order",
+                    {
+                        imageDescriptions: [
+                            { view: "front" as const, prompt: "a" },
+                            { view: "side" as const, prompt: "b" },
+                        ],
+                    },
+                ],
+            ]),
+            cachedImages: new Set(["p-order-front", "p-order-side"]),
+            dryRun: false,
+            shopware: ShopwareCapabilities.fromVersion("6.7.16.0"),
+        });
+        mockApi.mockPostResponse("search/product", {
+            data: [{ id: "p-order", media: [], coverId: null }],
+        });
+        mockApi.mockPostResponse("search/media", { data: [] });
+        mockApi.mockPostResponse("search/media-folder", { data: [{ id: "folder-1" }] });
+
+        const result = await ImageProcessor.process(context);
+        expect(result).toMatchObject({ processed: 1, skipped: 0, errors: [] });
+
+        const bodies = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body as SyncBody);
+        expect(bodies.length).toBe(2);
+        const media = bodies[0]?.createMedia?.payload ?? [];
+        expect(media.map((m) => m.title)).toEqual([
+            "Oak Shelf (front view)",
+            "Oak Shelf (side view)",
+        ]);
+        expect(media.every((m) => m.private === false && m.mediaFolderId === "folder-1")).toBe(
+            true
+        );
+
+        const links = bodies[1]?.createProductMedia?.payload ?? [];
+        expect(bodies[1]?.createProductMedia?.entity).toBe("product_media");
+        expect(links.map((l) => l.position)).toEqual([0, 1]);
+        expect(links.map((l) => l.mediaId)).toEqual(media.map((m) => m.id));
+        expect(links.every((l) => l.productId === "p-order")).toBe(true);
+        const cover = bodies[1]?.updateCover?.payload[0];
+        expect(bodies[1]?.updateCover?.entity).toBe("product");
+        expect(cover?.id).toBe("p-order");
+        expect(cover?.coverId).toBe(links[0]?.id as string);
+
+        const uploads = mockApi.getCallsByEndpoint("_action/media/").map((c) => c.endpoint);
+        expect(uploads.length).toBe(2);
+        expect(uploads.some((e) => e.includes("fileName=Oak-Shelf-front"))).toBe(true);
+        expect(uploads.some((e) => e.includes("fileName=Oak-Shelf-side"))).toBe(true);
+    });
+
+    test("existing media with the same file name are linked without a new upload", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "p-reuse",
+                    name: "Reused Stool",
+                    metadata: createMockProductMetadata({
+                        imageDescriptions: [{ view: "front", prompt: "a" }],
+                    }),
+                }),
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map([
+                ["p-reuse", { imageDescriptions: [{ view: "front" as const, prompt: "a" }] }],
+            ]),
+            cachedImages: new Set(["p-reuse-front"]),
+            dryRun: false,
+        });
+        mockApi.mockPostResponse("search/product", {
+            data: [{ id: "p-reuse", media: [], coverId: null }],
+        });
+        mockApi.mockPostResponse("search/media", { data: [{ id: "media-existing" }] });
+
+        const result = await ImageProcessor.process(context);
+        expect(result).toMatchObject({ processed: 1, errors: [] });
+
+        const bodies = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body as SyncBody);
+        expect(bodies.length).toBe(1);
+        expect(bodies[0]?.createMedia).toBeUndefined();
+        expect(bodies[0]?.createProductMedia?.payload[0]?.mediaId).toBe("media-existing");
+        expect(mockApi.getCallsByEndpoint("_action/media/").length).toBe(0);
+        const mediaSearch = JSON.stringify(mockApi.getCallsByEndpoint("search/media")[0]?.body);
+        expect(mediaSearch).toContain('"value":"Reused-Stool-front"');
+    });
+
+    test("failed product and banner uploads are reported as errors", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "p-fail",
+                    name: "Broken Chair",
+                    metadata: createMockProductMetadata({
+                        imageDescriptions: [{ view: "front", prompt: "a" }],
+                    }),
+                }),
+            ],
+            categories: [
+                {
+                    id: "cat-fail",
+                    name: "Broken Cat",
+                    description: "d",
+                    level: 1 as const,
+                    hasImage: true,
+                    imageDescription: "banner",
+                    children: [],
+                },
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map([
+                ["p-fail", { imageDescriptions: [{ view: "front" as const, prompt: "a" }] }],
+            ]),
+            cachedImages: new Set(["p-fail-front", "cat-fail-banner"]),
+            dryRun: false,
+        });
+        mockApi.mockPostResponse("search/product", {
+            data: [{ id: "p-fail", media: [], coverId: null }],
+        });
+        mockApi.mockPostResponse("search/media", { data: [] });
+        mockApi.mockPostResponse("search/category", { data: [{ id: "cat-fail", mediaId: null }] });
+        mockApi.mockPostFailure("_action/sync", new Error("sync down"));
+
+        const result = await ImageProcessor.process(context);
+
+        expect(result.processed).toBe(0);
+        expect(result.skipped).toBe(1);
+        expect(result.errors).toEqual([
+            "Failed to upload images for Broken Chair: sync down",
+            "Failed to upload banner for Broken Cat: sync down",
+        ]);
+    });
+
+    test("dry run counts products but not category banners", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "p-dry",
+                    name: "Dry Product",
+                    metadata: createMockProductMetadata({
+                        imageDescriptions: [{ view: "front", prompt: "a" }],
+                    }),
+                }),
+            ],
+            categories: [
+                {
+                    id: "cat-dry",
+                    name: "Dry Cat",
+                    description: "d",
+                    level: 1 as const,
+                    hasImage: true,
+                    imageDescription: "banner",
+                    children: [
+                        {
+                            id: "cat-dry-child",
+                            name: "Dry Child",
+                            description: "d",
+                            level: 2 as const,
+                            hasImage: true,
+                            imageDescription: "banner",
+                            children: [],
+                        },
+                    ],
+                },
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map([
+                ["p-dry", { imageDescriptions: [{ view: "front" as const, prompt: "a" }] }],
+            ]),
+            cachedImages: new Set(["p-dry-front", "cat-dry-child-banner"]),
+            dryRun: true,
+        });
+
+        const result = await ImageProcessor.process(context);
+
+        expect(result).toMatchObject({ processed: 1, skipped: 0, errors: [] });
+        expect(mockApi.getCalls().length).toBe(0);
+    });
+
+    test("nested category banners are uploaded", async () => {
+        const blueprint = createTestBlueprint({
+            products: [],
+            categories: [
+                {
+                    id: "cat-parent-nb",
+                    name: "Parent",
+                    description: "d",
+                    level: 1 as const,
+                    hasImage: false,
+                    children: [
+                        {
+                            id: "cat-child-nb",
+                            name: "Nested Banner",
+                            description: "d",
+                            level: 2 as const,
+                            hasImage: true,
+                            imageDescription: "banner",
+                            children: [],
+                        },
+                    ],
+                },
+            ],
+        });
+        const { context, mockApi } = createTestContext({
+            blueprint,
+            metadataMap: new Map(),
+            cachedImages: new Set(["cat-child-nb-banner"]),
+            dryRun: false,
+        });
+        mockApi.mockPostResponse("search/category", { data: [] });
+        mockApi.mockPostResponse("search/media", { data: [] });
+
+        const result = await ImageProcessor.process(context);
+
+        expect(result.errors).toEqual([]);
+        const uploads = mockApi.getCallsByEndpoint("_action/media/").map((c) => c.endpoint);
+        expect(uploads.length).toBe(1);
+        expect(uploads[0]).toContain("fileName=Nested-Banner-banner");
+    });
+
     test("buildProductMediaTexts names product and view", () => {
         expect(buildProductMediaTexts("Chair", "side")).toEqual({
             alt: "Chair (side view)",

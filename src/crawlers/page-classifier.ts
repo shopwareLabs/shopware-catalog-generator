@@ -55,20 +55,22 @@ function flattenBlocks(data: unknown): Record<string, unknown>[] {
 
 /** A bare Product with only a name is a navigation/category item, not a real product.
  * Real products have at least one product-specific field. */
+const PRODUCT_DETAIL_FIELDS = [
+    "offers",
+    "sku",
+    "gtin",
+    "mpn",
+    "description",
+    "brand",
+    "color",
+    "material",
+    "additionalProperty",
+    "aggregateRating",
+    "review",
+];
+
 function isSubstantialProduct(block: Record<string, unknown>): boolean {
-    return !!(
-        block.offers ||
-        block.sku ||
-        block.gtin ||
-        block.mpn ||
-        block.description ||
-        block.brand ||
-        block.color ||
-        block.material ||
-        block.additionalProperty ||
-        block.aggregateRating ||
-        block.review
-    );
+    return PRODUCT_DETAIL_FIELDS.some((field) => !!block[field]);
 }
 
 interface JsonLdSignals {
@@ -79,7 +81,7 @@ interface JsonLdSignals {
     weakCms: boolean;
 }
 
-function classifyFromJsonLd($: CheerioAPI): JsonLdSignals {
+function parseJsonLdBlocks($: CheerioAPI): Record<string, unknown>[] {
     const blocks: Record<string, unknown>[] = [];
 
     $('script[type="application/ld+json"]').each((_, el) => {
@@ -91,58 +93,71 @@ function classifyFromJsonLd($: CheerioAPI): JsonLdSignals {
         }
     });
 
+    return blocks;
+}
+
+/** Definitive product/category signal of one JSON-LD block, null when it has none. */
+function strongSignalOf(types: string[], block: Record<string, unknown>): PageType | null {
+    if (types.some((t) => PRODUCT_TYPES.has(t)) && isSubstantialProduct(block)) return "product";
+    // ItemList subtypes are CATEGORY — except BreadcrumbList which is navigation
+    if (types.some((t) => CATEGORY_TYPES.has(t)) && !types.includes("breadcrumblist")) {
+        return "category";
+    }
+    return null;
+}
+
+function classifyFromJsonLd($: CheerioAPI): JsonLdSignals {
     let strong: PageType | null = null;
     let weakCms = false;
 
-    for (const block of blocks) {
+    for (const block of parseJsonLdBlocks($)) {
         const types = getTypes(block);
-        if (types.length === 0) continue;
-
-        if (!strong && types.some((t) => PRODUCT_TYPES.has(t)) && isSubstantialProduct(block)) {
-            strong = "product";
-        } else if (
-            !strong &&
-            types.some((t) => CATEGORY_TYPES.has(t)) &&
-            !types.includes("breadcrumblist")
-        ) {
-            // ItemList subtypes are CATEGORY — except BreadcrumbList which is navigation
-            strong = "category";
-        }
-
+        strong ??= strongSignalOf(types, block);
         if (types.some((t) => CMS_TYPES.has(t))) weakCms = true;
     }
 
     return { strong, weakCms };
 }
 
+interface MicrodataSignals {
+    productCount: number;
+    listCount: number;
+    priceCount: number;
+    aggregateRatingCount: number;
+}
+
+function countMicrodataSignals($: CheerioAPI): MicrodataSignals {
+    const itemtypes = $("[itemtype]")
+        .toArray()
+        .map((el) => $(el).attr("itemtype")?.toLowerCase() ?? "");
+    const countMatching = (predicate: (t: string) => boolean): number =>
+        itemtypes.filter(predicate).length;
+
+    return {
+        productCount: countMatching((t) => t.includes("schema.org/product")),
+        listCount: countMatching(
+            (t) => t.includes("schema.org/itemlist") && !t.includes("breadcrumb")
+        ),
+        priceCount: $("[itemprop='price'], [itemprop='offers']").length,
+        aggregateRatingCount: countMatching((t) => t.includes("schema.org/aggregaterating")),
+    };
+}
+
 function classifyFromMicrodata($: CheerioAPI): PageType | null {
-    let productCount = 0;
-    let listCount = 0;
-    let priceCount = 0;
-    let aggregateRatingCount = 0;
+    const { productCount, listCount, priceCount, aggregateRatingCount } = countMicrodataSignals($);
 
-    $("[itemtype]").each((_, el) => {
-        const t = $(el).attr("itemtype")?.toLowerCase() ?? "";
-        if (t.includes("schema.org/product")) productCount++;
-        if (t.includes("schema.org/itemlist") && !t.includes("breadcrumb")) listCount++;
-        if (t.includes("schema.org/aggregaterating")) aggregateRatingCount++;
-    });
-
-    $("[itemprop='price'], [itemprop='offers']").each((_i, _el) => {
-        priceCount++;
-    });
-
+    // An explicit ItemList → listing page.
+    if (listCount > 0) return "category";
     // Multiple Product scopes without an explicit ItemList → product cards on a listing page.
     // A single Product scope without any list → product detail page.
-    if (productCount >= 2 && listCount === 0) return "category";
-    if (productCount === 1 && listCount === 0) return "product";
-    if (listCount > 0) return "category";
+    if (productCount >= 2) return "category";
+    if (productCount === 1) return "product";
     if (priceCount >= 3) return "category";
     if (priceCount === 1) return "product";
     // A single AggregateRating block without a list → product detail page.
     // Category pages may show per-card ratings but those are typically inline itemprop,
     // not a structured AggregateRating scope; one scope = one product being rated.
-    if (aggregateRatingCount === 1 && listCount === 0) return "product";
+    if (aggregateRatingCount === 1) return "product";
 
     return null;
 }
@@ -175,30 +190,47 @@ export function classifyPage(html: string, $: CheerioAPI): PageType {
     // stronger product/category signal was found.
     if (jsonLd.weakCms) return "cms";
 
-    // Tier 3: Price count + cart-text count (regex, no DOM dependency).
-    // Strip inline scripts first so JS variable names like openOffcanvasAfter[AddToCart]
-    // don't produce false cart matches on every page.
-    const htmlNoScript = html.replace(/<script[\s\S]*?<\/script>/gi, "");
-    const priceCount = (htmlNoScript.match(PRICE_RE) ?? []).length;
-    const cartCount = (htmlNoScript.match(CART_RE) ?? []).length;
-
-    if (priceCount >= 10) return "category";
-    if (cartCount >= 2) return "category";
-    // 6–9 prices with no cart signal: listing pages that don't render full product grids
-    // (e.g. Hyva/Adobe Commerce category pages that SSR only 6–8 product cards).
-    // Placed before the 1–5 product rule so it catches the gap between the two thresholds.
-    if (priceCount >= 6 && cartCount === 0) return "category";
-    // 1–9 prices with 0–1 cart signals → product detail page.
-    // The ≥6 category rule above already handled 6–9 prices with 0 cart (listing pages).
-    // Reaching here with 6–9 prices means cartCount === 1 (variant-priced product pages).
-    // cartCount === 0 also covers shops where the cart button is JS-only (YT Industries).
-    if (priceCount >= 1 && priceCount <= 9 && cartCount <= 1) return "product";
+    // Tier 3: Price count + cart-text count
+    const signals = countCommerceSignals(html);
+    const fromPrices = classifyFromPriceSignals(signals);
+    if (fromPrices) return fromPrices;
 
     // og:type=product.group as tiebreaker when Tier 3 gives no price signal.
     // IKEA uses this on all category/collection pages (no prices on those pages).
     if (ogType === "product.group") return "category";
 
-    if (priceCount === 0 && cartCount === 0) return "cms";
+    // No prices: no cart text means an editorial page, a single cart match stays unknown
+    return signals.cartCount === 0 ? "cms" : "unknown";
+}
 
-    return "unknown";
+interface CommerceSignals {
+    priceCount: number;
+    cartCount: number;
+}
+
+/**
+ * Count prices and add-to-cart texts with regexes (no DOM dependency).
+ * Inline scripts are stripped first so JS variable names like openOffcanvasAfter[AddToCart]
+ * don't produce false cart matches on every page.
+ */
+function countCommerceSignals(html: string): CommerceSignals {
+    const htmlNoScript = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+    return {
+        priceCount: (htmlNoScript.match(PRICE_RE) ?? []).length,
+        cartCount: (htmlNoScript.match(CART_RE) ?? []).length,
+    };
+}
+
+/** Tier 3 decision; null when the page shows no price at all */
+function classifyFromPriceSignals({ priceCount, cartCount }: CommerceSignals): PageType | null {
+    if (priceCount >= 10) return "category";
+    if (cartCount >= 2) return "category";
+    // 6–9 prices with no cart signal: listing pages that don't render full product grids
+    // (e.g. Hyva/Adobe Commerce category pages that SSR only 6–8 product cards).
+    if (priceCount >= 6 && cartCount === 0) return "category";
+    // 1–9 prices with 0–1 cart signals → product detail page. 6–9 prices only get here
+    // with one cart signal (variant-priced product pages). cartCount === 0 also covers
+    // shops where the cart button is JS-only (YT Industries).
+    if (priceCount >= 1) return "product";
+    return null;
 }

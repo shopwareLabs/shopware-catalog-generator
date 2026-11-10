@@ -10,7 +10,10 @@ import type { PostProcessorContext, PostProcessorResult } from "../index.js";
 
 import { IMAGES_ELEMENTS_PAGE } from "../../fixtures/index.js";
 import { cloneDeep, logger } from "../../utils/index.js";
-import { BaseCmsProcessor } from "./base-processor.js";
+import { BaseCmsProcessor, fixtureSlots, toSliderItems } from "./base-processor.js";
+
+const SLIDER_IMAGE_COUNT = 5;
+const GALLERY_IMAGE_COUNT = 6;
 
 class ImagesProcessorImpl extends BaseCmsProcessor {
     readonly name = "cms-images";
@@ -18,30 +21,12 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
     readonly pageFixture = IMAGES_ELEMENTS_PAGE;
 
     override async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { options } = context;
-        const errors: string[] = [];
-        const cmsPageName = this.getCmsPageName(context);
-        const landingPageName = this.getLandingPageName(context);
-
-        if (options.dryRun) {
-            logger.info(`    [DRY RUN] Would create CMS layout "${this.pageFixture.name}"`, {
-                cli: true,
-            });
-            logger.info(`    [DRY RUN] Would create Landing Page "${this.pageFixture.name}"`, {
-                cli: true,
-            });
-            return {
-                name: this.name,
-                processed: 1,
-                skipped: 0,
-                errors: [],
-                durationMs: 0,
-            };
+        if (context.options.dryRun) {
+            return this.dryRunResult(this.pageFixture.name, this.pageFixture.name);
         }
 
-        try {
+        return this.processPage(context, async () => {
             const mediaIds = await this.uploadCmsImages(context);
-
             if (mediaIds.length === 0) {
                 logger.warn(`    ⚠ No CMS images generated, image blocks will be empty`, {
                     cli: true,
@@ -51,60 +36,11 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
             // Apply hydrated CMS text if available, then populate media IDs
             const hydratedPage = this.getHydratedCmsPage(context);
             const textFixture = this.applyHydratedText(this.pageFixture, hydratedPage);
-            const populatedFixture = this.populateMediaIds(textFixture, mediaIds);
-
-            let cmsPageId = await this.findCmsPageByName(context, cmsPageName);
-
-            if (!cmsPageId) {
-                cmsPageId = await this.createCmsPage(context, populatedFixture, cmsPageName);
-                if (!cmsPageId) {
-                    errors.push(`Failed to create CMS page layout "${cmsPageName}"`);
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-                }
-                logger.info(
-                    `    ✓ Created CMS layout "${this.pageFixture.name}" with ${mediaIds.length} images`,
-                    { cli: true }
-                );
-            } else {
-                logger.info(`    ⊘ CMS layout "${this.pageFixture.name}" already exists`, {
-                    cli: true,
-                });
-            }
-
-            let landingPageId = await this.findLandingPageByName(context, landingPageName);
-
-            if (!landingPageId) {
-                landingPageId = await this.createLandingPage(context, landingPageName, cmsPageId);
-                if (!landingPageId) {
-                    errors.push(`Failed to create Landing Page "${landingPageName}"`);
-                    return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-                }
-                logger.info(`    ✓ Created Landing Page "${this.pageFixture.name}"`, {
-                    cli: true,
-                });
-            } else {
-                await this.ensureSalesChannelAssociated(
-                    context,
-                    landingPageId,
-                    this.pageFixture.name,
-                    errors
-                );
-            }
-
-            await this.storeLandingPageId(context, landingPageId);
-        } catch (error) {
-            errors.push(
-                `CMS processing failed: ${error instanceof Error ? error.message : String(error)}`
-            );
-        }
-
-        return {
-            name: this.name,
-            processed: errors.length === 0 ? 1 : 0,
-            skipped: 0,
-            errors,
-            durationMs: 0,
-        };
+            return {
+                fixture: this.populateMediaIds(textFixture, mediaIds),
+                logs: this.layoutLogs(`with ${mediaIds.length} images`),
+            };
+        });
     }
 
     /**
@@ -112,56 +48,35 @@ class ImagesProcessorImpl extends BaseCmsProcessor {
      * Images are pre-generated during blueprint hydration.
      */
     private async uploadCmsImages(context: PostProcessorContext): Promise<string[]> {
+        const keys = [
+            ...Array.from({ length: SLIDER_IMAGE_COUNT }, (_, i) => `img-slider-${i}`),
+            ...Array.from({ length: GALLERY_IMAGE_COUNT }, (_, i) => `img-gallery-${i}`),
+        ];
+
         const mediaIds: string[] = [];
-
-        for (let i = 0; i < 5; i++) {
-            const id = await this.getOrCreateCmsMedia(context, `img-slider-${i}`);
+        for (const key of keys) {
+            const id = await this.getOrCreateCmsMedia(context, key);
             if (id) mediaIds.push(id);
         }
-
-        for (let i = 0; i < 6; i++) {
-            const id = await this.getOrCreateCmsMedia(context, `img-gallery-${i}`);
-            if (id) mediaIds.push(id);
-        }
-
         return mediaIds;
     }
 
+    /** Slider slots get the first images, gallery slots the next ones */
     private populateMediaIds(fixture: CmsPageFixture, mediaIds: string[]): CmsPageFixture {
         if (mediaIds.length === 0) return fixture;
 
+        const galleryEnd = SLIDER_IMAGE_COUNT + GALLERY_IMAGE_COUNT;
+        const mediaIdsBySlotType = new Map<string, string[]>([
+            ["image-slider", mediaIds.slice(0, SLIDER_IMAGE_COUNT)],
+            ["image-gallery", mediaIds.slice(SLIDER_IMAGE_COUNT, galleryEnd)],
+        ]);
+
         const cloned = cloneDeep(fixture);
-        const sliderMediaIds = mediaIds.slice(0, 5);
-        const galleryMediaIds = mediaIds.slice(5, 11);
-
-        for (const section of cloned.sections) {
-            for (const block of section.blocks) {
-                for (const slot of block.slots) {
-                    if (slot.type === "image-slider" && slot.config.sliderItems) {
-                        slot.config.sliderItems = {
-                            source: "static",
-                            value: sliderMediaIds.map((mediaId) => ({
-                                mediaId,
-                                url: null,
-                                newTab: false,
-                            })),
-                        };
-                    }
-
-                    if (slot.type === "image-gallery" && slot.config.sliderItems) {
-                        slot.config.sliderItems = {
-                            source: "static",
-                            value: galleryMediaIds.map((mediaId) => ({
-                                mediaId,
-                                url: null,
-                                newTab: false,
-                            })),
-                        };
-                    }
-                }
-            }
-        }
-
+        fixtureSlots(cloned).forEach((slot) => {
+            const slotMediaIds = mediaIdsBySlotType.get(slot.type);
+            if (!slotMediaIds || !slot.config.sliderItems) return;
+            slot.config.sliderItems = { source: "static", value: toSliderItems(slotMediaIds) };
+        });
         return cloned;
     }
 }

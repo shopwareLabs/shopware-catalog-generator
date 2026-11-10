@@ -109,6 +109,114 @@ describe("CategoryImageProcessor", () => {
         await processor.clearCategoryImage(contextWithoutApi, "cat-1", "Guitars", "media-1");
     });
 
+    test("reuses existing media with the same file name without creating new media", async () => {
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
+        mockApi.mockPostResponse("search/category", { data: [{ id: "cat-1", mediaId: null }] });
+        mockApi.mockPostResponse("search/media", { data: [{ id: "media-by-name" }] });
+
+        const processor = new CategoryImageProcessor();
+        const uploaded = await processor.uploadCategoryImage(
+            context,
+            "cat-1",
+            "Rock & Roll",
+            Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+            false
+        );
+
+        expect(uploaded).toBe(true);
+        expect(mockApi.getCallsByEndpoint("_action/media/").length).toBe(0);
+        const mediaSearch = mockApi.getCallsByEndpoint("search/media")[0];
+        expect(JSON.stringify(mediaSearch?.body)).toContain('"value":"Rock---Roll-banner"');
+        const syncBodies = mockApi.getCallsByEndpoint("_action/sync").map((call) => call.body);
+        expect(syncBodies).toEqual([
+            {
+                updateCategory: {
+                    entity: "category",
+                    action: "upsert",
+                    payload: [{ id: "cat-1", mediaId: "media-by-name" }],
+                },
+            },
+        ]);
+    });
+
+    test("clears the existing category image and uploads a new one when cleanup is enabled", async () => {
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
+        mockApi.mockPostResponse("search/category", {
+            data: [{ id: "cat-1", mediaId: "media-old" }],
+        });
+        mockApi.mockPostResponse("search/media", { data: [] });
+        mockApi.mockPostResponse("search/media-default-folder", {
+            data: [{ folder: { id: "folder-1" } }],
+        });
+
+        const processor = new CategoryImageProcessor();
+        const uploaded = await processor.uploadCategoryImage(
+            context,
+            "cat-1",
+            "Guitars",
+            Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+            true
+        );
+
+        expect(uploaded).toBe(true);
+        expect(mockApi.deleteEntityMock).toHaveBeenCalledTimes(1);
+        expect(mockApi.syncEntitiesMock).toHaveBeenCalledTimes(1);
+        expect(mockApi.getCallsByEndpoint("_action/media/").length).toBe(1);
+
+        const syncBodies = mockApi.getCallsByEndpoint("_action/sync").map((call) => call.body);
+        expect(syncBodies.length).toBe(3);
+        expect(JSON.stringify(syncBodies[0])).toContain("clearCategoryMedia");
+        const createBody = JSON.stringify(syncBodies[1]);
+        expect(createBody).toContain('"mediaFolderId":"folder-1"');
+        expect(createBody).toContain('"private":false');
+        expect(createBody).toContain('"entity":"media"');
+        const newMediaId = JSON.stringify(syncBodies[2]);
+        expect(newMediaId).toContain('"id":"cat-1"');
+        expect(newMediaId).not.toContain("media-old");
+    });
+
+    test("createMedia payload omits mediaFolderId when no folder is found", async () => {
+        const { context, mockApi } = createTestContext({
+            salesChannelId: "sc-1",
+            salesChannelName: "music",
+            blueprint: createTestBlueprint({
+                salesChannel: { name: "music", description: "Music store" },
+            }),
+        });
+
+        mockApi.mockPostResponse("search/category", { data: [{ id: "cat-1", mediaId: null }] });
+        mockApi.mockPostResponse("search/media", { data: [] });
+        mockApi.mockPostResponse("search/media-default-folder", { data: [] });
+        mockApi.mockPostResponse("search/media-folder", { data: [] });
+
+        const processor = new CategoryImageProcessor();
+        await processor.uploadCategoryImage(
+            context,
+            "cat-1",
+            "Guitars",
+            Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64"),
+            false
+        );
+
+        const createBody = JSON.stringify(mockApi.getCallsByEndpoint("_action/sync")[0]?.body);
+        expect(createBody).not.toContain("mediaFolderId");
+        expect(createBody).toContain('"alt":"Guitars"');
+    });
+
     test("clearCategoryImage tolerates media delete errors", async () => {
         const { context, mockApi } = createTestContext({
             salesChannelId: "sc-1",

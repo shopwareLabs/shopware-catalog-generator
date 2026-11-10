@@ -7,6 +7,7 @@
  * 4. Assigns manufacturers to products
  */
 
+import type { ShopwareApi } from "../shopware/api-helpers.js";
 import type { Manufacturer } from "../types/index.js";
 import type {
     PostProcessor,
@@ -48,6 +49,52 @@ function logDryRun(manufacturers: Manufacturer[]): void {
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+
+/** A manufacturer search hit: nested (Admin API JSON:API) or flat */
+interface ManufacturerSearchResult {
+    id?: string;
+    attributes?: {
+        id?: string;
+        name?: string;
+        translated?: { name?: string };
+    };
+    name?: string;
+    translated?: { name?: string };
+}
+
+/** Maps manufacturer name (translated first) to ID; hits without both are skipped */
+function manufacturerIdsByName(results: ManufacturerSearchResult[]): Map<string, string> {
+    const byName = new Map<string, string>();
+    for (const m of results) {
+        const attrs = m.attributes || m;
+        const name = attrs.translated?.name || attrs.name;
+        const id = m.id || attrs.id;
+        if (name && id) {
+            byName.set(name, id);
+        }
+    }
+    return byName;
+}
+
+/** productId -> manufacturerId for one batch; products without a manufacturer are left out */
+async function fetchProductManufacturers(
+    context: PostProcessorContext,
+    productIds: string[]
+): Promise<Array<[string, string]>> {
+    const response = await apiPost(context, "search/product", {
+        ids: productIds,
+        includes: { product: ["id", "manufacturerId"] },
+    });
+    if (!response.ok) {
+        return [];
+    }
+    const responseData = (await response.json()) as {
+        data?: Array<{ id: string; manufacturerId?: string | null }>;
+    };
+    return (responseData.data ?? []).flatMap((p): Array<[string, string]> =>
+        p.manufacturerId ? [[p.id, p.manufacturerId]] : []
+    );
+}
 
 /**
  * Manufacturer Processor implementation
@@ -200,103 +247,100 @@ class ManufacturerProcessorImpl implements PostProcessor {
      * 4. Delete manufacturers that have no other product associations
      */
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
-        const errors: string[] = [];
-        let deleted = 0;
-
         if (context.options.dryRun) {
             logger.info(
                 `    [DRY RUN] Would unassign and delete manufacturers for products in SalesChannel`,
                 { cli: true }
             );
-            return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
+            return this.cleanupResult(0, []);
         }
 
         if (!context.api) {
-            errors.push("API helpers not available - cannot perform cleanup");
-            return { name: this.name, deleted: 0, errors, durationMs: 0 };
+            return this.cleanupResult(0, ["API helpers not available - cannot perform cleanup"]);
         }
 
         try {
-            // Step 1: Get all products in this SalesChannel with their manufacturerId
-            const products = await this.getAllSalesChannelProductsWithManufacturer(context);
-
-            if (products.length === 0) {
-                logger.info(`    No products found in SalesChannel`, { cli: true });
-                return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
-            }
-
-            // Step 2: Collect unique manufacturer IDs from these products
-            const manufacturerIds = new Set<string>();
-            for (const product of products) {
-                if (product.manufacturerId) {
-                    manufacturerIds.add(product.manufacturerId);
-                }
-            }
-
-            if (manufacturerIds.size === 0) {
-                logger.info(`    No manufacturers assigned to products`, { cli: true });
-                return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
-            }
-
-            logger.info(
-                `    Found ${manufacturerIds.size} unique manufacturers assigned to ${products.length} products`,
-                { cli: true }
-            );
-
-            // Step 3: Unassign manufacturers from products (set manufacturerId to null)
-            const productUpdates = products
-                .filter((p) => p.manufacturerId)
-                .map((p) => ({ id: p.id, manufacturerId: null }));
-
-            if (productUpdates.length > 0) {
-                await context.api.syncEntities({
-                    unassignManufacturers: {
-                        entity: "product",
-                        action: "upsert",
-                        payload: productUpdates,
-                    },
-                });
-                logger.info(
-                    `    ✓ Unassigned manufacturers from ${productUpdates.length} products`,
-                    { cli: true }
-                );
-            }
-
-            // Step 4: Check which manufacturers are now orphaned (no product associations)
-            // For each manufacturer, check if it still has products
-            const manufacturersToDelete: string[] = [];
-
-            for (const manufacturerId of manufacturerIds) {
-                const productsWithManufacturer = await context.api.searchEntities<{ id: string }>(
-                    "product",
-                    [{ type: "equals", field: "manufacturerId", value: manufacturerId }],
-                    { limit: 1 }
-                );
-
-                if (productsWithManufacturer.length === 0) {
-                    manufacturersToDelete.push(manufacturerId);
-                }
-            }
-
-            // Step 5: Delete orphaned manufacturers
-            if (manufacturersToDelete.length > 0) {
-                await context.api.deleteEntities("product_manufacturer", manufacturersToDelete);
-                deleted = manufacturersToDelete.length;
-                logger.info(`    ✓ Deleted ${deleted} orphaned manufacturers`, { cli: true });
-            } else {
-                logger.info(
-                    `    No orphaned manufacturers to delete (all still have products in other SalesChannels)`,
-                    { cli: true }
-                );
-            }
-
-            // Clear local cache so the next generate re-creates manufacturers in Shopware
-            context.cache.saveManufacturers(context.salesChannelName, []);
+            const deleted = await this.unassignAndDeleteManufacturers(context, context.api);
+            return this.cleanupResult(deleted, []);
         } catch (error) {
-            errors.push(`Manufacturer cleanup failed: ${errorMessage(error)}`);
+            return this.cleanupResult(0, [`Manufacturer cleanup failed: ${errorMessage(error)}`]);
+        }
+    }
+
+    private cleanupResult(deleted: number, errors: string[]): PostProcessorCleanupResult {
+        return { name: this.name, deleted, errors, durationMs: 0 };
+    }
+
+    /** Unassigns the manufacturers of the SalesChannel products and deletes orphans; returns the count */
+    private async unassignAndDeleteManufacturers(
+        context: PostProcessorContext,
+        api: ShopwareApi
+    ): Promise<number> {
+        const products = await this.getAllSalesChannelProductsWithManufacturer(context);
+        if (products.length === 0) {
+            logger.info(`    No products found in SalesChannel`, { cli: true });
+            return 0;
         }
 
-        return { name: this.name, deleted, errors, durationMs: 0 };
+        const assigned = products.flatMap((p) =>
+            p.manufacturerId ? [{ id: p.id, manufacturerId: p.manufacturerId }] : []
+        );
+        const manufacturerIds = new Set(assigned.map((p) => p.manufacturerId));
+        if (manufacturerIds.size === 0) {
+            logger.info(`    No manufacturers assigned to products`, { cli: true });
+            return 0;
+        }
+
+        logger.info(
+            `    Found ${manufacturerIds.size} unique manufacturers assigned to ${products.length} products`,
+            { cli: true }
+        );
+
+        await api.syncEntities({
+            unassignManufacturers: {
+                entity: "product",
+                action: "upsert",
+                payload: assigned.map((p) => ({ id: p.id, manufacturerId: null })),
+            },
+        });
+        logger.info(`    ✓ Unassigned manufacturers from ${assigned.length} products`, {
+            cli: true,
+        });
+
+        const deleted = await this.deleteOrphanedManufacturers(api, [...manufacturerIds]);
+        // Clear local cache so the next generate re-creates manufacturers in Shopware
+        context.cache.saveManufacturers(context.salesChannelName, []);
+        return deleted;
+    }
+
+    /** Deletes the manufacturers that no product references any more; returns the count */
+    private async deleteOrphanedManufacturers(
+        api: ShopwareApi,
+        manufacturerIds: string[]
+    ): Promise<number> {
+        const orphaned: string[] = [];
+        for (const manufacturerId of manufacturerIds) {
+            const stillUsed = await api.searchEntities<{ id: string }>(
+                "product",
+                [{ type: "equals", field: "manufacturerId", value: manufacturerId }],
+                { limit: 1 }
+            );
+            if (stillUsed.length === 0) {
+                orphaned.push(manufacturerId);
+            }
+        }
+
+        if (orphaned.length === 0) {
+            logger.info(
+                `    No orphaned manufacturers to delete (all still have products in other SalesChannels)`,
+                { cli: true }
+            );
+            return 0;
+        }
+
+        await api.deleteEntities("product_manufacturer", orphaned);
+        logger.info(`    ✓ Deleted ${orphaned.length} orphaned manufacturers`, { cli: true });
+        return orphaned.length;
     }
 
     private async getAllSalesChannelProductsWithManufacturer(
@@ -326,34 +370,16 @@ class ManufacturerProcessorImpl implements PostProcessor {
     ): Promise<Map<string, string>> {
         const result = new Map<string, string>();
 
-        if (productIds.length === 0) {
-            return result;
-        }
-
         try {
             // Batch the query to avoid too large requests
             const batchSize = 100;
             for (let i = 0; i < productIds.length; i += batchSize) {
                 const batch = productIds.slice(i, i + batchSize);
-
-                const response = await apiPost(context, "search/product", {
-                    ids: batch,
-                    includes: { product: ["id", "manufacturerId"] },
-                });
-
-                if (response.ok) {
-                    interface ProductResult {
-                        id: string;
-                        manufacturerId?: string | null;
-                    }
-                    const responseData = (await response.json()) as { data?: ProductResult[] };
-                    if (responseData.data) {
-                        for (const product of responseData.data) {
-                            if (product.manufacturerId) {
-                                result.set(product.id, product.manufacturerId);
-                            }
-                        }
-                    }
+                for (const [id, manufacturerId] of await fetchProductManufacturers(
+                    context,
+                    batch
+                )) {
+                    result.set(id, manufacturerId);
                 }
             }
         } catch (error) {
@@ -370,47 +396,20 @@ class ManufacturerProcessorImpl implements PostProcessor {
         context: PostProcessorContext,
         names: Set<string>
     ): Promise<Map<string, string>> {
-        const result = new Map<string, string>();
-
         try {
             const response = await apiPost(context, "search/product-manufacturer", {
                 limit: 500,
                 filter: [{ type: "equalsAny", field: "name", value: Array.from(names) }],
             });
-
-            if (response.ok) {
-                interface ManufacturerResult {
-                    id?: string;
-                    attributes?: {
-                        id?: string;
-                        name?: string;
-                        translated?: { name?: string };
-                    };
-                    // Also support flat structure
-                    name?: string;
-                    translated?: { name?: string };
-                }
-                const responseData = (await response.json()) as {
-                    data?: ManufacturerResult[];
-                    total?: number;
-                };
-                if (responseData.data) {
-                    for (const m of responseData.data) {
-                        // Handle both nested (Admin API) and flat structures
-                        const attrs = m.attributes || m;
-                        const name = attrs.translated?.name || attrs.name;
-                        const id = m.id || attrs.id;
-                        if (name && id) {
-                            result.set(name, id);
-                        }
-                    }
-                }
+            if (!response.ok) {
+                return new Map();
             }
+            const responseData = (await response.json()) as { data?: ManufacturerSearchResult[] };
+            return manufacturerIdsByName(responseData.data ?? []);
         } catch (error) {
             logger.error("Failed to fetch existing manufacturers", { data: error });
+            return new Map();
         }
-
-        return result;
     }
 }
 

@@ -161,6 +161,58 @@ function createTextProvider(config: ProviderConfig): TextProvider {
 }
 
 /**
+ * OpenAI image provider with the image key (or the main key).
+ * Without any key images are disabled.
+ */
+function createOpenAIImageProvider(config: ProviderConfig): ImageProvider {
+    const apiKey = config.imageApiKey || config.apiKey;
+    if (!apiKey) {
+        logger.warn("No API key for OpenAI image generation. Disabling images.");
+        return new NoOpImageProvider();
+    }
+    const model = config.imageModel || "gpt-image-1-mini";
+    const quality = config.imageQuality || "low";
+    return new OpenAIImageProvider(apiKey, model, quality);
+}
+
+/**
+ * Key for Pollinations images:
+ * - explicit IMAGE_API_KEY if set
+ * - sk_ keys: pass through (no balance constraints)
+ * - pk_ keys: omit key to use free tier (preserves pollen for text)
+ * - other or no key: use free tier
+ */
+function pollinationsImageKey(config: ProviderConfig): string {
+    if (config.imageApiKey) return config.imageApiKey;
+
+    const mainKey = config.apiKey ?? "";
+    if (mainKey.startsWith("sk_")) return mainKey;
+
+    logFreeImageTier(mainKey);
+    return "";
+}
+
+/** Explain why the free tier is used (nothing to explain without a main key) */
+function logFreeImageTier(mainKey: string): void {
+    if (mainKey.startsWith("pk_")) {
+        logger.info("Using Pollinations free image generation (pk_ key preserved for text)", {
+            cli: true,
+        });
+        return;
+    }
+    if (mainKey) {
+        logger.info("Using Pollinations free image generation (no image API key needed)", {
+            cli: true,
+        });
+    }
+}
+
+function createPollinationsImageProvider(config: ProviderConfig): ImageProvider {
+    const model = config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL;
+    return new PollinationsImageProvider(pollinationsImageKey(config), model);
+}
+
+/**
  * Create an image provider based on configuration
  * Falls back to pollinations if the main provider doesn't support images
  */
@@ -168,47 +220,11 @@ function createImageProvider(config: ProviderConfig): ImageProvider {
     const imageProviderType = resolveImageProviderType(config);
 
     switch (imageProviderType) {
-        case "openai": {
-            // For OpenAI images, we need an API key
-            const apiKey = config.imageApiKey || config.apiKey;
-            if (!apiKey) {
-                logger.warn("No API key for OpenAI image generation. Disabling images.");
-                return new NoOpImageProvider();
-            }
-            const model = config.imageModel || "gpt-image-1-mini";
-            const quality = config.imageQuality || "low";
-            return new OpenAIImageProvider(apiKey, model, quality);
-        }
+        case "openai":
+            return createOpenAIImageProvider(config);
 
-        case "pollinations": {
-            const pollinationsModel = config.imageModel || DEFAULT_POLLINATIONS_IMAGE_MODEL;
-
-            // Use explicit IMAGE_API_KEY if set, otherwise:
-            // - sk_ keys: pass through (no balance constraints)
-            // - pk_ keys: omit key to use free tier (preserves pollen for text)
-            // - no key: use free tier
-            if (config.imageApiKey) {
-                return new PollinationsImageProvider(config.imageApiKey, pollinationsModel);
-            }
-
-            const mainKey = config.apiKey ?? "";
-            if (mainKey.startsWith("sk_")) {
-                return new PollinationsImageProvider(mainKey, pollinationsModel);
-            }
-
-            if (mainKey.startsWith("pk_")) {
-                logger.info(
-                    "Using Pollinations free image generation (pk_ key preserved for text)",
-                    { cli: true }
-                );
-            } else if (mainKey && !mainKey.startsWith("sk_")) {
-                logger.info("Using Pollinations free image generation (no image API key needed)", {
-                    cli: true,
-                });
-            }
-
-            return new PollinationsImageProvider("", pollinationsModel);
-        }
+        case "pollinations":
+            return createPollinationsImageProvider(config);
 
         case "none":
             return new NoOpImageProvider();
