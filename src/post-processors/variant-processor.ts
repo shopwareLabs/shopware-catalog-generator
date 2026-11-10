@@ -671,10 +671,10 @@ function formatIssues(issues: string[]): string {
     return issues.length > 0 ? ` (${issues.join("; ")})` : "";
 }
 
-/** The group contains at least two of the selected options (case-insensitive) */
+/** The group contains every selected option (case-insensitive) */
 function hasSelectedOptions(group: PropertyGroup, config: VariantConfig): boolean {
-    const selected = new Set(config.selectedOptions.map((o) => o.toLowerCase()));
-    return group.options.filter((o) => selected.has(o.name.toLowerCase())).length >= 2;
+    const names = new Set(group.options.map((o) => o.name.toLowerCase()));
+    return config.selectedOptions.every((o) => names.has(o.toLowerCase()));
 }
 
 /** One name contains the other (both lowercase) */

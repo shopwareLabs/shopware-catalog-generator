@@ -1450,6 +1450,53 @@ describe("VariantProcessor", () => {
                 expect(configuratorOptionIds(mockApi)).toEqual(["opt-xs", "opt-m", "opt-xl"]);
             });
 
+            test("prefers the cached group when the blueprint group has only some selected options", async () => {
+                writeCachedGroup(
+                    "cache-store-e",
+                    cachedGroup("Storage", ["64GB", "128GB", "256GB"])
+                );
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-blueprint-some",
+                    configs: [
+                        {
+                            group: "Storage",
+                            selectedOptions: ["64GB", "128GB", "256GB"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    propertyGroups: [
+                        {
+                            id: "pg-storage-blueprint",
+                            name: "Storage",
+                            displayType: "text",
+                            options: [
+                                { id: "opt-64-bp", name: "64GB" },
+                                { id: "opt-128-bp", name: "128GB" },
+                            ],
+                        },
+                    ],
+                    salesChannelName: "cache-store-e",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-storage",
+                            name: "Storage",
+                            options: [
+                                { id: "opt-64", name: "64GB" },
+                                { id: "opt-128", name: "128GB" },
+                                { id: "opt-256", name: "256GB" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                expect(configuratorOptionIds(mockApi)).toEqual(["opt-64", "opt-128", "opt-256"]);
+            });
+
             test("adds missing cached options to an existing group", async () => {
                 writeCachedGroup(
                     "cache-store-c",
