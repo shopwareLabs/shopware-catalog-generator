@@ -187,6 +187,10 @@ export class DataHydrator extends ShopwareHydrator {
         return this.cleanup.deleteOrphanedProductMedia(dryRun);
     }
 
+    async deleteProductsByIds(productIds: string[]): Promise<number> {
+        return this.cleanup.deleteProductsByIds(productIds);
+    }
+
     async deleteUnusedPropertyGroups(dryRun = false): Promise<number> {
         return this.cleanup.deleteUnusedPropertyGroups(dryRun);
     }

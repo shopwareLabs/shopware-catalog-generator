@@ -1444,6 +1444,10 @@ bun run cleanup -- --salesChannel="music" --processors=cms # Cleanup specific pr
 bun run cleanup:media                                      # Delete orphaned product images
 ```
 
+**Leftover products:** product IDs are deterministic, so the core cleanup also deletes the
+products of the cached hydrated blueprint by ID (variant children cascade), even when the
+SalesChannel no longer exists. Otherwise a new upload would reuse them with their old variants.
+
 **Processor-specific cleanup:** Use `--processors=<list>` to cleanup only entities created by specific
 post-processors. Each processor implements its own `cleanup()` method that knows how to remove its entities.
 Available processors with cleanup: `cms`, `customers`.

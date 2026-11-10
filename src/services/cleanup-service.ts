@@ -52,6 +52,8 @@ export interface CleanupShopware {
         dryRun: boolean
     ): Promise<PostProcessorCleanupResult[]>;
     cleanupCore(salesChannelName: string, options: CoreCleanupOptions): Promise<CoreCleanupResult>;
+    /** Delete these products if they exist, with or without a SalesChannel */
+    deleteProductsByIds(productIds: string[]): Promise<number>;
     deleteUnusedPropertyGroups(dryRun: boolean): Promise<number>;
     deleteUnusedPropertyOptions(dryRun: boolean): Promise<number>;
     deleteOrphanedProductMedia(dryRun: boolean): Promise<number>;
@@ -129,6 +131,7 @@ async function connectCleanupFromEnv(env: Env, cache: DataCache): Promise<Cleanu
                 // Manufacturers belong to the manufacturers processor
                 deleteManufacturers: false,
             }),
+        deleteProductsByIds: (productIds) => hydrator.deleteProductsByIds(productIds),
         deleteUnusedPropertyGroups: (dryRun) => hydrator.deleteUnusedPropertyGroups(dryRun),
         deleteUnusedPropertyOptions: (dryRun) => hydrator.deleteUnusedPropertyOptions(dryRun),
         deleteOrphanedProductMedia: (dryRun) => hydrator.deleteOrphanedProductMedia(dryRun),
@@ -197,7 +200,10 @@ export async function cleanupSalesChannelData(
     }
     if (!runCore) return lines;
 
-    lines.push(...(await cleanupCoreData(shopware, options)));
+    const blueprintProductIds = deps.cache
+        .loadHydratedBlueprint(salesChannel)
+        ?.products.map((p) => p.id);
+    lines.push(...(await cleanupCoreData(shopware, options, blueprintProductIds ?? [])));
     if (processors.length === 0) lines.push(...processorHint(salesChannel));
     lines.push(...cacheHint(deps.cache, salesChannel));
     return lines;
@@ -251,6 +257,7 @@ function coreDryRunLines(options: SalesChannelCleanupOptions): string[] {
     return [
         "[DRY RUN] Would delete:",
         `  - Products in SalesChannel "${options.salesChannel}"`,
+        "  - Products of its cached blueprint (also without the SalesChannel)",
         "  - Categories under its root category",
         ...when(options.deleteProps, "  - All property groups"),
         ...when(options.deleteSalesChannel, "  - The SalesChannel and its root category"),
@@ -279,7 +286,8 @@ function coreResultLines(result: CoreCleanupResult, options: SalesChannelCleanup
 
 async function cleanupCoreData(
     shopware: CleanupShopware,
-    options: SalesChannelCleanupOptions
+    options: SalesChannelCleanupOptions,
+    blueprintProductIds: string[]
 ): Promise<string[]> {
     const header = [
         "=== Core Cleanup ===",
@@ -289,11 +297,17 @@ async function cleanupCoreData(
     if (options.dryRun) return [...header, ...coreDryRunLines(options)];
 
     try {
+        // Before the core cleanup: leftovers can block deleting property groups
+        const leftovers = await shopware.deleteProductsByIds(blueprintProductIds);
         const result = await shopware.cleanupCore(options.salesChannel, {
             deletePropertyGroups: options.deleteProps,
             deleteSalesChannel: options.deleteSalesChannel,
         });
-        return [...header, ...coreResultLines(result, options)];
+        return [
+            ...header,
+            ...when(leftovers > 0, `Products deleted by blueprint ID: ${leftovers}`),
+            ...coreResultLines(result, options),
+        ];
     } catch (error) {
         return [...header, `Error: Core cleanup failed: ${errorMessage(error)}`];
     }
