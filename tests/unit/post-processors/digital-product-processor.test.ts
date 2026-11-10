@@ -156,6 +156,61 @@ describe("DigitalProductProcessor", () => {
                 .find((call) => JSON.stringify(call.body).includes('"private":true'));
             expect(JSON.stringify(mediaCall?.body)).toContain('"mediaFolderId":"download-folder"');
         });
+
+        test("deletes voucher media without a download before uploading a new one", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+            mockApi.mockSearchResponse("media", [
+                { id: "orphan-1", productDownloads: [] },
+                { id: "in-use", productDownloads: [{ id: "download-1" }] },
+                { id: "orphan-2" },
+            ]);
+
+            await DigitalProductProcessor.process(context);
+
+            const calls = mockApi.getCalls();
+            const deleteIndex = calls.findIndex((call) =>
+                JSON.stringify(call.body ?? "").includes('"delete-media"')
+            );
+            const uploadIndex = calls.findIndex((call) => call.endpoint.includes("extension=txt"));
+            expect(calls[deleteIndex]?.body).toEqual({
+                "delete-media": {
+                    entity: "media",
+                    action: "delete",
+                    payload: [{ id: "orphan-1" }, { id: "orphan-2" }],
+                },
+            });
+            expect(uploadIndex).toBeGreaterThan(deleteIndex);
+            expect(calls[uploadIndex]?.endpoint).toContain("fileName=gift-card-voucher");
+        });
+
+        test("deletes the empty media when the voucher upload fails", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockPostResponse("search/product", { data: [] });
+            mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
+            mockApi.mockPostResponse("search/product-download", { data: [] });
+            const uploadSpy = spyOn(mockApi, "uploadMedia").mockImplementation(
+                (_mediaId, _file, _fileName, extension) =>
+                    extension === "txt"
+                        ? Promise.reject(new Error("CONTENT__MEDIA_DUPLICATED_FILE_NAME"))
+                        : Promise.resolve()
+            );
+            const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+
+            const result = await DigitalProductProcessor.process(context);
+
+            const voucherMediaId = uploadSpy.mock.calls.find((call) => call[3] === "txt")?.[0];
+            expect(voucherMediaId).toBeDefined();
+            expect(mockApi.getCalls()).toContainEqual({
+                method: "delete",
+                endpoint: `media/${voucherMediaId}`,
+            });
+            expect(result.errors).toEqual(["Failed to create download media"]);
+            uploadSpy.mockRestore();
+            warnSpy.mockRestore();
+        });
     });
 
     describe("product type", () => {

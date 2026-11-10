@@ -489,7 +489,6 @@ export async function hydrateBlueprint(
 
         if (imageProvider.name !== "noop") {
             await hydrateProductImages(imageProvider, cache, salesChannelName, hydratedBlueprint);
-            await hydrateVariantImages(imageProvider, cache, salesChannelName, hydratedBlueprint);
 
             const storeDescription =
                 hydratedBlueprint.salesChannel.description ||
@@ -505,12 +504,13 @@ export async function hydrateBlueprint(
         }
     }
 
-    await buildPropertyGroups(
-        textProvider,
+    await finalizeHydratedBlueprint(
+        { text: textProvider, image: imageProvider },
         cache,
         salesChannelName,
         hydratedBlueprint,
-        existingProperties
+        existingProperties,
+        { variantImages: !hydrateOnly }
     );
     const collector = new PropertyCollector();
 
@@ -587,6 +587,30 @@ export async function buildPropertyGroups(
         existingProperties
     );
     applyColorSystem(blueprint, learned);
+}
+
+/**
+ * Last hydration step: property groups with the colour system, then (full hydration
+ * only) the colour variant images. The order matters: the colour system sets
+ * `variantColors`, and the variant image pass plans its edits from them.
+ */
+export async function finalizeHydratedBlueprint(
+    providers: { text: TextProvider; image: ImageProvider },
+    cache: DataCache,
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    existingProperties: ExistingProperty[],
+    options: { variantImages: boolean }
+): Promise<void> {
+    await buildPropertyGroups(
+        providers.text,
+        cache,
+        salesChannelName,
+        blueprint,
+        existingProperties
+    );
+    if (!options.variantImages || providers.image.name === "noop") return;
+    await hydrateVariantImages(providers.image, cache, salesChannelName, blueprint);
 }
 
 export async function fixBlueprint(salesChannelName: string): Promise<string[]> {

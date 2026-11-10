@@ -462,10 +462,13 @@ hydrated-blueprint.json ──▶ blueprint translate ──▶ translations/{lo
 generate / process ──▶ translations + reviews processors ◀┘ (no AI)
 ```
 
-- **What is translated:** products (name, description, SEO/OG fields, pack units), categories,
+- **What is translated:** products (name, description, pack units), categories,
   property groups and options, manufacturers, AI CMS texts, the homepage, promotion names,
   units, footer categories, image alt texts (products, category banners), other fixture texts
-  and reviews. Testing navigation category names stay English.
+  and reviews. Testing navigation category names stay English. Product meta title and
+  description (and the OG fields) are not sent to the AI: the upload derives them from the
+  translated name and description like English does (`deriveProductSeoMeta`, max 70/160
+  characters), so they stay within Shopware's 255-character limit.
 - **Target locales:** `--languages=de-DE,fr-FR`, `all` (every non-English language of the
   existing SalesChannel, or `DEFAULT_DOMAIN_LOCALES` for a new one) or `none`.
   `TRANSLATION_LANGUAGES` sets the default. Without either, `generate` shows the forecast

@@ -4,6 +4,7 @@ import {
     capitalizeString,
     createShortHash,
     decodeHtmlEntities,
+    deriveProductSeoMeta,
     generateCategoryPlaceholder,
     generateProductPlaceholder,
     generatePropertyGroupPlaceholder,
@@ -79,6 +80,33 @@ describe("string utilities", () => {
 
         test("handles multiple entities", () => {
             expect(decodeHtmlEntities("&lt;a&gt; &amp; &quot;b&quot;")).toBe('<a> & "b"');
+        });
+
+        test("decodes apostrophes with and without leading zeros", () => {
+            expect(decodeHtmlEntities("it&#39;s &#039;ok&#x27;")).toBe("it's 'ok'");
+        });
+    });
+
+    describe("deriveProductSeoMeta", () => {
+        test("uses name and plain description when they are short", () => {
+            expect(
+                deriveProductSeoMeta("Linen Sofa", "<p>A soft</p><p>sofa &amp; more</p>")
+            ).toEqual({
+                metaTitle: "Linen Sofa",
+                metaDescription: "A soft sofa & more",
+            });
+        });
+
+        test("cuts the title at 70 and the description at 160 characters", () => {
+            const meta = deriveProductSeoMeta("N".repeat(100), `<p>${"word ".repeat(100)}</p>`);
+            expect(meta.metaTitle).toHaveLength(70);
+            expect(meta.metaDescription).toHaveLength(160);
+            expect(meta.metaDescription).toEndWith("...");
+        });
+
+        test("keeps a description of exactly 160 characters", () => {
+            const description = "d".repeat(160);
+            expect(deriveProductSeoMeta("Name", description).metaDescription).toBe(description);
         });
     });
 

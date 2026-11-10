@@ -22,7 +22,12 @@ import type { VariantResolver } from "../variant-resolver.js";
 
 import { PropertyCache } from "../../property-cache.js";
 import { DEFAULT_VARIANT_SETTINGS } from "../../types/index.js";
-import { ConcurrencyLimiter, executeWithRetry, logger } from "../../utils/index.js";
+import {
+    ConcurrencyLimiter,
+    deriveProductSeoMeta,
+    executeWithRetry,
+    logger,
+} from "../../utils/index.js";
 
 // =============================================================================
 // Zod Schemas for AI Response Validation
@@ -1012,18 +1017,7 @@ Return JSON in this exact format:
             }
 
             // Derive SEO metadata from AI-generated content (no extra AI call)
-            const metaTitle = h.name.slice(0, 70);
-            const cleanDesc = h.description
-                .replace(/<[^>]*>/g, "")
-                .replace(/&amp;/g, "&")
-                .replace(/&lt;/g, "<")
-                .replace(/&gt;/g, ">")
-                .replace(/&quot;/g, '"')
-                .replace(/&#039;/g, "'")
-                .replace(/\s+/g, " ")
-                .trim();
-            const metaDescription =
-                cleanDesc.length > 157 ? cleanDesc.slice(0, 157) + "..." : cleanDesc;
+            const { metaTitle, metaDescription } = deriveProductSeoMeta(h.name, h.description);
 
             results.push({
                 ...product,
