@@ -18,6 +18,7 @@ import type {
     VariantSettings,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
+import type { ShopwareConnection } from "./shopware-context.js";
 
 import {
     applyColorSystem,
@@ -54,8 +55,8 @@ import {
     providerConfigFromEnv,
     resolveModelSelection,
 } from "../providers/index.js";
-import { DataHydrator } from "../shopware/index.js";
 import { countCategories, logger, PropertyCollector } from "../utils/index.js";
+import { connectShopware, shopwareConnectionFromEnv } from "./shopware-context.js";
 import { buildGenerationStep } from "./template-service.js";
 
 /**
@@ -130,6 +131,8 @@ const NEEDS_HYDRATED: readonly HydrateOnly[] = ["variants", "variant-images"];
 /** Options shared by hydrate and estimate */
 interface HydrateRunOptions {
     only?: HydrateOnly;
+    /** Shopware to read existing property groups from (default: SW_ENV_URL integration) */
+    connection?: ShopwareConnection;
     /** Variant setting overrides, only for --only=variants */
     variants?: VariantSettingOverrides;
 }
@@ -397,14 +400,9 @@ export async function hydrateBlueprint(
 
     let existingProperties: ExistingProperty[] = [];
     try {
-        const dataHydrator = new DataHydrator();
-        const swEnvUrl = process.env.SW_ENV_URL;
-        if (swEnvUrl) {
-            await dataHydrator.authenticateWithClientCredentials(
-                swEnvUrl,
-                process.env.SW_CLIENT_ID,
-                process.env.SW_CLIENT_SECRET
-            );
+        const connection = options.connection ?? shopwareConnectionFromEnv();
+        if (connection) {
+            const dataHydrator = await connectShopware(connection);
             existingProperties = await dataHydrator.getExistingPropertyGroups();
         }
     } catch {

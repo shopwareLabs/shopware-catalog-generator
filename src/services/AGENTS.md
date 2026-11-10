@@ -4,7 +4,7 @@ Internal documentation for AI agents working on the services module.
 
 ## Overview
 
-The `services/` layer contains shared application logic consumed by both the **CLI** and the **MCP server**. Functions return `string[]` (output lines) so callers can handle output differently:
+The `services/` layer contains shared application logic consumed by the **CLI**, the **MCP server** and the **HTTP server**. Functions return `string[]` (output lines) so callers can handle output differently:
 
 - **CLI** — prints each line with `console.log`
 - **MCP** — joins lines and returns as a single string
@@ -16,11 +16,14 @@ No function in this layer calls `console.log` directly.
 ```
 services/
 ├── blueprint-service.ts   # createBlueprint, hydrateBlueprint, estimateBlueprintCost, fixBlueprint, inspireBlueprint
-├── generate-service.ts    # generate, runProcessorsForSalesChannel
-├── image-fix-service.ts   # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
+├── generate-service.ts    # runGenerate, runProcessorsForSalesChannel
+├── commands.ts            # Command specs (Zod params + run) shared by CLI and MCP, executeCommand
+├── generate-request.ts    # buildGenerateRequest, generateRequestParams (input → options, all surfaces)
+├── variant-params.ts      # variantSettingParams (Zod shape for MCP tools and the server body)
+├── image-fix-service.ts   # fixImages (dispatch by type), fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 ├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, estimateTranslation, translateBlueprint
 ├── template-service.ts    # buildGenerationStep, readLaneResults, writeTemplateMetadata (template.json)
-└── shopware-context.ts    # createProcessorDeps (shared bootstrap for API helpers + providers)
+└── shopware-context.ts    # ShopwareConnection, connectShopware, createProcessorDeps
 ```
 
 ## blueprint-service.ts
@@ -101,14 +104,10 @@ const desc = resolveCmsStoreDescription("music", blueprint.salesChannel.descript
 Shared logic for the `generate` (full pipeline) and `process` (post-processors only) commands.
 
 ```typescript
-import {
-    generate,
-    runProcessorsForSalesChannel,
-    GenerateOptions,
-} from "./services/generate-service.js";
+import { runGenerate, runProcessorsForSalesChannel } from "./services/generate-service.js";
 
-// Full pipeline: blueprint → hydrate → upload → post-processors
-const lines = await generate("music", "Musical instruments", { products: 90 });
+// Full pipeline: blueprint → hydrate → translate → upload → post-processors
+const { lines, summary } = await runGenerate("music", "Musical instruments", { products: 90 });
 
 // Run post-processors against an existing SalesChannel
 const lines = await runProcessorsForSalesChannel("music", ["images", "reviews"], false);
@@ -116,13 +115,75 @@ const lines = await runProcessorsForSalesChannel("music", ["images", "reviews"],
 
 `GenerateOptions`:
 
-| Field        | Type      | Default | Description                        |
-| ------------ | --------- | ------- | ---------------------------------- |
-| `products`   | `number`  | `90`    | Products to generate               |
-| `dryRun`     | `boolean` | `false` | Preview only, no Shopware changes  |
-| `noTemplate` | `boolean` | `false` | Skip pre-generated template lookup |
+| Field            | Type                      | Default           | Description                                                   |
+| ---------------- | ------------------------- | ----------------- | ------------------------------------------------------------- |
+| `products`       | `number`                  | `90`              | Products to generate                                          |
+| `dryRun`         | `boolean`                 | `false`           | Preview only, no Shopware changes                             |
+| `noTemplate`     | `boolean`                 | `false`           | Skip pre-generated template lookup                            |
+| `languages`      | `LanguageSelection`       | -                 | Translate before upload                                       |
+| `variants`       | `VariantSettingOverrides` | `{}`              | Variant settings for a new blueprint                          |
+| `connection`     | `ShopwareConnection`      | from `SW_ENV_URL` | Integration (CLI/MCP) or admin user (server)                  |
+| `clearCache`     | `boolean`                 | `false`           | Clear the SalesChannel cache first (server)                   |
+| `inspirationUrl` | `string`                  | -                 | Crawl this store before the blueprint (server)                |
+| `skipProcessors` | `boolean`                 | `false`           | Upload only, no post-processors (server)                      |
+| `hooks`          | `GenerateHooks`           | -                 | `onLine` / `onProgress` for live output (server process logs) |
 
-The `generate` function:
+`runGenerate` returns `{ lines, summary? }`. `summary` (SalesChannel ID, counts, processor
+results) is only set when the upload ran; a run that stopped early ends with an `Error:` line.
+
+### Surface parity (CLI, MCP, server)
+
+`runGenerate` is the only implementation of the pipeline. CLI, MCP and the HTTP server are thin
+wrappers that map their input to a `GenerateInput` and call `buildGenerateRequest()`
+(`generate-request.ts`), which validates the name and products, resolves `--languages` /
+`TRANSLATION_LANGUAGES` and returns the options. Each entry point accepts an injected
+`runGenerate` (`generate(args, deps)`, `executeGenerateTool(args, run)`,
+`handleGenerate(request, deps)`), and `tests/unit/services/generate-request-parity.test.ts`
+runs one case per surface and expects the same service call.
+
+**Adding a generate option:** add it to `GenerateInput`, `generateRequestParams` and
+`buildGenerateRequest`, map the CLI flag in `generateInputFromArgs`, and add a case to the
+parity test. The MCP tool and the server body pick up `generateRequestParams` automatically.
+
+### Command specs (every other command)
+
+All other commands shared by CLI and MCP (`blueprint create/estimate/translate/hydrate/inspire/fix`,
+`image fix`, `template metadata`, `process`) are defined once in `commands.ts`:
+
+```typescript
+export const BLUEPRINT_FIX = defineCommand({
+    tool: "blueprint_fix",
+    description: "Fix placeholder names in a hydrated blueprint",
+    params: { name: z.string().describe("SalesChannel name") },
+    run: ({ name }, { services }) => withValidName(name, (n) => services.fixBlueprint(n)),
+});
+```
+
+The Zod `params` are the single source of validation and defaults. `executeCommand(spec, rawArgs,
+options)` parses the arguments, returns `["Error: ..."]` on invalid input (no service call), and
+runs the spec with the real or injected `services`. The surfaces only map their input:
+
+- MCP: `registerCommandTool(server, spec)` (`src/mcp/tools/command-tool.ts`)
+- CLI: `runCliCommand(spec, args, { errorCode })` (`src/cli/command.ts`), which maps flags to
+  params (`--only` → `only` / `processors`, `--variant-colors` → `variantColors`) and names flags
+  in error messages
+
+`tests/unit/services/commands-parity.test.ts` runs every case through the CLI argv parser and the
+MCP tool with recording services and expects identical service calls (and no call for invalid
+input on either surface). The cache and cleanup CLIs (`src/cache-cli.ts`, `src/cleanup-cli.ts`)
+run their specs with `runCliParams`; `maintenance-parity.test.ts` covers them the same way.
+Shared recording services live in `tests/helpers/recording-services.ts`.
+
+**Cache and cleanup services:** `cache-service.ts` works on an injectable `DataCache`
+(`createCacheFromEnv()` by default). Restore never overwrites a non-empty target.
+`cleanup-service.ts` takes `CleanupDeps { connect, cache }`, so tests use a fake Shopware.
+A dry run never deletes core data, and `full` runs every processor cleanup plus the core cleanup
+but only deletes the SalesChannel with `deleteSalesChannel`.
+
+**Adding a command or a parameter:** change the spec in `commands.ts`, map a new CLI flag in
+`commandParamsFromArgs` if its name differs, and add a case to the parity test.
+
+The pipeline:
 
 1. Checks for a pre-generated template in the configured template repo
 2. Creates a blueprint if none exists
@@ -133,7 +194,7 @@ The `generate` function:
 7. Syncs categories, property groups, and products to Shopware
 8. Runs all registered post-processors
 
-Both `generate` and `runProcessorsForSalesChannel` append an `Error:` line via `formatProcessorErrorLine()`
+Both `runGenerate` and `runProcessorsForSalesChannel` append an `Error:` line via `formatProcessorErrorLine()`
 when any post-processor returns errors (`theme (2), images (1)`), even though the processor did not throw.
 The CLI wrappers print the summary first and then throw a `CLIError`, so the exit code reflects the failure.
 
@@ -145,12 +206,16 @@ Shared logic for the `image fix` command. Regenerates cached images and re-uploa
 
 ```typescript
 import {
+    fixImages,
     fixProductImages,
     fixCategoryImages,
     fixCmsImages,
     fixThemeImages,
     THEME_MEDIA_KEYS,
 } from "./services/image-fix-service.js";
+
+// Entry point used by CLI and MCP: loads the blueprint and dispatches by type
+const lines = await fixImages("music", { type: "product", target: "Guitar Stand", dryRun: false });
 
 // Regenerate product images (match by name or ID)
 const lines = await fixProductImages("music", blueprint, cache, "Guitar Stand", false);

@@ -10,9 +10,10 @@ The CLI is a thin router in `main.ts` that parses args and delegates to focused 
 - `generate.ts` — `generate`, `process`
 - `image-fix.ts` — `image fix`
 - `template.ts` — `template metadata`
+- `command.ts` — `runCliCommand(spec, args, options)`: maps flags to the params of a command spec in `src/services/commands.ts`, prints the lines, throws `CLIError` on an `Error:` line
 - `shared.ts` — `CLIError`, validation helpers, `executePostProcessors`
 
-**Important:** All application logic lives in `src/services/`, not in the CLI modules. CLI handlers are thin wrappers that call service functions and print their `string[]` output. This keeps the CLI and MCP tools in sync — both call the same service functions.
+**Important:** All application logic lives in `src/services/`, not in the CLI modules. CLI handlers are thin wrappers that call service functions and print their `string[]` output. This keeps the CLI and MCP tools in sync — both call the same service functions. Except `generate`, every command shared with MCP is a spec in `src/services/commands.ts`; validation errors name the CLI flag (`--variant-colors: ...`).
 
 | Service File                        | CLI Module         | What It Does                                     |
 | ----------------------------------- | ------------------ | ------------------------------------------------ |
@@ -259,9 +260,9 @@ bun run cleanup -- --salesChannel="music" --full --delete
 | `--salesChannel`  | string | _(required)_ | SalesChannel to clean up                                        |
 | `--delete`        | flag   | `false`      | Also delete the SalesChannel itself                             |
 | `--props`         | flag   | `false`      | Also delete property groups                                     |
-| `--manufacturers` | flag   | `false`      | Also delete manufacturers                                       |
+| `--manufacturers` | flag   | `false`      | Same as adding `manufacturers` to `--processors`                |
 | `--processors`    | string | _(none)_     | Cleanup specific processor entities (comma-separated, or `all`) |
-| `--full`          | flag   | `false`      | Full cleanup: all processor cleanups, then core cleanup         |
+| `--full`          | flag   | `false`      | All processor cleanups, then core (add `--delete` for the SC)   |
 | `--dry-run`       | flag   | `false`      | Preview what would be deleted                                   |
 
 #### Global Cleanup (no SalesChannel required)
@@ -296,7 +297,7 @@ bun run cache:clear -- music          # Move specific SalesChannel to trash
 bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore specific item from trash
 bun run cache:restore -- --all        # Restore all items from trash
-bun run cache:empty-trash             # Permanently delete trash (irreversible)
+bun run cache:empty-trash -- --confirm  # Permanently delete trash (irreversible)
 ```
 
 | Command                   | Description                                             |

@@ -3,8 +3,6 @@
  */
 
 import type { VariantSettingOverrides } from "../blueprint/index.js";
-import type { DataCache } from "../cache.js";
-import type { HydratedBlueprint } from "../types/index.js";
 
 import { createShopwareAdminClient } from "../shopware/index.js";
 import { logger, validateSubdomainName } from "../utils/index.js";
@@ -105,25 +103,6 @@ export function requireValidName(args: CliArgs): string {
     }
 
     return validation.sanitized;
-}
-
-/**
- * Load a hydrated blueprint from cache.
- * Throws CLIError if blueprint is not found.
- */
-export function requireHydratedBlueprint(
-    cache: DataCache,
-    salesChannelName: string
-): HydratedBlueprint {
-    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
-    if (!blueprint) {
-        throw new CLIError(
-            `No hydrated blueprint found for "${salesChannelName}". ` +
-                `Run: bun run src/main.ts blueprint hydrate --name=${salesChannelName}`,
-            "BLUEPRINT_NOT_FOUND"
-        );
-    }
-    return blueprint;
 }
 
 export type ShopwareConnectionFailure = "auth" | "unreachable" | "unknown";

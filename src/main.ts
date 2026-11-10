@@ -212,7 +212,7 @@ async function main(): Promise<void> {
 
             case "template":
                 if (args.subcommand === "metadata") {
-                    templateMetadataCommand(args);
+                    await templateMetadataCommand(args);
                 } else {
                     showHelp();
                     throw new CLIError(

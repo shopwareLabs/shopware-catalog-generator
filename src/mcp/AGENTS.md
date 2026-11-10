@@ -13,41 +13,45 @@ mcp/
 ├── index.ts              # Server entry point (FastMCP, stdio transport)
 └── tools/                # Tool definitions by category
     ├── index.ts          # Re-exports all registration functions
+    ├── command-tool.ts   # registerCommandTool / executeCommandTool for specs from services/commands.ts
     ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_fix, blueprint_inspire
     ├── generate.ts       # generate, process
     ├── image-fix.ts      # image_fix
     ├── template.ts       # template_metadata
     ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore, cache_empty_trash
-    ├── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
+    ├── cleanup.ts        # list_saleschannels + cleanup, cleanup_media, cleanup_unused_props, cleanup_unused_options
 ```
 
 ## Available Tools
 
-| Tool                   | CLI Equivalent                    |
-| ---------------------- | --------------------------------- |
-| `generate`             | `bun run generate --name=...`     |
-| `process`              | `bun run process --name=...`      |
-| `blueprint_inspire`    | `bun run blueprint inspire ...`   |
-| `blueprint_create`     | `bun run blueprint create ...`    |
-| `blueprint_hydrate`    | `bun run blueprint hydrate ...`   |
-| `blueprint_estimate`   | `bun run blueprint estimate ...`  |
-| `blueprint_translate`  | `bun run blueprint translate ...` |
-| `blueprint_fix`        | `bun run blueprint fix ...`       |
-| `image_fix`            | `bun run image fix ...`           |
-| `template_metadata`    | `bun run template metadata ...`   |
-| `cleanup`              | `bun run cleanup -- ...`          |
-| `cleanup_media`        | `bun run cleanup:media`           |
-| `cleanup_unused_props` | `bun run cleanup:props`           |
-| `cache_list`           | `bun run cache:list`              |
-| `cache_clear`          | `bun run cache:clear`             |
-| `cache_trash`          | `bun run cache:trash`             |
-| `cache_restore`        | `bun run cache:restore`           |
-| `cache_empty_trash`    | `bun run cache:empty-trash`       |
-| `list_saleschannels`   | (lookup only)                     |
-| `list_processors`      | (lookup only)                     |
+| Tool                     | CLI Equivalent                           |
+| ------------------------ | ---------------------------------------- |
+| `generate`               | `bun run generate --name=...`            |
+| `process`                | `bun run process --name=...`             |
+| `blueprint_inspire`      | `bun run blueprint inspire ...`          |
+| `blueprint_create`       | `bun run blueprint create ...`           |
+| `blueprint_hydrate`      | `bun run blueprint hydrate ...`          |
+| `blueprint_estimate`     | `bun run blueprint estimate ...`         |
+| `blueprint_translate`    | `bun run blueprint translate ...`        |
+| `blueprint_fix`          | `bun run blueprint fix ...`              |
+| `image_fix`              | `bun run image fix ...`                  |
+| `template_metadata`      | `bun run template metadata ...`          |
+| `cleanup`                | `bun run cleanup -- ...`                 |
+| `cleanup_media`          | `bun run cleanup:media`                  |
+| `cleanup_unused_props`   | `bun run cleanup:props`                  |
+| `cleanup_unused_options` | `bun run cleanup -- --unused-options`    |
+| `cache_list`             | `bun run cache:list`                     |
+| `cache_clear`            | `bun run cache:clear`                    |
+| `cache_trash`            | `bun run cache:trash`                    |
+| `cache_restore`          | `bun run cache:restore`                  |
+| `cache_empty_trash`      | `bun run cache:empty-trash -- --confirm` |
+| `list_saleschannels`     | (lookup only)                            |
+| `list_processors`        | (lookup only)                            |
 
 `blueprint_create`, `blueprint_estimate`, `blueprint_hydrate` and `generate` spread
-`variantSettingParams` from `tools/variant-params.ts`. The ranges come from `VARIANT_SETTING_LIMITS`,
+`variantSettingParams` from `src/services/variant-params.ts` (shared with the HTTP server).
+The `generate` tool uses `generateRequestParams` from `src/services/generate-request.ts`, see
+[Surface parity](../services/AGENTS.md#surface-parity-cli-mcp-server). The ranges come from `VARIANT_SETTING_LIMITS`,
 so they match the CLI flags (`--variant-colors`, `--variant-options`, `--max-variants`,
 `--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"` and `only: "variant-images"`
 (both use `HYDRATE_ONLY_MODES` from the blueprint service).
@@ -64,6 +68,13 @@ src/cli/blueprint.ts       src/mcp/tools/blueprint.ts
 ```
 
 ## Adding a New Tool
+
+**Commands shared with the CLI** are defined once as a spec in `src/services/commands.ts`
+(Zod params, defaults, `run`). Register them with `registerCommandTool(server, SPEC)` and add a
+case to `tests/unit/services/commands-parity.test.ts`. Do not write a separate `addTool` for them.
+See [Command specs](../services/AGENTS.md#command-specs-every-other-command).
+
+**MCP-only tools** (cache, cleanup, listings):
 
 1. Implement the logic in `src/services/<category>-service.ts` (returns `string[]`)
 2. Create or update the tool file in `src/mcp/tools/`

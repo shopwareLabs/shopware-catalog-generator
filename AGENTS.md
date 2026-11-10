@@ -64,11 +64,12 @@ src/
 │   ├── generate.ts           # generate (full pipeline), process (thin wrappers)
 │   ├── image-fix.ts          # image fix - thin wrapper
 │   ├── template.ts           # template metadata - thin wrapper
+│   ├── command.ts            # runCliCommand: CLI flags → command spec params
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
 │
 ├── services/                 # Shared application logic (used by both CLI and MCP)
 │   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
-│   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
+│   ├── generate-service.ts   # runGenerate (one pipeline for CLI, MCP, server), runProcessorsForSalesChannel
 │   └── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 │
 ├── blueprint/                # Blueprint-based generation
@@ -185,15 +186,21 @@ src/
 ├── services/                 # Shared application logic (CLI + MCP)
 │   ├── AGENTS.md             # Services documentation
 │   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
-│   ├── generate-service.ts   # generate, runProcessorsForSalesChannel
+│   ├── generate-service.ts   # runGenerate (one pipeline for CLI, MCP, server), runProcessorsForSalesChannel
 │   ├── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
 │   ├── translation-service.ts # parseLanguageSelection, resolveTargetLocales, translateBlueprint
 │   ├── template-service.ts   # template.json: generation log, lane results, template metadata
-│   └── shopware-context.ts   # createProcessorDeps (API helpers + providers bootstrap)
+│   ├── commands.ts           # Command specs (params + run) shared by CLI and MCP
+│   ├── cache-service.ts      # listCache, clearCache, listTrash, restoreFromTrash, emptyTrash
+│   ├── cleanup-service.ts    # cleanupSalesChannelData, cleanupGlobal (injectable Shopware)
+│   ├── generate-request.ts   # buildGenerateRequest, generateRequestParams (input → options, all surfaces)
+│   ├── variant-params.ts     # variantSettingParams (MCP tools + server body)
+│   └── shopware-context.ts   # ShopwareConnection, connectShopware, createProcessorDeps
 │
 ├── server/                   # HTTP server infrastructure
 │   ├── AGENTS.md             # Server documentation
 │   ├── index.ts              # Exports ProcessManager + types
+│   ├── generate-route.ts     # POST /generate → runGenerate (thin wrapper)
 │   └── process-manager.ts    # Background task management
 │
 ├── crawlers/                 # Website crawling for store inspiration
@@ -211,12 +218,13 @@ src/
 │   ├── index.ts              # MCP server entry point (stdio transport)
 │   └── tools/                # Tool definitions by category
 │       ├── index.ts          # Re-exports all tools
+│       ├── command-tool.ts   # registerCommandTool (specs from services/commands.ts)
 │       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_translate, blueprint_fix, blueprint_inspire
 │       ├── generate.ts       # generate, process
 │       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
 │       ├── template.ts       # template_metadata
 │       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
-│       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props
+│       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props, cleanup_unused_options
 │
 ├── cache.ts                  # DataCache class (+ blueprint storage)
 ├── image-cache.ts            # ImageCache (product/category/CMS/property media)
@@ -1149,6 +1157,16 @@ export function extractSalesChannelIds(data: ShopwareEntity): string[] {
 
 **All CLI commands MUST be exposed via the MCP server.**
 
+**One implementation, thin surfaces.** CLI, MCP and the HTTP server only map their input and call
+the same service (see [Surface parity](src/services/AGENTS.md#surface-parity-cli-mcp-server)).
+Never copy pipeline steps into `server.ts`, a CLI command or an MCP tool. For `generate`,
+`tests/unit/services/generate-request-parity.test.ts` runs the same case through all three
+surfaces; add a case there for every new generate option. Every other command shared by CLI
+and MCP is a spec in `src/services/commands.ts` (Zod params + run); `commands-parity.test.ts`
+checks both surfaces make the same service calls. Add a case there for every new parameter.
+The cache and cleanup commands (`cache-cli.ts`, `cleanup-cli.ts`) use specs too; their parity
+test is `maintenance-parity.test.ts`.
+
 When adding a new command to any CLI entry point (`main.ts`, `cache-cli.ts`, `cleanup-cli.ts`):
 
 1. Create or update the corresponding tool in `src/mcp/tools/`
@@ -1186,6 +1204,13 @@ server.addTool({
 - **TypeCheck:** `tsc --noEmit` (included in `bun run lint`)
 - **Formatter:** `oxfmt` (via `bun run format`). Scripts use `npx oxfmt` so formatting runs under Node; under Bun, oxfmt’s worker threads trigger DataCloneError for JSON/markdown (see [bun#25610](https://github.com/oven-sh/bun/issues/25610)).
 - **Build:** `bun run build` runs lint + format + bun build
+- **Code quality:** [fallow](https://fallow.tools/) (`.fallowrc.jsonc`) for complexity, duplication
+  and mutation testing only. It does not replace knip, oxlint or oxfmt (its dead-code checks are off).
+    - `bun run quality` — health score + top complex functions + top clones (src only, `--production`)
+    - `bun run quality:health` — hotspots (churn × complexity) and refactoring targets
+    - `bun run quality:dupes` — full duplication report
+    - `bun run quality:mutation -- <files>` — mutation testing (slow; run on the files you changed)
+- **Coverage:** `bun test --coverage` (no thresholds yet)
 
 ## Environment Variables
 
@@ -1485,7 +1510,7 @@ bun run cache:clear -- music         # Move specific SalesChannel to trash
 bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore item from trash
 bun run cache:restore -- --all        # Restore all items from trash
-bun run cache:empty-trash             # Permanently delete trash
+bun run cache:empty-trash -- --confirm  # Permanently delete trash
 
 # Log management
 bun run logs:clear
@@ -1518,28 +1543,29 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 
 ### Available Tools
 
-| Tool                   | Description                                            |
-| ---------------------- | ------------------------------------------------------ |
-| `blueprint_inspire`    | Crawl a real store URL and save inspiration.json       |
-| `blueprint_create`     | Generate blueprint.json (no AI)                        |
-| `blueprint_hydrate`    | Fill blueprint with AI content (supports `--only=cms`) |
-| `blueprint_estimate`   | Forecast AI tokens, images and USD cost (no AI calls)  |
-| `blueprint_translate`  | Translate the hydrated catalog into other locales      |
-| `blueprint_fix`        | Fix placeholder names                                  |
-| `image_fix`            | Regenerate images (product/category/cms by type)       |
-| `template_metadata`    | Write template.json (models, languages, tested lanes)  |
-| `generate`             | Full pipeline: create + hydrate + upload               |
-| `process`              | Run post-processors                                    |
-| `cache_list`           | List cached SalesChannels                              |
-| `cache_clear`          | Clear cache to trash                                   |
-| `cache_trash`          | List trash contents                                    |
-| `cache_restore`        | Restore from trash                                     |
-| `cache_empty_trash`    | Permanently delete trash                               |
-| `list_saleschannels`   | List available SalesChannels                           |
-| `cleanup`              | Delete SalesChannel data                               |
-| `cleanup_media`        | Delete orphaned media                                  |
-| `cleanup_unused_props` | Delete unused property groups                          |
-| `list_processors`      | List available post-processors                         |
+| Tool                     | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `blueprint_inspire`      | Crawl a real store URL and save inspiration.json       |
+| `blueprint_create`       | Generate blueprint.json (no AI)                        |
+| `blueprint_hydrate`      | Fill blueprint with AI content (supports `--only=cms`) |
+| `blueprint_estimate`     | Forecast AI tokens, images and USD cost (no AI calls)  |
+| `blueprint_translate`    | Translate the hydrated catalog into other locales      |
+| `blueprint_fix`          | Fix placeholder names                                  |
+| `image_fix`              | Regenerate images (product/category/cms by type)       |
+| `template_metadata`      | Write template.json (models, languages, tested lanes)  |
+| `generate`               | Full pipeline: create + hydrate + upload               |
+| `process`                | Run post-processors                                    |
+| `cache_list`             | List cached SalesChannels                              |
+| `cache_clear`            | Clear cache to trash                                   |
+| `cache_trash`            | List trash contents                                    |
+| `cache_restore`          | Restore from trash                                     |
+| `cache_empty_trash`      | Permanently delete trash                               |
+| `list_saleschannels`     | List available SalesChannels                           |
+| `cleanup`                | Delete SalesChannel data                               |
+| `cleanup_media`          | Delete orphaned media                                  |
+| `cleanup_unused_props`   | Delete unused property groups                          |
+| `cleanup_unused_options` | Delete unused property options                         |
+| `list_processors`        | List available post-processors                         |
 
 ### Testing the MCP Server
 

@@ -7,14 +7,15 @@
 
 import type { VariantSettingOverrides } from "../blueprint/index.js";
 import type { PostProcessorResult } from "../post-processors/index.js";
-import type { LanguageSelection, ProductSyncResult } from "../types/index.js";
+import type { DataHydrator } from "../shopware/index.js";
+import type { HydratedBlueprint, LanguageSelection, ProductSyncResult } from "../types/index.js";
+import type { ShopwareConnection } from "./shopware-context.js";
 
 import { applyColorSystem, hasVariantOverrides } from "../blueprint/index.js";
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
 import {
     buildPropertyMaps,
-    DataHydrator,
     detectShopwareCapabilities,
     syncCategories,
     syncProducts,
@@ -23,8 +24,12 @@ import {
 } from "../shopware/index.js";
 import { createTemplateFetcherFromEnv } from "../templates/index.js";
 import { isIncompleteHydration, logger, validateBlueprint } from "../utils/index.js";
-import { createBlueprint, hydrateBlueprint } from "./blueprint-service.js";
-import { createProcessorDeps } from "./shopware-context.js";
+import { createBlueprint, hydrateBlueprint, inspireBlueprint } from "./blueprint-service.js";
+import {
+    connectShopware,
+    createProcessorDepsForConnection,
+    shopwareConnectionFromEnv,
+} from "./shopware-context.js";
 import { summarizeTemplateInfo } from "./template-service.js";
 import {
     formatTranslationForecast,
@@ -43,6 +48,58 @@ export interface GenerateOptions {
     languages?: LanguageSelection;
     /** Variant settings for a new blueprint (ignored with a warning for an existing one) */
     variants?: VariantSettingOverrides;
+    /** Move the cached SalesChannel data to the trash first */
+    clearCache?: boolean;
+    /** Crawl this store for inspiration before the blueprint is created */
+    inspirationUrl?: string;
+    /** Upload only, no post-processors */
+    skipProcessors?: boolean;
+    /** Shopware to upload to (default: SW_ENV_URL integration) */
+    connection?: ShopwareConnection;
+    /** Live progress for callers that report while the run is going (HTTP server) */
+    hooks?: GenerateHooks;
+}
+
+export interface GenerateHooks {
+    /** Every output line, as soon as it is written */
+    onLine?: (line: string) => void;
+    onProgress?: (phase: GeneratePhase, current: number, total: number) => void;
+}
+
+export type GeneratePhase = "blueprint" | "upload" | "processors";
+
+/** What a finished upload produced (absent for errors before the upload and for dry runs) */
+export interface GenerateSummary {
+    salesChannelId: string;
+    salesChannelName: string;
+    categories: number;
+    products: number;
+    failedProducts: number;
+    propertyGroups: number;
+    processors: { name: string; processed: number; errors: string[] }[];
+}
+
+export interface GenerateRun {
+    lines: string[];
+    summary?: GenerateSummary;
+}
+
+/** Output lines of a run, forwarded to the onLine hook as they are written */
+class RunOutput {
+    readonly lines: string[] = [];
+
+    constructor(private readonly onLine?: (line: string) => void) {}
+
+    push(...lines: string[]): void {
+        this.lines.push(...lines);
+        for (const line of lines) this.onLine?.(line);
+    }
+
+    /** Add the final lines and return the run */
+    end(...lines: string[]): GenerateRun {
+        this.push(...lines);
+        return { lines: this.lines };
+    }
 }
 
 /**
@@ -72,164 +129,90 @@ export function formatProductSyncErrorLine(result: ProductSyncResult): string | 
     return `Error: ${result.failed} of ${total} products failed to upload (see log for the Shopware response)`;
 }
 
-export async function generate(
+/**
+ * Full pipeline: blueprint, hydration, translation, upload, post-processors.
+ * The single implementation behind CLI, MCP and the HTTP server.
+ * Without a description, the crawled brand description or "{name} webshop" is used.
+ */
+export async function runGenerate(
     salesChannelName: string,
-    description: string,
+    description: string | undefined,
     options: GenerateOptions = {}
-): Promise<string[]> {
-    const { dryRun = false, noTemplate = false } = options;
+): Promise<GenerateRun> {
+    const { dryRun = false } = options;
+    const progress = options.hooks?.onProgress ?? (() => {});
 
     logger.configure({ enabled: true });
 
-    const results: string[] = [
-        `=== Shopware Data Generator v2 ===`,
-        `Name: ${salesChannelName}`,
-        `Description: ${description}`,
-        `Log file: ${logger.getLogFile()}`,
-        ``,
-    ];
-
-    const swEnvUrl = process.env.SW_ENV_URL;
-    if (!swEnvUrl) {
-        return [...results, `Error: SW_ENV_URL environment variable is required`];
-    }
-
+    const out = new RunOutput(options.hooks?.onLine);
     const cache = createCacheFromEnv();
 
-    // Check for pre-generated template
-    let usedTemplate = false;
-    if (!noTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-        results.push(`Checking for pre-generated template...`);
-        const templateFetcher = createTemplateFetcherFromEnv();
-        usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
-        if (usedTemplate) {
-            results.push(`Using pre-generated template for "${salesChannelName}"`);
-            const templateInfo = cache.loadTemplateInfo(salesChannelName);
-            if (templateInfo) results.push(`  Template: ${summarizeTemplateInfo(templateInfo)}`);
-        } else {
-            results.push(`No template found, will generate from scratch`);
-        }
+    if (options.clearCache) {
+        cache.clearSalesChannel(salesChannelName);
+    }
+    const inspirationLines = await runInspirationStep(salesChannelName, options.inspirationUrl);
+    const effectiveDescription =
+        description ||
+        cache.loadInspiration(salesChannelName)?.brandDescription ||
+        `${salesChannelName} webshop`;
+
+    out.push(
+        `=== Shopware Data Generator v2 ===`,
+        `Name: ${salesChannelName}`,
+        `Description: ${effectiveDescription}`,
+        `Log file: ${logger.getLogFile()}`,
+        ``
+    );
+    if (options.clearCache) out.push(`Cleared cached data for "${salesChannelName}"`);
+    out.push(...inspirationLines);
+
+    const connection = options.connection ?? shopwareConnectionFromEnv();
+    if (!connection) {
+        return out.end(`Error: SW_ENV_URL environment variable is required`);
     }
 
-    if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
-        results.push(`Step 1: Creating blueprint...`);
-        const lines = await createBlueprint(
-            salesChannelName,
-            description,
-            options.products ?? 90,
-            options.variants
-        );
-        const createError = lines.find((l) => l.startsWith("Error:"));
-        if (createError) return [...results, createError];
-        results.push(...lines.filter((l) => !l.startsWith("===")));
-    } else {
-        if (options.variants && hasVariantOverrides(options.variants)) {
-            results.push(
-                `⚠ Variant settings are ignored for an existing blueprint. ` +
-                    `Use: blueprint hydrate --name=${salesChannelName} --only=variants`
-            );
-        }
-        results.push(
-            usedTemplate ? `Step 1: Using template blueprint` : `Step 1: Using existing blueprint`
-        );
-    }
+    progress("blueprint", 0, 2);
+    const blueprintError = await prepareBlueprints(
+        salesChannelName,
+        effectiveDescription,
+        options,
+        connection,
+        out
+    );
+    if (blueprintError) return out.end(blueprintError);
+    progress("blueprint", 2, 2);
 
-    if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-        const hydrateError = await runHydration(salesChannelName, results);
-        if (hydrateError) return [...results, hydrateError];
-    } else {
-        results.push(
-            usedTemplate
-                ? `Step 2: Using template hydrated blueprint`
-                : `Step 2: Using existing hydrated blueprint`
-        );
-    }
-
-    let blueprint = cache.loadHydratedBlueprint(salesChannelName);
-    if (!blueprint) {
-        return [...results, `Error: Failed to load hydrated blueprint`];
-    }
-
-    let validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
-
-    if (!validationResult.valid && isIncompleteHydration(validationResult)) {
-        results.push(
-            `  Detected incomplete hydrated blueprint (likely from a previous failed attempt). Re-hydrating...`
-        );
-        cache.deleteHydratedBlueprint(salesChannelName);
-
-        const hydrateError = await runHydration(salesChannelName, results);
-        if (hydrateError) return [...results, hydrateError];
-
-        blueprint = cache.loadHydratedBlueprint(salesChannelName);
-        if (!blueprint) {
-            return [...results, `Error: Failed to load hydrated blueprint after re-hydration`];
-        }
-        validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
-    }
-
-    if (!validationResult.valid) {
-        const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
-        return [
-            ...results,
-            `Error: Blueprint validation failed:\n${issues}`,
-            ``,
-            `This may be caused by an interrupted hydration (e.g., API credits exhausted).`,
-            `To retry: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
-        ];
-    }
-    if (validationResult.fixesApplied > 0) {
-        results.push(`  Auto-fixed ${validationResult.fixesApplied} blueprint issue(s)`);
-    }
-
-    // Blueprints from older runs and templates get the colour system before translation
-    // and upload (no AI: unknown shades are estimated)
-    applyColorSystem(blueprint, cache.loadColorShades(salesChannelName));
-    cache.saveHydratedBlueprint(salesChannelName, blueprint);
-
-    const originalBlueprint = cache.loadBlueprint(salesChannelName);
-    if (originalBlueprint) {
-        const expectedProducts = originalBlueprint.products.length;
-        const actualProducts = blueprint.products.length;
-        if (actualProducts < expectedProducts) {
-            results.push(
-                ``,
-                `  ⚠ Partial hydration: ${actualProducts}/${expectedProducts} products were generated.`,
-                `  Some branches may have failed (e.g., API rate limit or credits exhausted).`,
-                `  To regenerate all products: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
-                ``
-            );
-        }
-    }
+    const loaded = await loadValidatedBlueprint(salesChannelName, connection, out);
+    if (typeof loaded === "string") return out.end(loaded);
+    const blueprint = loaded;
 
     const translation = await runTranslationStep(salesChannelName, options.languages, dryRun);
-    results.push(...translation.lines);
-    if (translation.error) return [...results, translation.error];
+    out.push(...translation.lines);
+    if (translation.error) return out.end(translation.error);
 
-    results.push(`Step 3: Syncing to Shopware...`);
+    out.push(`Step 3: Syncing to Shopware...`);
 
     if (dryRun) {
-        results.push(`  [DRY RUN] Would sync to ${swEnvUrl}`);
-        results.push(``);
-        results.push(`=== Dry Run Complete ===`);
-        return results;
+        return out.end(
+            `  [DRY RUN] Would sync to ${connection.url}`,
+            ``,
+            `=== Dry Run Complete ===`
+        );
     }
 
-    const dataHydrator = new DataHydrator();
-    await dataHydrator.authenticateWithClientCredentials(
-        swEnvUrl,
-        process.env.SW_CLIENT_ID,
-        process.env.SW_CLIENT_SECRET
-    );
+    let dataHydrator: DataHydrator;
+    try {
+        dataHydrator = await connectShopware(connection);
+    } catch (error) {
+        return out.end(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
-    const deps = createProcessorDeps({
-        baseURL: swEnvUrl,
-        getAccessToken: () => dataHydrator.getAccessToken(),
-        clientId: process.env.SW_CLIENT_ID,
-        clientSecret: process.env.SW_CLIENT_SECRET,
+    const deps = createProcessorDepsForConnection(connection, dataHydrator, {
+        skipProviders: options.skipProcessors,
     });
     const shopware = await detectShopwareCapabilities(deps.apiHelpers);
-    results.push(`  Shopware: ${shopware.describe()}`);
+    out.push(`  Shopware: ${shopware.describe()}`);
+    progress("upload", 0, 4);
 
     let salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
     const isNewSalesChannel = !salesChannel;
@@ -241,10 +224,11 @@ export async function generate(
             imperialEnglishDomain: shopware.supports("measurementUnits"),
             locales: translation.locales,
         });
-        results.push(`  Created SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
+        out.push(`  Created SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
     } else {
-        results.push(`  Using existing SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
+        out.push(`  Using existing SalesChannel: ${salesChannel.name} (${salesChannel.id})`);
     }
+    progress("upload", 1, 4);
 
     const categoryIdMap = await syncCategories(
         dataHydrator,
@@ -252,10 +236,12 @@ export async function generate(
         salesChannel,
         isNewSalesChannel
     );
-    results.push(`  Synced ${categoryIdMap.size} categories`);
+    out.push(`  Synced ${categoryIdMap.size} categories`);
+    progress("upload", 2, 4);
 
     await syncPropertyGroups(dataHydrator, blueprint);
-    results.push(`  Synced ${blueprint.propertyGroups.length} property groups`);
+    out.push(`  Synced ${blueprint.propertyGroups.length} property groups`);
+    progress("upload", 3, 4);
 
     const propertyMaps = buildPropertyMaps(blueprint);
     syncPropertyIdsToBlueprint(blueprint, propertyMaps);
@@ -271,29 +257,41 @@ export async function generate(
         propertyMaps.propertyOptionMap,
         shopware
     );
-    results.push(`  Synced ${productSync.synced} of ${blueprint.products.length} products`);
+    out.push(`  Synced ${productSync.synced} of ${blueprint.products.length} products`);
+    progress("upload", 4, 4);
 
-    results.push(``, `=== Sync Complete ===`, ``, `Running post-processors...`);
+    out.push(``, `=== Sync Complete ===`, ``);
 
-    const processorResults = await runProcessors(
-        {
-            salesChannelId: salesChannel.id,
-            salesChannelName,
-            blueprint,
-            cache,
-            textProvider: deps.textProvider,
-            imageProvider: deps.imageProvider,
-            api: deps.apiHelpers,
-            shopware,
-            options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
-        },
-        registry.getNames()
-    );
+    const processorNames = options.skipProcessors ? [] : registry.getNames();
+    if (options.skipProcessors) {
+        out.push(`Skipping post-processors`);
+    } else {
+        out.push(`Running post-processors...`);
+    }
+    progress("processors", 0, processorNames.length);
+    const processorResults =
+        processorNames.length === 0
+            ? []
+            : await runProcessors(
+                  {
+                      salesChannelId: salesChannel.id,
+                      salesChannelName,
+                      blueprint,
+                      cache,
+                      textProvider: deps.textProvider,
+                      imageProvider: deps.imageProvider,
+                      api: deps.apiHelpers,
+                      shopware,
+                      options: { ...DEFAULT_PROCESSOR_OPTIONS, dryRun: false },
+                  },
+                  processorNames
+              );
+    progress("processors", processorNames.length, processorNames.length);
 
     const totalProcessed = processorResults.reduce((sum, r) => sum + r.processed, 0);
     const totalErrors = processorResults.reduce((sum, r) => sum + r.errors.length, 0);
 
-    results.push(
+    out.push(
         ``,
         `=== Generation Complete ===`,
         `SalesChannel: ${salesChannelName}`,
@@ -304,8 +302,173 @@ export async function generate(
         formatProductSyncErrorLine(productSync),
         formatProcessorErrorLine(processorResults),
     ].filter((line): line is string => line !== undefined);
-    results.push(...errorLines);
-    return results;
+    out.push(...errorLines);
+
+    return {
+        lines: out.lines,
+        summary: {
+            salesChannelId: salesChannel.id,
+            salesChannelName,
+            categories: categoryIdMap.size,
+            products: productSync.synced,
+            failedProducts: productSync.failed,
+            propertyGroups: blueprint.propertyGroups.length,
+            processors: processorResults.map((r) => ({
+                name: r.name,
+                processed: r.processed,
+                errors: r.errors,
+            })),
+        },
+    };
+}
+
+/** Signature of runGenerate, injected by CLI, MCP and server so tests can record the call */
+export type RunGenerate = typeof runGenerate;
+
+/** Step 0 (optional): crawl a real store. A failed crawl never stops the run. */
+async function runInspirationStep(
+    salesChannelName: string,
+    inspirationUrl: string | undefined
+): Promise<string[]> {
+    if (!inspirationUrl) return [];
+    if (createCacheFromEnv().hasInspiration(salesChannelName)) {
+        return [`Step 0: Using cached inspiration`];
+    }
+    try {
+        const lines = await inspireBlueprint(inspirationUrl, salesChannelName);
+        const error = lines.find((l) => l.startsWith("Error:"));
+        if (error) return [`  ⚠ Inspiration crawl failed: ${error.slice("Error: ".length)}`];
+        return [`Step 0: Inspiration saved from ${inspirationUrl}`];
+    } catch (error) {
+        return [
+            `  ⚠ Inspiration crawl failed: ${error instanceof Error ? error.message : String(error)}`,
+        ];
+    }
+}
+
+/** Steps 1 and 2: template, blueprint and hydration. Returns an "Error:" line on failure. */
+async function prepareBlueprints(
+    salesChannelName: string,
+    description: string,
+    options: GenerateOptions,
+    connection: ShopwareConnection,
+    out: RunOutput
+): Promise<string | undefined> {
+    const cache = createCacheFromEnv();
+
+    let usedTemplate = false;
+    if (!options.noTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
+        out.push(`Checking for pre-generated template...`);
+        const templateFetcher = createTemplateFetcherFromEnv();
+        usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
+        if (usedTemplate) {
+            out.push(`Using pre-generated template for "${salesChannelName}"`);
+            const templateInfo = cache.loadTemplateInfo(salesChannelName);
+            if (templateInfo) out.push(`  Template: ${summarizeTemplateInfo(templateInfo)}`);
+        } else {
+            out.push(`No template found, will generate from scratch`);
+        }
+    }
+
+    if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
+        out.push(`Step 1: Creating blueprint...`);
+        const lines = await createBlueprint(
+            salesChannelName,
+            description,
+            options.products ?? 90,
+            options.variants
+        );
+        const createError = lines.find((l) => l.startsWith("Error:"));
+        if (createError) return createError;
+        out.push(...lines.filter((l) => !l.startsWith("===")));
+    } else {
+        if (options.variants && hasVariantOverrides(options.variants)) {
+            out.push(
+                `⚠ Variant settings are ignored for an existing blueprint. ` +
+                    `Use: blueprint hydrate --name=${salesChannelName} --only=variants`
+            );
+        }
+        out.push(
+            usedTemplate ? `Step 1: Using template blueprint` : `Step 1: Using existing blueprint`
+        );
+    }
+    options.hooks?.onProgress?.("blueprint", 1, 2);
+
+    if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
+        return runHydration(salesChannelName, connection, out);
+    }
+    out.push(
+        usedTemplate
+            ? `Step 2: Using template hydrated blueprint`
+            : `Step 2: Using existing hydrated blueprint`
+    );
+    return undefined;
+}
+
+/**
+ * Load the hydrated blueprint, re-hydrate a broken one from a failed run, validate it and
+ * apply the colour system. Returns the blueprint or an "Error:" line.
+ */
+async function loadValidatedBlueprint(
+    salesChannelName: string,
+    connection: ShopwareConnection,
+    out: RunOutput
+): Promise<HydratedBlueprint | string> {
+    const cache = createCacheFromEnv();
+    let blueprint = cache.loadHydratedBlueprint(salesChannelName);
+    if (!blueprint) {
+        return `Error: Failed to load hydrated blueprint`;
+    }
+
+    let validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+
+    if (!validationResult.valid && isIncompleteHydration(validationResult)) {
+        out.push(
+            `  Detected incomplete hydrated blueprint (likely from a previous failed attempt). Re-hydrating...`
+        );
+        cache.deleteHydratedBlueprint(salesChannelName);
+
+        const hydrateError = await runHydration(salesChannelName, connection, out);
+        if (hydrateError) return hydrateError;
+
+        blueprint = cache.loadHydratedBlueprint(salesChannelName);
+        if (!blueprint) {
+            return `Error: Failed to load hydrated blueprint after re-hydration`;
+        }
+        validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
+    }
+
+    if (!validationResult.valid) {
+        const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
+        return [
+            `Error: Blueprint validation failed:`,
+            issues,
+            ``,
+            `This may be caused by an interrupted hydration (e.g., API credits exhausted).`,
+            `To retry: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+        ].join("\n");
+    }
+    if (validationResult.fixesApplied > 0) {
+        out.push(`  Auto-fixed ${validationResult.fixesApplied} blueprint issue(s)`);
+    }
+
+    // Blueprints from older runs and templates get the colour system before translation
+    // and upload (no AI: unknown shades are estimated)
+    applyColorSystem(blueprint, cache.loadColorShades(salesChannelName));
+    cache.saveHydratedBlueprint(salesChannelName, blueprint);
+
+    const originalBlueprint = cache.loadBlueprint(salesChannelName);
+    const expectedProducts = originalBlueprint?.products.length ?? 0;
+    if (blueprint.products.length < expectedProducts) {
+        out.push(
+            ``,
+            `  ⚠ Partial hydration: ${blueprint.products.length}/${expectedProducts} products were generated.`,
+            `  Some branches may have failed (e.g., API rate limit or credits exhausted).`,
+            `  To regenerate all products: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+            ``
+        );
+    }
+    return blueprint;
 }
 
 interface TranslationStepResult {
@@ -354,15 +517,16 @@ async function runTranslationStep(
 
 async function runHydration(
     salesChannelName: string,
-    results: string[]
+    connection: ShopwareConnection,
+    out: RunOutput
 ): Promise<string | undefined> {
-    results.push(`Step 2: Hydrating blueprint...`);
-    const lines = await hydrateBlueprint(salesChannelName, {});
+    out.push(`Step 2: Hydrating blueprint...`);
+    const lines = await hydrateBlueprint(salesChannelName, { connection });
     const errorLine = lines.find((l) => l.startsWith("Error:"));
     if (errorLine) {
         return errorLine;
     }
-    results.push(...lines.filter((l) => !l.startsWith("===") && l !== ``));
+    out.push(...lines.filter((l) => !l.startsWith("===") && l !== ``));
     return undefined;
 }
 
@@ -383,17 +547,17 @@ export async function runProcessorsForSalesChannel(
         ];
     }
 
-    const swEnvUrl = process.env.SW_ENV_URL;
-    if (!swEnvUrl) {
+    const connection = shopwareConnectionFromEnv();
+    if (!connection) {
         return [...results, `Error: SW_ENV_URL environment variable is required`];
     }
 
-    const dataHydrator = new DataHydrator();
-    await dataHydrator.authenticateWithClientCredentials(
-        swEnvUrl,
-        process.env.SW_CLIENT_ID,
-        process.env.SW_CLIENT_SECRET
-    );
+    let dataHydrator: DataHydrator;
+    try {
+        dataHydrator = await connectShopware(connection);
+    } catch (error) {
+        return [...results, `Error: ${error instanceof Error ? error.message : String(error)}`];
+    }
 
     const salesChannel = await dataHydrator.findSalesChannelByName(salesChannelName);
     if (!salesChannel) {
@@ -407,12 +571,7 @@ export async function runProcessorsForSalesChannel(
     const availableProcessors = registry.getNames();
     const selectedProcessors = processors.length > 0 ? processors : availableProcessors;
 
-    const deps = createProcessorDeps({
-        baseURL: swEnvUrl,
-        getAccessToken: () => dataHydrator.getAccessToken(),
-        clientId: process.env.SW_CLIENT_ID,
-        clientSecret: process.env.SW_CLIENT_SECRET,
-    });
+    const deps = createProcessorDepsForConnection(connection, dataHydrator);
 
     results.push(`Running processors: ${selectedProcessors.join(", ")}`);
     if (dryRun) results.push(`(Dry run mode - no changes will be made)`);
