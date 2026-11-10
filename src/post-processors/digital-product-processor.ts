@@ -28,6 +28,9 @@ import { apiPost, generateUUID, logger } from "../utils/index.js";
 /** Cache file for storing digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
 
+/** File name of the downloadable voucher */
+const VOUCHER_FILE_NAME = "gift-card-voucher";
+
 interface DigitalProductCache {
     productId: string;
     mediaId: string;
@@ -170,6 +173,7 @@ class DigitalProductProcessorImpl implements PostProcessor {
             return { mediaId: existingMediaId, downloadId: "" };
         }
 
+        await this.deleteOrphanedVoucherMedia(context);
         const mediaId = await this.createDownloadMedia(context);
         if (!mediaId)
             return { mediaId: "", downloadId: "", error: "Failed to create download media" };
@@ -708,17 +712,55 @@ class DigitalProductProcessorImpl implements PostProcessor {
                 .replace("{{CODE}}", voucherCode)
                 .replace("{{DATE}}", voucherDate);
 
-            await context.api.uploadMedia(
-                mediaId,
-                Buffer.from(voucherContent),
-                "gift-card-voucher",
-                "txt"
-            );
+            await this.uploadVoucherFile(context, mediaId, voucherContent);
 
             return mediaId;
         } catch (error) {
             logger.warn("Failed to create download media", { data: error });
             return null;
+        }
+    }
+
+    /**
+     * Delete voucher media that no product download uses. Earlier runs that failed after
+     * creating the media, or a cleanup that removed only the download, leave them behind.
+     * Shopware rejects an upload whose file name another visible media already uses, so
+     * the next voucher upload would fail.
+     */
+    private async deleteOrphanedVoucherMedia(context: PostProcessorContext): Promise<void> {
+        try {
+            const media = await context.api.searchEntities<{
+                id: string;
+                productDownloads?: unknown[];
+            }>("media", [{ type: "prefix", field: "fileName", value: VOUCHER_FILE_NAME }], {
+                associations: { productDownloads: {} },
+            });
+            const orphanIds = media
+                .filter((m) => (m.productDownloads ?? []).length === 0)
+                .map((m) => m.id);
+            if (orphanIds.length === 0) return;
+
+            await context.api.deleteEntities("media", orphanIds);
+            logger.info(`    ✓ Deleted ${orphanIds.length} unused voucher file(s)`, { cli: true });
+        } catch (error) {
+            logger.warn("Failed to delete unused voucher media", { data: error });
+        }
+    }
+
+    /**
+     * Upload the voucher file. The empty media entity is deleted again when the upload
+     * fails, so a failed run leaves nothing behind.
+     */
+    private async uploadVoucherFile(
+        context: PostProcessorContext,
+        mediaId: string,
+        content: string
+    ): Promise<void> {
+        try {
+            await context.api.uploadMedia(mediaId, Buffer.from(content), VOUCHER_FILE_NAME, "txt");
+        } catch (error) {
+            await context.api.deleteEntity("media", mediaId);
+            throw error;
         }
     }
 
