@@ -20,12 +20,14 @@ import type { LanguageContent } from "./languages.js";
 
 import {
     COLOR_FAMILY_GROUP_NAME,
+    COLOR_SHADE_GROUP_NAME,
     colorFamilyTranslation,
     fillFixtureText,
     footerTextKey,
     localizedFixtureText,
     packagingTextKey,
     productMediaTexts,
+    variantMediaTexts,
 } from "../fixtures/index.js";
 import { buildBlueprintCategoryPathMap, chunkArray, deriveProductSeoMeta } from "../utils/index.js";
 
@@ -59,7 +61,8 @@ export interface TranslationPayloadInput {
     /** Demo promotions, matched by code */
     promotions?: Array<{ id: string; code: string }>;
     /** Product images with the view they show (front, side, ...) */
-    productMedia?: Array<{ mediaId: string; productId: string; view: string }>;
+    /** Product images; colour variant images also carry the English shade name */
+    productMedia?: Array<{ mediaId: string; productId: string; view: string; shade?: string }>;
     /** Category banner images */
     categoryMedia?: Array<{ mediaId: string; categoryId: string }>;
     /** Homepage CMS page and its slot HTML per language (built from fixture texts) */
@@ -97,6 +100,12 @@ function productNameIn(
     const english = source.products[productId]?.name;
     if (content.kind === "source") return english;
     return content.file.products[productId]?.name ?? english;
+}
+
+/** Shade name in a language (translated "Color" option, English as fallback) */
+function shadeIn(shade: string, { content }: LanguageContent): string {
+    if (content.kind === "source") return shade;
+    return content.file.propertyGroups[COLOR_SHADE_GROUP_NAME]?.options[shade] ?? shade;
 }
 
 function withTranslations(id: string, perLanguage: Array<[string, Fields | null]>): Fields | null {
@@ -378,7 +387,13 @@ export function buildMediaTranslations(input: TranslationPayloadInput): Fields[]
             input.languages.map((lc) => {
                 const name = productNameIn(media.productId, lc, input.source);
                 if (!name) return [lc.language.id, null];
-                return [lc.language.id, productMediaTexts(name, media.view, fixtureTextsOf(lc))];
+                const texts = fixtureTextsOf(lc);
+                return [
+                    lc.language.id,
+                    media.shade
+                        ? variantMediaTexts(name, media.view, shadeIn(media.shade, lc), texts)
+                        : productMediaTexts(name, media.view, texts),
+                ];
             })
         )
     );

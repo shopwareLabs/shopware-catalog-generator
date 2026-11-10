@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 
 import type {
@@ -12,7 +12,7 @@ import type {
 } from "../types/index.js";
 
 import { PROVIDER_DEFAULTS } from "../types/index.js";
-import { logger } from "../utils/index.js";
+import { detectImageFormat, logger } from "../utils/index.js";
 
 /**
  * OpenAI text generation provider
@@ -99,6 +99,9 @@ export class OpenAITextProvider implements TextProvider {
  * Supports parallel processing with high rate limits
  * Concurrency is not a rate limit: image quotas depend on the account's usage tier.
  */
+/** Per-request timeout for image edits (low quality edits normally take well under a minute) */
+const IMAGE_EDIT_TIMEOUT_MS = 180_000;
+
 export class OpenAIImageProvider implements ImageProvider {
     private readonly client: OpenAI;
     private readonly model: string;
@@ -128,24 +131,58 @@ export class OpenAIImageProvider implements ImageProvider {
                 n: 1,
             });
 
-            const imageData = response.data?.[0];
-            if (!imageData) return null;
-
-            if (imageData.b64_json) {
-                return imageData.b64_json;
-            }
-
-            if (imageData.url) {
-                const imageResponse = await fetch(imageData.url);
-                const buffer = await imageResponse.arrayBuffer();
-                return Buffer.from(buffer).toString("base64");
-            }
-
-            return null;
+            return await this.readImageData(response.data?.[0]);
         } catch (error) {
             logger.warn(`OpenAI image generation failed:`, { data: error });
             return null;
         }
+    }
+
+    /**
+     * Edit an image (e.g. recolour a product). Sends the source as WebP or PNG,
+     * returns WebP like generateImage.
+     */
+    async editImage(
+        prompt: string,
+        sourceBase64: string,
+        options?: ImageGenerationOptions
+    ): Promise<string | null> {
+        try {
+            const buffer = Buffer.from(sourceBase64, "base64");
+            const format = detectImageFormat(buffer);
+            const image = await toFile(buffer, `source.${format.extension}`, {
+                type: format.mimeType,
+            });
+            const response = await this.client.images.edit(
+                {
+                    model: this.model,
+                    image,
+                    prompt,
+                    size: this.mapToOpenAISize(options),
+                    quality: this.quality,
+                    output_format: "webp",
+                    n: 1,
+                },
+                // The caller retries; without a timeout a stuck edit blocks for 10 min x 3 SDK attempts
+                { timeout: IMAGE_EDIT_TIMEOUT_MS, maxRetries: 0 }
+            );
+            return await this.readImageData(response.data?.[0]);
+        } catch (error) {
+            logger.warn(`OpenAI image edit failed:`, { data: error });
+            return null;
+        }
+    }
+
+    private async readImageData(
+        imageData: { b64_json?: string; url?: string } | undefined
+    ): Promise<string | null> {
+        if (!imageData) return null;
+        if (imageData.b64_json) return imageData.b64_json;
+        if (!imageData.url) return null;
+
+        const imageResponse = await fetch(imageData.url);
+        const buffer = await imageResponse.arrayBuffer();
+        return Buffer.from(buffer).toString("base64");
     }
 
     private parseQuality(quality: string): "low" | "medium" | "high" | "auto" {

@@ -96,6 +96,7 @@ class MockTextProvider implements TextProvider {
                             { view: "front", prompt: "Oak coffee table front view" },
                         ],
                         suggestedVariantGroups: null,
+                        variantColors: null,
                         assignedCategories: ["Sofas"],
                     },
                     {
@@ -113,6 +114,7 @@ class MockTextProvider implements TextProvider {
                             { view: "lifestyle", prompt: "Gray velvet sofa in living room" },
                         ],
                         suggestedVariantGroups: null,
+                        variantColors: null,
                         assignedCategories: ["Sofas"],
                     },
                 ],
@@ -138,6 +140,7 @@ class MockTextProvider implements TextProvider {
                             { group: "Style", value: "Modern" },
                         ],
                         suggestedVariantGroups: null,
+                        variantColors: null,
                     },
                     {
                         id: "prod2",
@@ -146,6 +149,7 @@ class MockTextProvider implements TextProvider {
                             { group: "Color", value: "Gray" },
                         ],
                         suggestedVariantGroups: ["Color"],
+                        variantColors: null,
                     },
                 ],
             });
@@ -798,5 +802,96 @@ describe("BlueprintHydrator", () => {
             const placeholders = hydrator.findPlaceholderProducts(products);
             expect(placeholders.length).toBe(0);
         });
+    });
+});
+
+describe("BlueprintHydrator.hydrateVariantsOnly", () => {
+    const settings = { colors: 4, options: 2, maxVariants: 24, share: 0.3 };
+
+    class VariantColorProvider implements TextProvider {
+        readonly name = "variant-colors";
+        readonly isSequential = false;
+        readonly maxConcurrency = 1;
+        readonly tokenLimit = 100000;
+        calls = 0;
+
+        constructor(private readonly fail = false) {}
+
+        async generateCompletion(): Promise<string> {
+            this.calls++;
+            if (this.fail) throw new Error("no credits");
+            return JSON.stringify({
+                products: [{ id: "v1", variantColors: ["Red", "Teal", "Plum", "Sand"] }],
+            });
+        }
+    }
+
+    function blueprintWithVariant(colors: string[] = ["Red"]): HydratedBlueprint {
+        const base = createTestHydratedBlueprint();
+        const [first, ...rest] = base.products;
+        if (!first) throw new Error("test blueprint has no products");
+        const variant: BlueprintProduct = {
+            ...first,
+            id: "v1",
+            metadata: {
+                ...first.metadata,
+                isVariant: true,
+                defaultColor: "Red",
+                variantConfigs: [
+                    {
+                        group: "Color",
+                        selectedOptions: colors,
+                        priceModifiers: Object.fromEntries(colors.map((c) => [c, 1])),
+                    },
+                    {
+                        group: "Size",
+                        selectedOptions: ["S", "M", "L"],
+                        priceModifiers: { S: 1, M: 1, L: 1.1 },
+                    },
+                ],
+            },
+        };
+        return { ...base, products: [variant, ...rest] };
+    }
+
+    afterEach(() => {
+        fs.rmSync(TEST_CACHE_DIR, { recursive: true, force: true });
+    });
+
+    test("adds the AI colours after the default colour and shrinks the other groups", async () => {
+        const provider = new VariantColorProvider();
+        const result = await new BlueprintHydrator(provider, TEST_CACHE_DIR).hydrateVariantsOnly(
+            blueprintWithVariant(),
+            settings
+        );
+        const configs = result.products.find((p) => p.id === "v1")?.metadata.variantConfigs;
+
+        expect(provider.calls).toBe(1);
+        expect(configs?.[0]?.selectedOptions).toEqual(["Red", "Teal", "Plum", "Sand"]);
+        expect(configs?.[1]?.selectedOptions).toEqual(["S", "M"]);
+    });
+
+    test("tops up from known colours when the AI call fails", async () => {
+        const result = await new BlueprintHydrator(
+            new VariantColorProvider(true),
+            TEST_CACHE_DIR
+        ).hydrateVariantsOnly(blueprintWithVariant(), settings);
+        const colors = result.products.find((p) => p.id === "v1")?.metadata.variantConfigs?.[0];
+
+        expect(colors?.selectedOptions[0]).toBe("Red");
+        expect(colors?.selectedOptions).toHaveLength(4);
+    });
+
+    test("makes no AI call when every product already has enough colours", async () => {
+        const provider = new VariantColorProvider();
+        const result = await new BlueprintHydrator(provider, TEST_CACHE_DIR).hydrateVariantsOnly(
+            blueprintWithVariant(["Red", "Navy"]),
+            { ...settings, colors: 2, options: 3 }
+        );
+        const configs = result.products.find((p) => p.id === "v1")?.metadata.variantConfigs;
+
+        expect(provider.calls).toBe(0);
+        expect(configs?.[0]?.selectedOptions).toEqual(["Red", "Navy"]);
+        expect(configs?.[1]?.selectedOptions).toEqual(["S", "M", "L"]);
     });
 });

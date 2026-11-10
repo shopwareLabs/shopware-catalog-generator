@@ -17,6 +17,7 @@ import type {
 } from "../index.js";
 
 import {
+    detectImageFormat,
     apiPost,
     cloneDeep,
     generateUUID,
@@ -24,7 +25,7 @@ import {
     toFixtureUrlSlug,
     toStoreScopedName,
 } from "../../utils/index.js";
-import { detectImageFormat, uploadImageWithRetry } from "../image-utils.js";
+import { uploadImageWithRetry } from "../image-utils.js";
 
 /** Filename for storing CMS landing page IDs */
 const CMS_LANDING_PAGES_FILE = "cms-landing-pages.json";

@@ -8,6 +8,7 @@ import { DataCache } from "../../../src/cache.js";
 import {
     buildGenerationStep,
     buildTemplateInfo,
+    formatTemplateInfo,
     mergeLaneResults,
     readLaneResult,
     readLaneResults,
@@ -179,9 +180,37 @@ describe("buildTemplateInfo", () => {
         });
 
         expect(info.description).toBe("Beauty and skincare");
-        expect(info.content).toEqual({ products: 2, categories: 2, languages: ["en", "de-DE"] });
+        expect(info.content).toEqual({
+            products: 2,
+            categories: 2,
+            languages: ["en", "de-DE"],
+            variantProducts: 0,
+        });
         expect(info.models).toEqual({ text: hydrate.text, image: hydrate.image });
         expect(info.createdAt).toBe("2026-11-09T10:00:00.000Z");
+    });
+
+    test("records the variant settings and the number of variant products", () => {
+        const variants = { colors: 6, options: 2, maxVariants: 12, share: 0.5 };
+        const variantProduct = createTestProduct({ id: "p3" });
+        variantProduct.metadata.isVariant = true;
+        const info = buildTemplateInfo({
+            name: STORE,
+            blueprint: {
+                ...blueprint,
+                variants,
+                products: [...blueprint.products, variantProduct],
+            },
+            steps: {},
+            translationLocales: [],
+            testedOn: [],
+        });
+
+        expect(info.content.variantProducts).toBe(1);
+        expect(info.content.variants).toEqual(variants);
+        expect(formatTemplateInfo(info)).toContain(
+            "  Variants: 1 variant products; settings: 50% variant products, 6 colours, 2 options per other group, max 12 variants"
+        );
     });
 
     test("has no models when no full hydration was recorded", () => {

@@ -18,6 +18,7 @@ types/
 ├── export.ts           # Export types (ExportValidation, ExportResult)
 ├── property-cache.ts   # Property cache types (CachedPropertyGroup)
 ├── color.ts            # ColorFamily, COLOR_FAMILY_KEYS, ColorShade (+ Zod schema), LearnedColorShades
+├── variant-settings.ts # VariantSettings, VARIANT_SETTING_LIMITS, DEFAULT_VARIANT_SETTINGS, Zod schemas
 └── shopware-version.ts # ShopwareVersion, ShopwareFeatureRequirement (version gating)
 ```
 

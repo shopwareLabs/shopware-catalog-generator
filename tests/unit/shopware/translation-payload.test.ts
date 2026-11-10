@@ -458,6 +458,35 @@ describe("buildMediaTranslations", () => {
         ]);
     });
 
+    test("colour variant image alt text adds the translated shade", () => {
+        const file = createTranslationFile({
+            ...DE_FILE,
+            fixtures: { "media.productImage.front": "{name} (Vorderansicht)" },
+        });
+        const input = createInput({
+            productMedia: [
+                { mediaId: "media-red", productId: "p1", view: "front", shade: "Red" },
+                { mediaId: "media-blue", productId: "p1", view: "front", shade: "Blue" },
+            ],
+            languages: [translation(DE, file), source(EN_EXTRA)],
+        });
+        const [red, blue] = buildMediaTranslations(input);
+        expect(red?.translations).toEqual({
+            "lang-de": {
+                alt: "Leinensofa, Rot (Vorderansicht)",
+                title: "Leinensofa, Rot (Vorderansicht)",
+            },
+            "lang-en": {
+                alt: "Linen Sofa, Red (front view)",
+                title: "Linen Sofa, Red (front view)",
+            },
+        });
+        // No translation for the shade: keep the English shade name
+        expect(blue?.translations).toMatchObject({
+            "lang-de": { alt: "Leinensofa, Blue (Vorderansicht)" },
+        });
+    });
+
     test("category banner alt text is the translated category name", () => {
         const input = createInput({
             categoryMedia: [

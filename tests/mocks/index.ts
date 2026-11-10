@@ -3,6 +3,7 @@ export type { ApiCall, MockResponse } from "./api-helpers.mock.js";
 export { createMockApiHelpers, MockApiHelpers } from "./api-helpers.mock.js";
 export { createMockDataCache, MockDataCache, MockImageCache } from "./data-cache.mock.js";
 export {
+    EditingImageProvider,
     FailingImageProvider,
     MockImageProvider,
     SlowImageProvider,

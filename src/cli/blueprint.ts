@@ -4,12 +4,14 @@
  * Thin wrappers that delegate to src/services/blueprint-service.ts and print output.
  */
 
+import type { HydrateOnly } from "../services/blueprint-service.js";
 import type { CliArgs } from "./shared.js";
 
 import {
     createBlueprint,
     estimateBlueprintCost,
     fixBlueprint,
+    HYDRATE_ONLY_MODES,
     hydrateBlueprint,
     inspireBlueprint,
     resolveCmsStoreDescription,
@@ -27,22 +29,23 @@ export async function blueprintCreate(args: CliArgs): Promise<void> {
     const description = args.description || `${salesChannelName} webshop`;
     const products = args.products || 90;
 
-    const lines = await createBlueprint(salesChannelName, description, products);
+    const lines = await createBlueprint(salesChannelName, description, products, args.variants);
+    throwIfServiceError(lines, "INVALID_OPTION");
     for (const line of lines) {
         console.log(line);
     }
 }
 
-type HydrateOnly = "categories" | "properties" | "cms";
+function isHydrateOnly(value: string): value is HydrateOnly {
+    return HYDRATE_ONLY_MODES.some((mode) => mode === value);
+}
 
 function parseHydrateOnly(args: CliArgs, command: string): HydrateOnly | undefined {
     const hydrateOnly = args.only?.[0];
     if (!hydrateOnly) return undefined;
-    if (hydrateOnly === "categories" || hydrateOnly === "properties" || hydrateOnly === "cms") {
-        return hydrateOnly;
-    }
+    if (isHydrateOnly(hydrateOnly)) return hydrateOnly;
     throw new CLIError(
-        `--only must be 'categories', 'properties', or 'cms' for ${command} (got: ${hydrateOnly})`,
+        `--only must be one of ${HYDRATE_ONLY_MODES.map((m) => `'${m}'`).join(", ")} for ${command} (got: ${hydrateOnly})`,
         "INVALID_OPTION"
     );
 }
@@ -51,6 +54,7 @@ export async function blueprintEstimate(args: CliArgs): Promise<void> {
     const salesChannelName = requireValidName(args);
     const lines = estimateBlueprintCost(salesChannelName, {
         only: parseHydrateOnly(args, "blueprint estimate"),
+        variants: args.variants,
     });
 
     throwIfServiceError(lines, "ESTIMATE_FAILED");
@@ -95,6 +99,7 @@ export async function blueprintHydrate(args: CliArgs): Promise<void> {
     const lines = await hydrateBlueprint(salesChannelName, {
         only: hydrateOnly,
         force: forceHydration,
+        variants: args.variants,
     });
 
     throwIfServiceError(lines, "HYDRATE_FAILED");

@@ -33,6 +33,12 @@ export {
     hydrateColorShades,
     hydrateProductImages,
     hydrateThemeMedia,
+    hydrateVariantImages,
+    countVariantImages,
+    NO_EDIT_SUPPORT_WARNING,
+    planVariantImages,
+    resolveVariantImageViews,
+    variantImageView,
     ProductHydrator,
     buildTranslationSource,
     collectCmsTexts,
@@ -40,3 +46,23 @@ export {
 } from "./hydrators/index.js";
 export type { TranslateCatalogInput, TranslateCatalogResult } from "./hydrators/index.js";
 export { VariantResolver } from "./variant-resolver.js";
+export {
+    assignVariantProducts,
+    blueprintVariantSettings,
+    capVariantConfigs,
+    countVariants,
+    formatVariantSettings,
+    hasVariantOverrides,
+    isColorVariantGroup,
+    missingColorCount,
+    pickOptions,
+    pickPreferredOptions,
+    productDefaultColor,
+    productsMissingColors,
+    repickVariantConfigs,
+    resolveVariantSettings,
+    VARIANT_SETTING_ENV,
+    VARIANT_SETTING_FLAGS,
+    VariantSettingsError,
+} from "./variant-settings.js";
+export type { RepickInput, VariantSettingOverrides } from "./variant-settings.js";

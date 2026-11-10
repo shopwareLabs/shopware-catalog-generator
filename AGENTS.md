@@ -23,6 +23,7 @@ src/
 │   ├── shopware.ts           # Shopware entities + Zod schemas
 │   ├── blueprint.ts          # Blueprint types
 │   ├── cost-estimate.ts      # Cost forecast types (ModelSelection, TokenUsage, CostEstimate)
+│   ├── variant-settings.ts   # VariantSettings, VARIANT_SETTING_LIMITS, defaults + Zod schemas
 │   ├── translation.ts        # Translation file + source types (TranslationFile, LanguageSelection)
 │   ├── providers.ts          # AI provider interfaces (+ tokenLimit)
 │   ├── cache.ts              # Cache configuration types
@@ -78,6 +79,7 @@ src/
 │   ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 │   ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
 │   ├── cost-estimator.ts     # Hydration cost forecast (tokens, images, USD)
+│   ├── variant-settings.ts   # Variant settings: resolve, assign variant products, pick, cap, re-pick
 │   ├── color-system.ts       # Colour system: shades in "Color", families in "Color family" (no AI)
 │   └── hydrators/            # Specialized hydration modules
 │       ├── index.ts          # Re-exports all hydrators
@@ -85,6 +87,7 @@ src/
 │       ├── product.ts        # Product content via AI (parallel branches)
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
 │       ├── image.ts          # Product/category/CMS/theme image pre-generation
+│       ├── variant-images.ts # Recolour parent images per colour variant (editImage)
 │       ├── translation.ts    # AI translation pass (native-sounding, per locale, reuses unchanged)
 │       ├── color-shades.ts   # AI hex + family for unknown shade names (store context)
 │       └── theme.ts          # AI brand color generation
@@ -115,6 +118,7 @@ src/
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── promotion-processor.ts # Demo promotion codes (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── variant-processor.ts  # Variant product creation
+│   ├── variant-image-processor.ts # Colour images + gallery per colour variant
 │   ├── review-processor.ts   # Variable review counts, spread across SalesChannel languages
 │   ├── translation-processor.ts # Writes cached translations (no AI)
 │   └── theme-processor.ts    # Child theme with brand colors + media
@@ -168,6 +172,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
+│   ├── image-format.ts       # detectImageFormat (magic bytes → extension + mime type)
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
@@ -235,7 +240,8 @@ tests/
 │   │       ├── cms.test.ts
 │   │       ├── color-shades.test.ts
 │   │       ├── image.test.ts
-│   │       └── theme.test.ts
+│   │       ├── theme.test.ts
+│   │       └── variant-images.test.ts
 │   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
 │   │   ├── customer-processor.test.ts
@@ -244,6 +250,7 @@ tests/
 │   │   ├── review-processor.test.ts
 │   │   ├── theme-processor.test.ts
 │   │   ├── variant-processor.test.ts
+│   │   ├── variant-image-processor.test.ts
 │   │   ├── digital-product-processor.test.ts
 │   │   ├── media-product-processor.test.ts
 │   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
@@ -305,7 +312,7 @@ tests/
     ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
     ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
     ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
-    └── image-provider.mock.ts # MockImageProvider, FailingImageProvider, SlowImageProvider
+    └── image-provider.mock.ts # MockImageProvider, EditingImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Module Documentation
@@ -535,28 +542,29 @@ interface PostProcessorOptions {
 
 **Available processors:**
 
-| Processor          | Description                                      | Dependencies                                                 |
-| ------------------ | ------------------------------------------------ | ------------------------------------------------------------ |
-| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling`                   |
-| `cms-text`         | Text elements demo page                          | none                                                         |
-| `cms-images`       | Image elements demo page                         | none                                                         |
-| `cms-video`        | Video elements demo page                         | none                                                         |
-| `cms-text-images`  | Text & Images demo page                          | none                                                         |
-| `cms-commerce`     | Commerce elements demo page                      | `images`                                                     |
-| `cms-form`         | Form elements demo page                          | none                                                         |
-| `cms-footer-pages` | Shared footer and legal pages                    | none                                                         |
-| `cross-selling`    | Category-based cross-selling via product streams | none                                                         |
-| `customers`        | Demo customer accounts with B2B group            | none                                                         |
-| `images`           | Upload pre-generated product/category images     | none                                                         |
-| `manufacturers`    | Fictional manufacturer creation                  | none                                                         |
-| `promotions`       | Tiered pricing and promotion codes               | none                                                         |
-| `reviews`          | Variable review counts (0-10 per product)        | none                                                         |
-| `theme`            | Child theme with brand colors, logo, favicon     | none                                                         |
-| `variants`         | Variant product creation                         | `manufacturers`                                              |
-| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `promotions` |
-| `digital-product`  | Digital product with download                    | none                                                         |
-| `media-product`    | Product with 3D models + videos (6.6+)           | none                                                         |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product, media-product                       |
+| Processor          | Description                                      | Dependencies                                                                   |
+| ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `cms-home`         | Homepage layout on root category                 | `customers`, `promotions`, `cross-selling`                                     |
+| `cms-text`         | Text elements demo page                          | none                                                                           |
+| `cms-images`       | Image elements demo page                         | none                                                                           |
+| `cms-video`        | Video elements demo page                         | none                                                                           |
+| `cms-text-images`  | Text & Images demo page                          | none                                                                           |
+| `cms-commerce`     | Commerce elements demo page                      | `images`                                                                       |
+| `cms-form`         | Form elements demo page                          | none                                                                           |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                                                                           |
+| `cross-selling`    | Category-based cross-selling via product streams | none                                                                           |
+| `customers`        | Demo customer accounts with B2B group            | none                                                                           |
+| `images`           | Upload pre-generated product/category images     | none                                                                           |
+| `manufacturers`    | Fictional manufacturer creation                  | none                                                                           |
+| `promotions`       | Tiered pricing and promotion codes               | none                                                                           |
+| `reviews`          | Variable review counts (0-10 per product)        | none                                                                           |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                                                                           |
+| `variants`         | Variant product creation                         | `manufacturers`                                                                |
+| `variant-images`   | Colour images and gallery per colour variant     | `variants`, `images`                                                           |
+| `translations`     | Write cached translations per language (no AI)   | `manufacturers`, `variants`, `cms-*`, `images`, `variant-images`, `promotions` |
+| `digital-product`  | Digital product with download                    | none                                                                           |
+| `media-product`    | Product with 3D models + videos (6.6+)           | none                                                                           |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, digital-product, media-product                                         |
 
 Processors run in parallel when possible, respecting dependencies:
 
@@ -720,7 +728,8 @@ generated/
         │   └── {productId}.json    # Per-product metadata
         └── images/                 # Reorganized by media type
             ├── product_media/
-            │   └── {productId}.webp
+            │   ├── {productId}-{view}.webp           # Parent images (default colour)
+            │   └── {productId}-{view}--{shade}.webp  # Recoloured copy per colour variant (+ .json with source hash)
             ├── category_media/
             │   └── {categoryId}.webp
             ├── cms_media/
@@ -1190,6 +1199,11 @@ AI_API_KEY=pk_your_pollinations_key    # pk_ = free/sequential, sk_ = parallel
 # Optional overrides
 AI_MODEL=gpt-6-luna   # OpenAI default; or gpt-5.4-mini, gpt-4.1-2025-04-14
 TRANSLATION_LANGUAGES=de-DE  # Default for --languages: list, "all" or "none"
+VARIANT_SHARE=0.3     # Share of products with variants (blueprint create)
+VARIANT_COLORS=4      # Colours per colour variant product
+VARIANT_OPTIONS=3     # Options per other variant group (Size, Material, ...)
+MAX_VARIANTS=24       # Max variants per product
+VARIANT_IMAGE_VIEWS=all  # Colour images for every view, or "cover" (first view only, cheaper)
 IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
 IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
 IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-2.5-flare, flux, klein, zimage
@@ -1226,6 +1240,8 @@ bun run blueprint hydrate --name=music
 # Phase 2b: Selective re-hydration (preserves product names for image stability)
 bun run blueprint hydrate --name=music --only=categories  # Categories only
 bun run blueprint hydrate --name=music --only=properties  # Properties only
+bun run blueprint hydrate --name=music --only=variants --variant-colors=6  # More colour variants
+bun run blueprint hydrate --name=music --only=variant-images  # Recolour images per colour variant
 bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
@@ -1283,14 +1299,22 @@ bun run blueprint create \
   --name=NAME              # Required: SalesChannel name (becomes subdomain)
   --description=TEXT       # Context for AI generation (default: "{name} webshop")
   --products=N             # Products to generate (default: 90)
+  --variant-share=0.3      # Share of products with variants, 0-1 (env VARIANT_SHARE)
+  --variant-colors=4       # Colours per colour variant product, 2-12 (env VARIANT_COLORS)
+  --variant-options=3      # Options per other variant group, 2-8 (env VARIANT_OPTIONS)
+  --max-variants=24        # Max variants per product, 4-100 (env MAX_VARIANTS)
 ```
+
+Variant settings are stored in `blueprint.variants` (flag beats env var beats default). Exactly
+`round(products × share)` products get variants. When the cartesian product exceeds `--max-variants`,
+the largest other group shrinks first (down to 2), then the colours, then other groups are dropped.
 
 ### Hydration Options
 
 ```bash
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
-  --only=MODE              # Selective: "categories", "properties", or "cms"
+  --only=MODE              # Selective: "categories", "properties", "cms", "variants" or "variant-images"
   --rehydrate              # Force full re-hydration (changes names, triggers image regen)
 ```
 
@@ -1300,6 +1324,14 @@ Hydration modes:
 - **--only=categories**: Only update category names/descriptions, preserve all product data
 - **--only=properties**: Only update product properties, preserve names (for image stability)
 - **--only=cms**: Only hydrate CMS blueprint text (`cms-blueprint.json`)
+- **--only=variants**: Re-pick variant options with new `--variant-colors`, `--variant-options`,
+  `--max-variants` (existing options stay first; one AI call per 25 products that need more colours)
+- **--only=variant-images**: Recolour the parent product images once per colour variant (all colours
+  except the default one, which the parent images already show). Needs image editing (OpenAI
+  `images.edit`); other providers are skipped with a warning and variants keep the parent images.
+  Cached images are reused; a changed parent image makes its colour copies stale (source hash).
+  `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too.
+  The `variant-images` processor uploads them in `generate` / `process`
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
@@ -1309,7 +1341,7 @@ Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prev
 ```bash
 bun run blueprint estimate \
   --name=NAME              # Required: SalesChannel name (blueprint must exist)
-  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms")
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images")
   --languages=LIST         # Optional: also forecast translation ("de-DE,fr-FR", "all", "none")
 ```
 

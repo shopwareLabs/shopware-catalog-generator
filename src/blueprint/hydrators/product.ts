@@ -15,11 +15,13 @@ import type {
     ProductProperty,
     TextProvider,
     VariantConfig,
+    VariantSettings,
 } from "../../types/index.js";
 import type { ExistingProperty } from "../../utils/index.js";
 import type { VariantResolver } from "../variant-resolver.js";
 
 import { PropertyCache } from "../../property-cache.js";
+import { DEFAULT_VARIANT_SETTINGS } from "../../types/index.js";
 import {
     ConcurrencyLimiter,
     deriveProductSeoMeta,
@@ -51,6 +53,7 @@ const ProductResponseSchema = z.object({
                 })
             ),
             suggestedVariantGroups: z.array(z.string()).nullable(),
+            variantColors: z.array(z.string()).nullable(),
             assignedCategories: z.array(z.string()).nullable(),
         })
     ),
@@ -67,6 +70,16 @@ const PropertyOnlyResponseSchema = z.object({
                 })
             ),
             suggestedVariantGroups: z.array(z.string()).nullable(),
+            variantColors: z.array(z.string()).nullable(),
+        })
+    ),
+});
+
+const VariantColorsResponseSchema = z.object({
+    products: z.array(
+        z.object({
+            id: z.string(),
+            variantColors: z.array(z.string()),
         })
     ),
 });
@@ -110,6 +123,35 @@ const COLOR_PROPERTY_RULES = `- "Color" is the only predefined property group - 
 - Reuse the existing Color values listed above when one fits; for a pattern or several colours use "Multicolor"
 - Never create a "Color family" group: families are added automatically`;
 
+/** True for the "Color" group name (any case) */
+function isColorGroupName(name: string): boolean {
+    const normalized = name.trim().toLowerCase();
+    return normalized === "color" || normalized === "colour";
+}
+
+/**
+ * Preferred colours for a colour variant product: its own Color value first (the colour of
+ * the main image), then the colours the AI chose.
+ */
+export function productColorPreferences(
+    properties: ReadonlyArray<{ group: string; value: string }>,
+    variantColors: readonly string[] | null | undefined
+): string[] {
+    const own = properties.find((p) => isColorGroupName(p.group))?.value;
+    return [...(own ? [own] : []), ...(variantColors ?? [])];
+}
+
+/** Product whose colour variants are filled by hydrateVariantColors() */
+export interface VariantColorRequest {
+    id: string;
+    name: string;
+    /** The product's own colour (first colour variant) */
+    color?: string;
+}
+
+/** Products per AI call when only colours are requested */
+export const VARIANT_COLOR_BATCH_SIZE = 25;
+
 export interface StoreContext {
     name: string;
     description: string;
@@ -140,8 +182,18 @@ export class ProductHydrator {
         private readonly propertyCache: PropertyCache,
         private readonly variantResolver: VariantResolver,
         private readonly generateBaseImagePrompt: GenerateBaseImagePromptFn,
-        private readonly inspiration?: InspirationData
+        private readonly inspiration?: InspirationData,
+        private readonly variantSettings: VariantSettings = DEFAULT_VARIANT_SETTINGS
     ) {}
+
+    /** Prompt rule for the colour variants of variant products */
+    private variantColorRule(step: string): string {
+        const count = this.variantSettings.colors;
+        return `${step} For products with isVariant: true whose "suggestedVariantGroups" include "Color", return EXACTLY ${count} shade names in "variantColors"
+   - The FIRST entry is the product's own Color property value
+   - The others are realistic alternative shades this product is sold in, all different
+   - Use null for all other products`;
+    }
 
     /**
      * Hydrate products with AI
@@ -321,18 +373,69 @@ export class ProductHydrator {
             )
         );
 
-        let jsonStr = responseText.trim();
-        if (jsonStr.startsWith("```")) {
-            const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-            if (match) {
-                jsonStr = match[1]?.trim() || jsonStr;
-            }
-        }
-
-        const parsed = JSON.parse(jsonStr);
-        const validated = PropertyOnlyResponseSchema.parse(parsed);
+        const validated = PropertyOnlyResponseSchema.parse(parseJsonResponse(responseText));
 
         return new Map(validated.products.map((p) => [p.id, p]));
+    }
+
+    /**
+     * Ask the AI for exactly `variantSettings.colors` shades per product (own colour first).
+     * Used by `hydrate --only=variants` for products that need more colours than they have.
+     * Returns product ID → colours; products the AI skipped are missing.
+     */
+    async hydrateVariantColors(
+        products: VariantColorRequest[],
+        storeContext: StoreContext
+    ): Promise<Map<string, string[]>> {
+        const batches = Array.from(
+            { length: Math.ceil(products.length / VARIANT_COLOR_BATCH_SIZE) },
+            (_, i) =>
+                products.slice(i * VARIANT_COLOR_BATCH_SIZE, (i + 1) * VARIANT_COLOR_BATCH_SIZE)
+        );
+        const limiter = new ConcurrencyLimiter(this.textProvider.maxConcurrency);
+        const results = await limiter.all(
+            batches.map((batch) => () => this.hydrateVariantColorBatch(batch, storeContext))
+        );
+        return new Map(results.flatMap((result) => [...result]));
+    }
+
+    private async hydrateVariantColorBatch(
+        products: VariantColorRequest[],
+        storeContext: StoreContext
+    ): Promise<Map<string, string[]>> {
+        const count = this.variantSettings.colors;
+        const prompt = `Choose the colour variants for products of this store.
+
+STORE CONTEXT:
+- Store name: "${storeContext.name}"
+- Store description: "${storeContext.description}"
+
+Products (${products.length} total):
+${JSON.stringify(products, null, 2)}
+
+For each product return EXACTLY ${count} shade names in "variantColors":
+- The FIRST entry is the product's own "color" (keep it exactly when it is given)
+- The others are realistic alternative shades this product is sold in, all different
+- Shade names a shopper of THIS store would recognise (e.g. "Navy", "Dusty Rose"), not "Various"
+
+Return JSON: { "products": [{ "id": "...", "variantColors": ["...", "..."] }] }`;
+
+        const responseText = await executeWithRetry(() =>
+            this.textProvider.generateCompletion(
+                [
+                    {
+                        role: "system",
+                        content: "You are a JSON generator. Output ONLY valid JSON.",
+                    },
+                    { role: "user", content: prompt },
+                ],
+                VariantColorsResponseSchema,
+                "VariantColorsResponse"
+            )
+        );
+
+        const validated = VariantColorsResponseSchema.parse(parseJsonResponse(responseText));
+        return new Map(validated.products.map((p) => [p.id, p.variantColors]));
     }
 
     /** Clear batch progress state (call before starting hydration) */
@@ -763,6 +866,7 @@ For each product:
    - Only suggest new group names if absolutely no existing group fits
    - Use BROAD group names: "Size" not "Pot Size", "Material" not "Handle Material"
    - Just group names, not the options (options come from cache or will be generated later)
+${this.variantColorRule("6b.")}
 7. ASSIGN 1-2 subcategories from the AVAILABLE SUBCATEGORIES list that MATCH the product type
    - Use "assignedCategories" field with EXACT category names from the list
    - Choose categories that logically fit the product (e.g., guitar products → guitar categories)
@@ -780,6 +884,7 @@ Return JSON in this exact format:
         { "view": "front", "prompt": "Product description for image generation" }
       ],
       "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"],
+      "variantColors": null,
       "assignedCategories": ["Subcategory1", "Subcategory2"]
     }
   ]
@@ -835,6 +940,7 @@ For each product:
 1. Generate 2-3 properties that MATCH the existing product name
    Example: "Garden Hose - 20m - Green" → properties: [{ group: "Length", value: "20m" }, { group: "Color", value: "Green" }]
 2. For products with isVariant: true, suggest 1-3 property group names in "suggestedVariantGroups"
+${this.variantColorRule("3.")}
 
 Return JSON in this exact format:
 {
@@ -842,7 +948,8 @@ Return JSON in this exact format:
     {
       "id": "...",
       "properties": [{ "group": "PropertyGroup", "value": "Value" }, ...],
-      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"]
+      "suggestedVariantGroups": ["PropertyGroup1", "PropertyGroup2"],
+      "variantColors": null
     }
   ]
 }`;
@@ -878,7 +985,12 @@ Return JSON in this exact format:
                 const categoryName = categoryNameMap.get(product.primaryCategoryId) || "Unknown";
                 variantConfigs = await this.variantResolver.resolveVariantConfigs(
                     h.suggestedVariantGroups,
-                    { name: h.name, category: categoryName }
+                    {
+                        name: h.name,
+                        category: categoryName,
+                        productId: product.id,
+                        colors: productColorPreferences(h.properties, h.variantColors),
+                    }
                 );
             }
 
@@ -929,4 +1041,13 @@ Return JSON in this exact format:
 
         return results;
     }
+}
+
+/** Parse a JSON response, also when the model wrapped it in a Markdown code fence */
+function parseJsonResponse(responseText: string): unknown {
+    const trimmed = responseText.trim();
+    const fenced = trimmed.startsWith("```")
+        ? trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)?.[1]?.trim()
+        : undefined;
+    return JSON.parse(fenced || trimmed);
 }

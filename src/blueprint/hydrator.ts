@@ -13,6 +13,7 @@ import type {
     HydratedBlueprint,
     ProductProperty,
     TextProvider,
+    VariantSettings,
 } from "../types/index.js";
 import type { ExistingProperty } from "../utils/index.js";
 
@@ -29,7 +30,14 @@ import {
     hydrateCategories,
     ProductHydrator,
 } from "./hydrators/index.js";
+import { productColorPreferences } from "./hydrators/product.js";
 import { VariantResolver } from "./variant-resolver.js";
+import {
+    blueprintVariantSettings,
+    productDefaultColor,
+    productsMissingColors,
+    repickVariantConfigs,
+} from "./variant-settings.js";
 
 /** Store context passed through hydration methods */
 interface StoreContext {
@@ -108,7 +116,10 @@ export class BlueprintHydrator {
         // Step 2: Hydrate products
         logger.info("  [2/3] Generating product content...", { cli: true });
         logger.info("Hydrating products...");
-        const productHydrator = this.createProductHydrator(inspiration);
+        const productHydrator = this.createProductHydrator(
+            blueprintVariantSettings(blueprint),
+            inspiration
+        );
         productHydrator.clearBatchCounter();
         const hydratedProducts = await productHydrator.hydrateProducts(
             blueprint.products,
@@ -227,8 +238,13 @@ export class BlueprintHydrator {
         };
         flatCats(existingBlueprint.categories);
 
-        const productHydrator = this.createProductHydrator();
-        const variantResolver = new VariantResolver(this.textProvider, this.propertyCache);
+        const settings = blueprintVariantSettings(existingBlueprint);
+        const productHydrator = this.createProductHydrator(settings);
+        const variantResolver = new VariantResolver(
+            this.textProvider,
+            this.propertyCache,
+            settings
+        );
 
         const updatedProducts: BlueprintProduct[] = [];
         const branches = Array.from(productsByBranch.entries());
@@ -248,10 +264,22 @@ export class BlueprintHydrator {
                 const update = propertyUpdates.get(product.id);
                 if (update) {
                     let variantConfigs = product.metadata.variantConfigs;
-                    if (update.suggestedVariantGroups && update.suggestedVariantGroups.length > 0) {
+                    if (
+                        product.metadata.isVariant &&
+                        update.suggestedVariantGroups &&
+                        update.suggestedVariantGroups.length > 0
+                    ) {
                         variantConfigs = await variantResolver.resolveVariantConfigs(
                             update.suggestedVariantGroups,
-                            { name: product.name, category: branchName }
+                            {
+                                name: product.name,
+                                category: branchName,
+                                productId: product.id,
+                                colors: productColorPreferences(
+                                    update.properties,
+                                    update.variantColors
+                                ),
+                            }
                         );
                     }
 
@@ -304,14 +332,110 @@ export class BlueprintHydrator {
         return fixHydratedPlaceholders(this.textProvider, blueprint);
     }
 
-    private createProductHydrator(inspiration?: InspirationData): ProductHydrator {
-        const variantResolver = new VariantResolver(this.textProvider, this.propertyCache);
+    /**
+     * Re-pick the variant options of an existing hydrated blueprint for new settings.
+     * Keeps names, properties and images. Only products that need more colours than they
+     * have cost an AI call (one per 25 products); everything else comes from the cache.
+     */
+    async hydrateVariantsOnly(
+        existingBlueprint: HydratedBlueprint,
+        settings: VariantSettings
+    ): Promise<HydratedBlueprint> {
+        const storeSlug = toKebabCase(existingBlueprint.salesChannel.name);
+        this.propertyCache = PropertyCache.forStore(this.cacheDir, storeSlug);
+        this.propertyCache.ensureDefaults();
+
+        const variantProducts = existingBlueprint.products.filter(
+            (p) => p.metadata.isVariant && (p.metadata.variantConfigs?.length ?? 0) > 0
+        );
+        const aiColors = await this.fetchMissingVariantColors(
+            existingBlueprint,
+            variantProducts,
+            settings
+        );
+
+        const poolFor = (group: string): string[] =>
+            this.propertyCache.get(this.propertyCache.resolveGroupName(group))?.options ?? [];
+
+        const products = existingBlueprint.products.map((product) => {
+            const configs = product.metadata.variantConfigs;
+            if (!product.metadata.isVariant || !configs || configs.length === 0) return product;
+            const variantConfigs = repickVariantConfigs({
+                productId: product.id,
+                configs,
+                settings,
+                poolFor,
+                defaultColor: productDefaultColor(product),
+                extraColors: aiColors.get(product.id) ?? [],
+            });
+            return { ...product, metadata: { ...product.metadata, variantConfigs } };
+        });
+
+        const skipped = existingBlueprint.products.filter(
+            (p) => p.metadata.isVariant && (p.metadata.variantConfigs?.length ?? 0) === 0
+        ).length;
+        if (skipped > 0) {
+            logger.warn(
+                `  ${skipped} variant product(s) have no variant groups yet; run --only=properties to add them`,
+                { cli: true }
+            );
+        }
+
+        logger.info(`  Variant options re-picked for ${variantProducts.length} products`, {
+            cli: true,
+        });
+        return {
+            ...existingBlueprint,
+            variants: { ...settings },
+            products,
+            hydratedAt: new Date().toISOString(),
+        };
+    }
+
+    /** Ask the AI for colours of products that need more than they have (empty on failure) */
+    private async fetchMissingVariantColors(
+        blueprint: HydratedBlueprint,
+        variantProducts: BlueprintProduct[],
+        settings: VariantSettings
+    ): Promise<Map<string, string[]>> {
+        const requests = productsMissingColors(variantProducts, settings).map((p) => ({
+            id: p.id,
+            name: p.name,
+            color: productDefaultColor(p),
+        }));
+        if (requests.length === 0) return new Map();
+
+        logger.info(`  Choosing more colours for ${requests.length} products...`, { cli: true });
+        try {
+            return await this.createProductHydrator(settings).hydrateVariantColors(requests, {
+                name: blueprint.salesChannel.name,
+                description: blueprint.salesChannel.description,
+            });
+        } catch (error) {
+            logger.warn("  Colour choice failed, topping up from known colours instead", {
+                cli: true,
+                data: error,
+            });
+            return new Map();
+        }
+    }
+
+    private createProductHydrator(
+        settings: VariantSettings,
+        inspiration?: InspirationData
+    ): ProductHydrator {
+        const variantResolver = new VariantResolver(
+            this.textProvider,
+            this.propertyCache,
+            settings
+        );
         return new ProductHydrator(
             this.textProvider,
             this.propertyCache,
             variantResolver,
             (name, props) => this.generateBaseImagePrompt(name, props),
-            inspiration
+            inspiration,
+            settings
         );
     }
 
@@ -346,3 +470,5 @@ export class BlueprintHydrator {
         return basePrompt;
     }
 }
+
+/** The product's default colour: stored default, else its own Color, else the first colour variant */

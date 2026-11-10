@@ -104,15 +104,15 @@ per locale (`fixtures` in `translations/{locale}.json`, with a source hash per k
 `fixtureHashes` so changed texts are re-translated). Placeholders like `{name}` are filled at
 upload time with `localizedFixtureText(key, texts, values)`, which falls back to English.
 
-| Key                                 | Used for                                          |
-| ----------------------------------- | ------------------------------------------------- |
-| `manufacturer.description`          | Manufacturer description                          |
-| `promotion.<CODE>.name`             | Promotion names                                   |
-| `unit.<shortCode>.name / shortCode` | Packaging units (non-system languages only)       |
-| `packaging.<label>`                 | Product `packUnit` / `packUnitPlural`             |
-| `media.productImage.<view>`         | Product image alt/title (`productMediaTexts`)     |
-| `footer.category.<name>`            | Footer category names (non-system languages only) |
-| `home.*`                            | Homepage hero and reference text (cms-home)       |
+| Key                                 | Used for                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `manufacturer.description`          | Manufacturer description                                                                                                       |
+| `promotion.<CODE>.name`             | Promotion names                                                                                                                |
+| `unit.<shortCode>.name / shortCode` | Packaging units (non-system languages only)                                                                                    |
+| `packaging.<label>`                 | Product `packUnit` / `packUnitPlural`                                                                                          |
+| `media.productImage.<view>`         | Product image alt/title (`productMediaTexts`), colour variant images add the shade (`variantMediaTexts`: "Name, Shade (view)") |
+| `footer.category.<name>`            | Footer category names (non-system languages only)                                                                              |
+| `home.*`                            | Homepage hero and reference text (cms-home)                                                                                    |
 
 Units and footer categories are looked up by short code / name, so their system-language
 row stays English. Units are global: a German translation also applies to other

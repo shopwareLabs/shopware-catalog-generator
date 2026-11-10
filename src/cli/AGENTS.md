@@ -74,6 +74,18 @@ bun run blueprint create --name=music --description="Musical instruments and acc
 | `--description` | string | `"{name} webshop"` | Context for AI generation      |
 | `--products`    | number | `90`               | Number of products to generate |
 
+Variant settings are fixed here and stored in `blueprint.variants` (flag beats env var beats default):
+
+| Flag                | Type   | Default | Description                                                     |
+| ------------------- | ------ | ------- | --------------------------------------------------------------- |
+| `--variant-share`   | number | `0.3`   | Share of products with variants (0-1, env `VARIANT_SHARE`)      |
+| `--variant-colors`  | number | `4`     | Colours per colour variant product (2-12, env `VARIANT_COLORS`) |
+| `--variant-options` | number | `3`     | Options per other variant group (2-8, env `VARIANT_OPTIONS`)    |
+| `--max-variants`    | number | `24`    | Max variants per product (4-100, env `MAX_VARIANTS`)            |
+
+Exactly `round(products × share)` products get variants, picked by a seeded rank of their IDs.
+Out-of-range values fail with a clear error.
+
 **Output:** `generated/sales-channels/{name}/blueprint.json`
 
 ### Blueprint Estimate
@@ -85,11 +97,11 @@ bun run blueprint estimate --name=music
 bun run blueprint estimate --name=music --only=cms
 ```
 
-| Flag          | Type   | Default            | Description                                             |
-| ------------- | ------ | ------------------ | ------------------------------------------------------- |
-| `--name`      | string | _(required)_       | SalesChannel name (blueprint must exist)                |
-| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`    |
-| `--languages` | string | _(none)_           | Also forecast translation: `de-DE,fr-FR`, `all`, `none` |
+| Flag          | Type   | Default            | Description                                                   |
+| ------------- | ------ | ------------------ | ------------------------------------------------------------- |
+| `--name`      | string | _(required)_       | SalesChannel name (blueprint must exist)                      |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms`, `variants` |
+| `--languages` | string | _(none)_           | Also forecast translation: `de-DE,fr-FR`, `all`, `none`       |
 
 `blueprint hydrate` prints the same forecast before it starts and the actual token usage at the end.
 
@@ -125,7 +137,7 @@ bun run blueprint hydrate --name=music
 | Flag          | Type   | Default            | Description                                                          |
 | ------------- | ------ | ------------------ | -------------------------------------------------------------------- |
 | `--name`      | string | _(required)_       | SalesChannel name                                                    |
-| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, or `cms`                 |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms` or `variants`      |
 | `--rehydrate` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names) |
 
 #### Hydration Modes
@@ -136,9 +148,26 @@ bun run blueprint hydrate --name=music
 | `--only=categories`        | Only update category names/descriptions, preserve product data |
 | `--only=properties`        | Only update product properties, preserve names (image-stable)  |
 | `--only=cms`               | Only hydrate CMS blueprint text (`cms-blueprint.json`)         |
+| `--only=variants`          | Re-pick variant options with new settings (see below)          |
+| `--only=variant-images`    | Recolour product images per colour variant (OpenAI edits)      |
 | `--rehydrate`              | Force full re-hydration even if hydrated blueprint exists      |
 
 If a hydrated blueprint already exists, `--only` or `--rehydrate` is required to prevent accidental name changes.
+
+`--only=variants` takes `--variant-colors`, `--variant-options` and `--max-variants` (not
+`--variant-share`, which is fixed at create). Existing options stay first, so product names and images
+stay valid. Products that need more colours get them from one AI call per 25 products (default colour
+first); without AI the colours are topped up from the known shades. The new settings are saved to
+`blueprint.json`. Variant flags without `--only=variants` fail with an error.
+
+```bash
+bun run blueprint hydrate --name=music --only=variants --variant-colors=6 --max-variants=36
+```
+
+`--only=variant-images` recolours the parent images (default colour) into every other colour of a
+colour variant product with OpenAI `images.edit`. Run it after `--only=variants`. Pollinations cannot
+edit images, so it is skipped with a warning. `VARIANT_IMAGE_VIEWS=cover` only recolours the first view.
+`blueprint estimate --only=variant-images` shows the edit count and cost first.
 
 **Output:** `generated/sales-channels/{name}/hydrated-blueprint.json`
 

@@ -56,7 +56,7 @@ tests/
     ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
     ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
     ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
-    └── image-provider.mock.js # MockImageProvider, FailingImageProvider, SlowImageProvider
+    └── image-provider.mock.js # MockImageProvider, EditingImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Running Tests

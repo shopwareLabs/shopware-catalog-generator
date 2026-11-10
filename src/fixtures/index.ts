@@ -95,6 +95,7 @@ export {
     PRODUCT_IMAGE_VIEWS,
     productImageTextKey,
     productMediaTexts,
+    variantMediaTexts,
     TRANSLATABLE_FIXTURE_TEXTS,
 } from "./translatable-texts.js";
 // Footer navigation

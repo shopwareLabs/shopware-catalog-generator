@@ -21,6 +21,7 @@ import type {
     TemplateInfo,
 } from "../types/index.js";
 
+import { formatVariantSettings } from "../blueprint/variant-settings.js";
 import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
 import { TEMPLATE_INFO_SCHEMA_VERSION } from "../types/index.js";
 import { getGeneratorInfo } from "../utils/generator-version.js";
@@ -157,6 +158,8 @@ export function buildTemplateInfo(params: BuildTemplateInfoParams): TemplateInfo
             products: params.blueprint.products.length,
             categories: countCategories(params.blueprint.categories),
             languages: [SOURCE_LANGUAGE, ...params.translationLocales],
+            variantProducts: params.blueprint.products.filter((p) => p.metadata.isVariant).length,
+            ...(params.blueprint.variants ? { variants: { ...params.blueprint.variants } } : {}),
         },
         steps: params.steps,
         testedOn: params.testedOn,
@@ -178,6 +181,7 @@ export function formatTemplateInfo(info: TemplateInfo): string[] {
         `  Generator: ${generator}`,
         `  Content: ${info.content.products} products, ${info.content.categories} categories`,
         `  Languages: ${info.content.languages.join(", ")}`,
+        `  Variants: ${formatTemplateVariants(info)}`,
         `  Text model: ${formatModel(info.models?.text)}`,
         `  Image model: ${formatModel(info.models?.image)}`,
     ];
@@ -190,6 +194,13 @@ export function formatTemplateInfo(info: TemplateInfo): string[] {
                 `    ${r.lane}: ${r.shopwareVersion} ${r.passed ? "PASS" : "FAIL"} (${r.testedAt})`
         ),
     ];
+}
+
+function formatTemplateVariants(info: TemplateInfo): string {
+    const { variantProducts, variants } = info.content;
+    const products = variantProducts === undefined ? "?" : String(variantProducts);
+    if (!variants) return `${products} variant products (settings not recorded)`;
+    return `${products} variant products; settings: ${formatVariantSettings(variants)}`;
 }
 
 function formatModel(model: ModelInfo | undefined): string {

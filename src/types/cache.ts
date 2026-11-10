@@ -45,6 +45,12 @@ export interface ImageCacheMetadata {
     prompt: string;
     generatedAt: string;
     imageModel?: string;
+    /** Colour images: hash of the parent image they were made from (stale when it changes) */
+    sourceHash?: string;
+    /** Colour images: shade name the product was recoloured to */
+    shade?: string;
+    /** Colour images: hex code of the shade */
+    hex?: string;
 }
 
 /** Cache configuration options */

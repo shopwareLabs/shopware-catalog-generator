@@ -6,10 +6,17 @@
 
 import { z } from "zod";
 
-import type { CachedPropertyGroup, TextProvider, VariantConfig } from "../types/index.js";
+import type {
+    CachedPropertyGroup,
+    TextProvider,
+    VariantConfig,
+    VariantSettings,
+} from "../types/index.js";
 
 import { PropertyCache } from "../property-cache.js";
-import { executeWithRetry, logger, randomSamplePercent, toKebabCase } from "../utils/index.js";
+import { DEFAULT_VARIANT_SETTINGS } from "../types/index.js";
+import { executeWithRetry, logger, toKebabCase } from "../utils/index.js";
+import { capVariantConfigs, pickPreferredOptions, pickOptions } from "./variant-settings.js";
 
 const PropertyOptionsResponseSchema = z.object({
     groupName: z.string(),
@@ -24,34 +31,65 @@ const PropertyOptionsResponseSchema = z.object({
         .nullable(),
 });
 
+/** Product the variant options are picked for */
+export interface VariantProductContext {
+    name: string;
+    category: string;
+    /** Seed for the option picks (same product → same options). Defaults to the name */
+    productId?: string;
+    /** Preferred colours, the product's own colour first (then the AI's choice) */
+    colors?: string[];
+}
+
 export class VariantResolver {
     constructor(
         private readonly textProvider: TextProvider,
-        private readonly propertyCache: PropertyCache
+        private readonly propertyCache: PropertyCache,
+        private readonly settings: VariantSettings = DEFAULT_VARIANT_SETTINGS
     ) {}
 
     /**
-     * Resolve variant configs from AI-suggested group names
-     * Uses cache for known groups, generates options for unknown groups
+     * Resolve variant configs from AI-suggested group names.
+     * Uses cache for known groups, generates options for unknown groups. Picks the exact
+     * number of options from the settings and caps the variant count.
      */
     async resolveVariantConfigs(
         suggestedGroups: string[] | undefined,
-        productContext: { name: string; category: string }
+        productContext: VariantProductContext
     ): Promise<VariantConfig[]> {
         if (!suggestedGroups || suggestedGroups.length === 0) {
             return [];
         }
 
         const configs: VariantConfig[] = [];
+        const seen = new Set<string>();
 
         for (const groupName of suggestedGroups) {
             const config = await this.resolveSingleVariantConfig(groupName, productContext);
-            if (config) {
-                configs.push(config);
-            }
+            if (!config || seen.has(config.group.toLowerCase())) continue;
+            seen.add(config.group.toLowerCase());
+            configs.push(config);
         }
 
-        return configs;
+        return capVariantConfigs(configs, this.settings.maxVariants);
+    }
+
+    /** Pick the exact option count for a group (colours keep the preferred ones first) */
+    private pickGroupOptions(
+        groupName: string,
+        pool: string[],
+        productContext: VariantProductContext
+    ): string[] {
+        const seed = `variant-options:${productContext.productId ?? productContext.name}:${groupName.toLowerCase()}`;
+        if (groupName.toLowerCase() === "color") {
+            return pickPreferredOptions(
+                productContext.colors ?? [],
+                pool,
+                this.settings.colors,
+                seed
+            );
+        }
+        return pickOptions(pool, this.settings.options, seed);
     }
 
     /**
@@ -60,17 +98,17 @@ export class VariantResolver {
      */
     async resolveSingleVariantConfig(
         groupName: string,
-        productContext: { name: string; category: string }
+        productContext: VariantProductContext
     ): Promise<VariantConfig | null> {
         const normalizedName = this.propertyCache.resolveGroupName(groupName);
 
         const cached = this.propertyCache.get(normalizedName);
         if (cached) {
-            return this.buildVariantConfigFromCache(cached, groupName);
+            return this.buildVariantConfigFromCache(cached, groupName, productContext);
         }
 
         if (normalizedName.toLowerCase() === "color" || groupName.toLowerCase() === "color") {
-            return this.handleColorFallback();
+            return this.handleColorFallback(productContext);
         }
 
         return this.generateVariantConfigViaAI(groupName, productContext);
@@ -79,12 +117,12 @@ export class VariantResolver {
     /**
      * Build a VariantConfig from cached property data.
      */
-    buildVariantConfigFromCache(cached: CachedPropertyGroup, originalName: string): VariantConfig {
-        const selectedOptions = randomSamplePercent(cached.options, 0.4, 0.6);
-        const finalOptions =
-            selectedOptions.length >= 2
-                ? selectedOptions
-                : cached.options.slice(0, Math.min(2, cached.options.length));
+    buildVariantConfigFromCache(
+        cached: CachedPropertyGroup,
+        originalName: string,
+        productContext: VariantProductContext = { name: originalName, category: "" }
+    ): VariantConfig {
+        const finalOptions = this.pickGroupOptions(cached.name, cached.options, productContext);
 
         const priceModifiers: Record<string, number> = {};
         for (const opt of finalOptions) {
@@ -105,25 +143,18 @@ export class VariantResolver {
     /**
      * Handle Color when it's suggested but not found via normalized name.
      */
-    handleColorFallback(): VariantConfig | null {
-        logger.warn(
-            `AI suggested "Color" but it's not in cache - this shouldn't happen. Skipping.`
-        );
-
+    handleColorFallback(productContext: VariantProductContext): VariantConfig | null {
         const colorFromCache = this.propertyCache.get("Color");
-        if (!colorFromCache) {
+        const pool = colorFromCache?.options ?? [];
+        const selectedOptions = this.pickGroupOptions("Color", pool, productContext);
+        if (selectedOptions.length < 2) {
+            logger.warn(`AI suggested "Color" but no colours are known for it. Skipping.`);
             return null;
         }
 
-        const selectedOptions = randomSamplePercent(colorFromCache.options, 0.4, 0.6);
-        const finalOptions =
-            selectedOptions.length >= 2
-                ? selectedOptions
-                : colorFromCache.options.slice(0, Math.min(2, colorFromCache.options.length));
-
         return {
-            group: colorFromCache.name,
-            selectedOptions: finalOptions,
+            group: colorFromCache?.name ?? "Color",
+            selectedOptions,
             priceModifiers: {},
         };
     }
@@ -133,7 +164,7 @@ export class VariantResolver {
      */
     async generateVariantConfigViaAI(
         groupName: string,
-        productContext: { name: string; category: string }
+        productContext: VariantProductContext
     ): Promise<VariantConfig | null> {
         logger.info(`Property cache miss for "${groupName}", generating options...`);
 
@@ -151,7 +182,7 @@ export class VariantResolver {
      */
     async generatePropertyOptions(
         groupName: string,
-        productContext: { name: string; category: string }
+        productContext: VariantProductContext
     ): Promise<VariantConfig> {
         if (groupName.toLowerCase() === "color") {
             throw new Error("Color must not be generated via AI - use universal cache");
@@ -164,7 +195,7 @@ Product context:
 - Category: "${productContext.category}"
 - Property group: "${groupName}"
 
-Generate 5-8 realistic options for this property group.
+Generate ${Math.max(5, this.settings.options + 2)}-${Math.max(8, this.settings.options + 4)} realistic options for this property group.
 Options should be:
 - Appropriate for the product type
 - Realistic for e-commerce variants
@@ -223,9 +254,11 @@ Return JSON:
             data: { options: validated.options.length },
         });
 
-        const selectedOptions = randomSamplePercent(validated.options, 0.4, 0.6);
-        const finalOptions =
-            selectedOptions.length >= 2 ? selectedOptions : validated.options.slice(0, 2);
+        const finalOptions = this.pickGroupOptions(
+            validated.groupName,
+            validated.options,
+            productContext
+        );
 
         const priceModifiers: Record<string, number> = {};
         for (const opt of finalOptions) {

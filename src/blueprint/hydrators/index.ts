@@ -15,6 +15,25 @@ export type {
     ThemeMediaHydrationResult,
 } from "./image.js";
 export { ProductHydrator } from "./product.js";
+export {
+    buildRecolorPrompt,
+    collectVariantImageTasks,
+    countVariantImages,
+    hashImage,
+    hydrateVariantImages,
+    NO_EDIT_SUPPORT_WARNING,
+    planVariantImages,
+    resolveVariantImageViews,
+    shadeSlug,
+    VARIANT_IMAGE_VIEWS_ENV,
+    variantImageView,
+} from "./variant-images.js";
+export type {
+    VariantImageHydrationResult,
+    VariantImagePlan,
+    VariantImageTask,
+    VariantImageViews,
+} from "./variant-images.js";
 export type { StoreContext } from "./product.js";
 export { hydrateBrandColors } from "./theme.js";
 export {

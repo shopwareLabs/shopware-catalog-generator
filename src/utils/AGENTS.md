@@ -123,6 +123,11 @@ Resolution order in `resolveShade`: curated shade → learned shade (`color-shad
 image colour (Multicolor, Rainbow, ...) → combination of two curated colours (family
 `multicolor`). Unknown names return `null` and go to the AI classifier during hydration.
 
+### image-format.ts
+
+`detectImageFormat(buffer)` returns `{ extension, mimeType }` from the magic bytes (jpg, png, gif,
+webp; unknown falls back to jpg). Used by media uploads and by the OpenAI image edit upload.
+
 ### image-prompt.ts
 
 Guard against real trademarks in generated images:

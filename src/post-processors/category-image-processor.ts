@@ -7,8 +7,8 @@
 import type { PostProcessorContext } from "./index.js";
 
 import { searchAllByFilter } from "../shopware/api-helpers.js";
-import { apiPost, generateUUID, logger } from "../utils/index.js";
-import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
+import { apiPost, detectImageFormat, generateUUID, logger } from "../utils/index.js";
+import { uploadImageWithRetry } from "./image-utils.js";
 
 /**
  * Helper for category banner image upload and cleanup.

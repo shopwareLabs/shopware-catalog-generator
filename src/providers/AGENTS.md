@@ -29,6 +29,12 @@ interface TextProvider {
 ```typescript
 interface ImageProvider {
     generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null>;
+    // Optional: edit an existing image (base64), used to recolour variant images. OpenAI only.
+    editImage?(
+        prompt: string,
+        sourceBase64: string,
+        options?: ImageGenerationOptions
+    ): Promise<string | null>;
     readonly isSequential: boolean; // Rate limit handling
     readonly maxConcurrency: number; // Parallel processing limit
     readonly name: string;
