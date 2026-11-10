@@ -18,6 +18,8 @@ import { classifyPage } from "./page-classifier.js";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_SAMPLE_URLS = 30;
+const MIN_CATEGORIES = 3;
+const CATEGORY_FALLBACK_SAMPLE_URLS = 20;
 const FETCH_CONCURRENCY = 5;
 
 const HOME_NAMES = new Set(["home", "startseite", "homepage", "start", "hauptseite"]);
@@ -26,6 +28,7 @@ const HOME_NAMES = new Set(["home", "startseite", "homepage", "start", "hauptsei
 const PRICE_RE_LISTING = /\d{1,4}[.,]\d{2}\s*[€£$]|[€£$]\s*\d{1,4}[.,]\d{2}/;
 
 const CATEGORY_SKIP = new Set([
+    "shop",
     "account",
     "login",
     "register",
@@ -413,6 +416,43 @@ async function discoverCandidateUrls(url: string, $home: cheerio.CheerioAPI): Pr
     return collectInternalLinks($home, url);
 }
 
+interface SamplePages {
+    sampled: string[];
+    fetched: Array<FetchedPage | null>;
+}
+
+function categoriesOf(pages: Array<FetchedPage | null>): string[] {
+    return uniqueCategories(pages.flatMap((page) => extractFromPage(page).categories));
+}
+
+/**
+ * Phase 3b: when product pages carry no category breadcrumbs (Foot Locker, WooCommerce
+ * without Product JSON-LD), the product-first sample yields few categories. Read the
+ * non-product sub-sitemaps then and fetch a sample of those pages.
+ */
+async function fetchCategoryFallbackPages(url: string, sampled: string[]): Promise<SamplePages> {
+    const seen = new Set(sampled);
+    const candidates = await discoverFromSitemap(url, { skipProductSitemaps: true });
+    const fallbackUrls = sampleUrls(
+        candidates.filter((candidate) => !seen.has(candidate)),
+        CATEGORY_FALLBACK_SAMPLE_URLS,
+        { mergeSingleUrlBranches: true }
+    );
+    return { sampled: fallbackUrls, fetched: await fetchPages(fallbackUrls) };
+}
+
+async function fetchSamplePages(url: string, $home: cheerio.CheerioAPI): Promise<SamplePages> {
+    const sampled = sampleUrls(await discoverCandidateUrls(url, $home), MAX_SAMPLE_URLS);
+    const fetched = await fetchPages(sampled);
+    if (categoriesOf(fetched).length >= MIN_CATEGORIES) return { sampled, fetched };
+
+    const fallback = await fetchCategoryFallbackPages(url, sampled);
+    return {
+        sampled: [...sampled, ...fallback.sampled],
+        fetched: [...fetched, ...fallback.fetched],
+    };
+}
+
 interface PageExtraction {
     categories: string[];
     products: ExampleProduct[];
@@ -420,11 +460,14 @@ interface PageExtraction {
 
 function extractFromProductPage($: cheerio.CheerioAPI): PageExtraction {
     const product = extractProduct($);
-    return {
-        // Breadcrumbs; home entries are dropped by uniqueCategories
-        categories: [...extractCategoriesFromJsonLd($), ...extractCategoriesFromMicrodata($)],
-        products: product ? [product] : [],
-    };
+    const productName = product?.name.toLowerCase().trim();
+    // Breadcrumbs; home entries are dropped by uniqueCategories. The last breadcrumb
+    // of a product page is often the product itself, which is not a category.
+    const categories = [
+        ...extractCategoriesFromJsonLd($),
+        ...extractCategoriesFromMicrodata($),
+    ].filter((name) => name.toLowerCase().trim() !== productName);
+    return { categories, products: product ? [product] : [] };
 }
 
 function extractFromCategoryPage($: cheerio.CheerioAPI): PageExtraction {
@@ -481,10 +524,8 @@ export async function crawlForInspiration(url: string): Promise<InspirationData>
         extractBrandDescriptionFromJsonLd($home) ?? extractBrandDescription($home);
     const brandColors = await resolveBrandColors($home, url);
 
-    const sampled = sampleUrls(await discoverCandidateUrls(url, $home), MAX_SAMPLE_URLS);
-
-    // Phase 2+3: Fetch, classify, extract in parallel
-    const fetched = await fetchPages(sampled);
+    // Phase 1-3: discover, fetch, classify (plus category fallback), then extract
+    const { sampled, fetched } = await fetchSamplePages(url, $home);
     const extracted = fetched.map(extractFromPage);
     const categories = uniqueCategories(extracted.flatMap((page) => page.categories));
     const products = extracted.flatMap((page) => page.products);
@@ -494,7 +535,7 @@ export async function crawlForInspiration(url: string): Promise<InspirationData>
         products.push(...(await followUpCrawl(fetched, url, sampled)));
     }
 
-    if (categories.length < 3) {
+    if (categories.length < MIN_CATEGORIES) {
         console.warn(`[inspire] only ${categories.length} categories found for ${url}`);
     }
 

@@ -321,3 +321,23 @@ describe("JSON-LD and microdata edge cases", () => {
         expect(classify(page("", body))).toBe("cms");
     });
 });
+
+// ── Platform body classes ───────────────────────────────────────────────────
+
+describe("platform body classes", () => {
+    const articleHead = `<meta property="og:type" content="article">`;
+    const withBodyClass = (bodyClass: string): string =>
+        `<!DOCTYPE html><html><head>${articleHead}</head><body class="${bodyClass}"></body></html>`;
+
+    test("WooCommerce single-product wins over og:type article", () => {
+        expect(classify(withBodyClass("home single single-product postid-12"))).toBe("product");
+    });
+
+    test("WooCommerce tax-product_cat → category", () => {
+        expect(classify(withBodyClass("archive tax-product_cat term-seeds"))).toBe("category");
+    });
+
+    test("unrelated body classes keep the og:type article result", () => {
+        expect(classify(withBodyClass("single single-post"))).toBe("cms");
+    });
+});

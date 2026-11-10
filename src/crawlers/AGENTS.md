@@ -83,6 +83,12 @@ Handles: gzip sitemaps (`.gz` URLs via `arrayBuffer()` + `Bun.gunzipSync()`), si
 sub-sitemaps at any origin (S3/CDN). Returns up to ~300 URLs.
 
 `sampleUrls(urls, n)` distributes the sample across top-level path branches to maximize coverage.
+With `{ mergeSingleUrlBranches: true }` (category fallback only), branches with one URL share a
+single slot, so dozens of root-level blog posts can't crowd out `/product-category/...`.
+
+`discoverFromSitemap(baseUrl, { skipProductSitemaps: true })` skips product sub-sitemaps of an
+index. Category patterns (`categor|kategorie|collection|product_cat`) are checked before product
+patterns, so WooCommerce's `product_cat-sitemap.xml` counts as a category sitemap.
 
 ### Phase 2: Page classifier (`page-classifier.ts`)
 
@@ -97,6 +103,11 @@ Applies Tier 1 → 2 → 3 in order — first match wins:
 - `Product`, `ProductGroup`, `ProductModel`, `IndividualProduct`, `Vehicle` → `product`
 - `ItemList`, `OfferCatalog`, `ProductCollection`, `CollectionPage` (not `BreadcrumbList`) → `category`
 - `AboutPage`, `ContactPage`, `FAQPage`, `Article`, `BlogPosting`, `Recipe`, etc. → `cms`
+
+**Tier 1 — platform body class** (after JSON-LD product/category, before `og:type=article`):
+
+- `single-product` → `product`, `tax-product_cat` → `category` (WooCommerce). WooCommerce shops
+  without Product JSON-LD emit `og:type=article` on product pages, which would otherwise mean `cms`.
 
 **Tier 2 — Microdata (`itemprop`):**
 
@@ -119,13 +130,21 @@ Applies Tier 1 → 2 → 3 in order — first match wins:
 **Product pages:**
 
 - Name: JSON-LD `Product.name` → `itemprop="name"` in product scope → single `h1` (3–120 chars)
-- Category hierarchy: JSON-LD `BreadcrumbList` → microdata BreadcrumbList → `.breadcrumb a`
+- Category hierarchy: JSON-LD `BreadcrumbList` → microdata BreadcrumbList → `.breadcrumb a`.
+  The breadcrumb entry that equals the product name is dropped (`Home > Shop > <product>`).
 - Shopware 6 category pages: `data-product-information` JSON attribute
 
 **Category pages:**
 
 - Category name: JSON-LD `BreadcrumbList` last non-root item → `h1`
 - Products from: JSON-LD `ItemList` with `@type: Product` items → `itemprop="name"` in product scope → `data-product-information`
+
+### Phase 3b: Category fallback (when < 3 categories found)
+
+Discovery is product-first, which is best when product pages carry category breadcrumbs. When
+they don't (Foot Locker, WooCommerce with a flat breadcrumb), the crawler reads the non-product
+sub-sitemaps (`skipProductSitemaps`), samples 20 URLs it has not fetched yet
+(`mergeSingleUrlBranches`) and extracts from those pages too. Their pages also feed Phase 4.
 
 ### Phase 4: Follow category page links (when < 5 products found)
 
@@ -174,21 +193,21 @@ Run `bun run test:crawlers` to re-validate against live sites.
 > their HTML at any time. When thresholds need updating, change the spec in
 > `scripts/validate-crawlers.ts` rather than patching the crawler for a single site.
 
-Last verified: 2026-05-05
+Last verified: 2026-11-10
 
 | Store                  | URL                                   | Platform              | Categories | Products | Brand Colors | Notes                                                                                   |
 | ---------------------- | ------------------------------------- | --------------------- | ---------- | -------- | ------------ | --------------------------------------------------------------------------------------- |
-| Gymshark               | `https://www.gymshark.com`            | Shopify Plus          | ✅ 9       | ✅ 19    | ✅ `#000000` | JSON-LD ProductGroup + BreadcrumbList; og:type=product                                  |
-| STABILO                | `https://www.stabilo.com/de/`         | Shopware 6            | ✅ 3       | ✅ 60    | ✅ `#ff0000` | Products from `data-product-information` on category pages (no product URLs in sitemap) |
-| schuhe24.de            | `https://www.schuhe24.de`             | Shopware 5            | ✅ 9       | ✅ 8     | ✅ `#e00000` | Categories from microdata BreadcrumbList on product pages                               |
-| IKEA                   | `https://www.ikea.com/de/de/`         | Custom                | ✅ 16      | ✅ 30    | ✅ `#0058a3` | JSON-LD ItemList products; locale prefix filtering                                      |
-| Media Markt            | `https://www.mediamarkt.de`           | Shopware 6            | ✅ 63      | ✅ 26    | ✅ `#c00000` | og:type `og:product` (prefixed) normalised; JSON-LD Product on detail pages             |
-| Foot Locker            | `https://www.footlocker.de`           | Custom                | ✅ 30      | ✅ ~10   | ✅ `#000000` | Products via Phase 4 two-level link-follow; product sitemaps return `{}` (useless)      |
-| Koro Drogerie          | `https://www.korodrogerie.de/`        | Shopware 6            | ✅ 21      | ✅ 9     | ✅ `#000000` | JSON-LD is FAQPage (not Product); products from h1 of og:type=product pages             |
-| YT Industries          | `https://www.yt-industries.com/de-eu` | Shopware 6 (Nuxt)     | ✅ 6       | ✅ ~8    | ✅ `#000000` | Gzip sitemap via pathPrefix fallback; Tier 3 price signal                               |
-| bergzeit.de            | `https://www.bergzeit.de`             | Magento 2             | ✅ 20      | ✅ 30    | ✅ `#000000` | robots.txt lists magazine sitemap first; editorial sitemaps deprioritized               |
-| forestwholefoods.co.uk | `https://www.forestwholefoods.co.uk`  | WooCommerce           | ✅ 55      | ✅ 29    | ✅ `#808000` | JSON-LD Product + BreadcrumbList; standard WooCommerce schema output                    |
-| mey.com                | `https://www.mey.com/`                | Hyva + Adobe Commerce | ✅ 30      | ✅ ~2    | ✅ `#000000` | Tier 3 gap rule: 6–9 prices + 0 cart → category; product listings JS-rendered           |
+| Gymshark               | `https://www.gymshark.com`            | Shopify Plus          | ✅ 7       | ✅ 20    | ✅ `#000000` | JSON-LD ProductGroup + BreadcrumbList; og:type=product                                  |
+| STABILO                | `https://www.stabilo.com/de/`         | Shopware 6            | ✅ 3       | ✅ 61    | ✅ `#ff0000` | Products from `data-product-information` on category pages (no product URLs in sitemap) |
+| schuhe24.de            | `https://www.schuhe24.de`             | Shopware 5            | ✅ 14      | ✅ 8     | ✅ `#e00000` | Categories from microdata BreadcrumbList on product pages                               |
+| IKEA                   | `https://www.ikea.com/de/de/`         | Custom                | ✅ 44      | ✅ 30    | ✅ `#0058a3` | JSON-LD ItemList products; locale prefix filtering                                      |
+| Media Markt            | `https://www.mediamarkt.de`           | Shopware 6            | ✅ 48      | ✅ 29    | ✅ `#c00000` | og:type `og:product` (prefixed) normalised; JSON-LD Product on detail pages             |
+| Foot Locker            | `https://www.footlocker.de`           | Custom                | ✅ 20      | ✅ 18    | ✅ `#000000` | Product pages lack category breadcrumbs; categories (collections) via category fallback |
+| Koro Drogerie          | `https://www.korodrogerie.de/`        | Shopware 6            | ✅ 18      | ✅ 18    | ✅ `#000000` | JSON-LD is FAQPage (not Product); products from h1 of og:type=product pages             |
+| YT Industries          | `https://www.yt-industries.com/de-eu` | Shopware 6 (Nuxt)     | ✅ 6       | ✅ 17    | ✅ `#000000` | Gzip sitemap via pathPrefix fallback; Tier 3 price signal                               |
+| bergzeit.de            | `https://www.bergzeit.de`             | Magento 2             | ✅ 18      | ✅ 30    | ✅ `#000000` | robots.txt lists magazine sitemap first; editorial sitemaps deprioritized               |
+| forestwholefoods.co.uk | `https://www.forestwholefoods.co.uk`  | WooCommerce           | ✅ 10      | ✅ 29    | ✅ `#808000` | No Product JSON-LD, og:type=article; body class + category fallback                     |
+| mey.com                | `https://www.mey.com/`                | Hyva + Adobe Commerce | ✅ 30      | ✅ 3     | ✅ `#000000` | Tier 3 gap rule: 6–9 prices + 0 cart → category; product listings JS-rendered           |
 
 **Known non-starters (not included in `test:crawlers`):**
 

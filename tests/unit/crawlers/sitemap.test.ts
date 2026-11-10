@@ -461,3 +461,72 @@ describe("sampleUrls — branching", () => {
         expect(sampleUrls(urls, 3)).toEqual(["https://shop.test/a/1", "https://shop.test/b/1"]);
     });
 });
+
+describe("discoverFromSitemap — skipProductSitemaps", () => {
+    const index = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex>
+    <sitemap><loc>https://shop.test/product-sitemap.xml</loc></sitemap>
+    <sitemap><loc>https://shop.test/product_cat-sitemap.xml</loc></sitemap>
+</sitemapindex>`;
+    const urlset = (path: string): string =>
+        `<urlset><url><loc>https://shop.test/${path}</loc></url></urlset>`;
+    const routes = {
+        "https://shop.test/sitemap.xml": index,
+        "https://shop.test/product-sitemap.xml": urlset("product/almonds/"),
+        "https://shop.test/product_cat-sitemap.xml": urlset("product-category/nuts/"),
+    };
+
+    test("reads product and category sub-sitemaps by default", async () => {
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch(routes);
+        try {
+            const urls = await discoverFromSitemap("https://shop.test");
+            expect(urls).toContain("https://shop.test/product/almonds/");
+            expect(urls).toContain("https://shop.test/product-category/nuts/");
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("skips product sub-sitemaps but keeps product_cat (a category sitemap)", async () => {
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch(routes);
+        try {
+            const urls = await discoverFromSitemap("https://shop.test", {
+                skipProductSitemaps: true,
+            });
+            expect(urls).toEqual(["https://shop.test/product-category/nuts/"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+});
+
+describe("sampleUrls — mergeSingleUrlBranches", () => {
+    const urls = [
+        "https://shop.test/product-category/a/",
+        "https://shop.test/product-category/b/",
+        "https://shop.test/product-category/c/",
+        "https://shop.test/post-1/",
+        "https://shop.test/post-2/",
+        "https://shop.test/post-3/",
+    ];
+
+    test("without the option every single-URL branch gets its own slot", () => {
+        expect(sampleUrls(urls, 4)).toEqual([
+            "https://shop.test/product-category/a/",
+            "https://shop.test/post-1/",
+            "https://shop.test/post-2/",
+            "https://shop.test/post-3/",
+        ]);
+    });
+
+    test("with the option single-URL branches share one slot per round", () => {
+        expect(sampleUrls(urls, 4, { mergeSingleUrlBranches: true })).toEqual([
+            "https://shop.test/product-category/a/",
+            "https://shop.test/post-1/",
+            "https://shop.test/product-category/b/",
+            "https://shop.test/post-2/",
+        ]);
+    });
+});
