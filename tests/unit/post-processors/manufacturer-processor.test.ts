@@ -103,12 +103,14 @@ describe("ManufacturerProcessor", () => {
                     }),
                 ],
             });
-            const { context } = createTestContext({ blueprint, dryRun: true });
+            const { context, mockApi, mockCache } = createTestContext({ blueprint, dryRun: true });
 
             const result = await ManufacturerProcessor.process(context);
 
             expect(result.processed).toBe(1);
             expect(result.errors).toHaveLength(0);
+            expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(0);
+            expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
         });
 
         test("skips creating manufacturers that already exist in Shopware", async () => {
@@ -382,5 +384,461 @@ describe("ManufacturerProcessor sync errors", () => {
             { id: "p1", manufacturerId: "shop-existing" },
             { id: "p2", manufacturerId: "shop-new" },
         ]);
+    });
+
+    test("a created manufacturer is assigned and cached with the same ID", async () => {
+        const { context, mockApi, mockCache } = setup(
+            [{ id: "shop-existing", name: "Existing Corp" }],
+            false
+        );
+        const result = await ManufacturerProcessor.process(context);
+
+        const syncs = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body);
+        const created = syncs.find(
+            (b): b is { createManufacturers: { payload: Array<{ id: string; name: string }> } } =>
+                typeof b === "object" && b !== null && "createManufacturers" in b
+        );
+        const createdId = created?.createManufacturers.payload[0]?.id;
+        expect(createdId).toBeString();
+        expect(result.processed).toBe(1);
+        expect(result.errors).toEqual([]);
+
+        const update = syncs.find(
+            (b): b is { updateProductManufacturers: { payload: unknown[] } } =>
+                typeof b === "object" && b !== null && "updateProductManufacturers" in b
+        );
+        expect(update?.updateProductManufacturers.payload).toContainEqual({
+            id: "p2",
+            manufacturerId: createdId,
+        });
+        const saved = mockCache.saveManufacturersMock.mock.calls.at(-1)?.[1] ?? [];
+        expect(saved.find((m) => m.name === "New Corp")?.id).toBe(createdId);
+    });
+
+    test("sends no product update when every product already has its manufacturer", async () => {
+        const { context, mockApi } = setup(
+            [
+                { id: "shop-existing", name: "Existing Corp" },
+                { id: "shop-new", name: "New Corp" },
+            ],
+            false
+        );
+        mockApi.mockPostResponse("search/product", {
+            data: [
+                { id: "p1", manufacturerId: "shop-existing" },
+                { id: "p2", manufacturerId: "shop-new" },
+            ],
+        });
+        await ManufacturerProcessor.process(context);
+
+        expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(0);
+    });
+});
+
+describe("ManufacturerProcessor (characterization)", () => {
+    function productsWith(
+        names: Array<string | undefined>
+    ): ReturnType<typeof createTestBlueprint> {
+        return createTestBlueprint({
+            products: names.map((manufacturerName, i) =>
+                createTestProduct({ id: `p${i + 1}`, metadata: { manufacturerName } })
+            ),
+        });
+    }
+
+    function syncBodies(mockApi: ReturnType<typeof createTestContext>["mockApi"]) {
+        return mockApi
+            .getCallsByEndpoint("_action/sync")
+            .map((c) => c.body as Record<string, { entity: string; payload: unknown[] }>);
+    }
+
+    function productSearches(mockApi: ReturnType<typeof createTestContext>["mockApi"]) {
+        return mockApi.getCalls().filter((c) => c.endpoint === "search/product");
+    }
+
+    test("trims names and deduplicates them", async () => {
+        const { context, mockApi, mockCache } = createTestContext({
+            blueprint: productsWith(["  Acme  ", "Acme", "   ", undefined]),
+        });
+        mockApi.mockPostResponse("search/product-manufacturer", { data: [] });
+        mockApi.mockPostResponse("search/product", { data: [] });
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result).toEqual({
+            name: "manufacturers",
+            processed: 1,
+            skipped: 0,
+            errors: [],
+            durationMs: 0,
+        });
+        const [create, assign] = syncBodies(mockApi);
+        const created = create?.createManufacturers?.payload as Array<{
+            id: string;
+            name: string;
+            link: string;
+            description: string;
+        }>;
+        expect(created.map((m) => m.name)).toEqual(["Acme"]);
+        expect(created[0]?.link).toBe("https://www.acme.com");
+        expect(created[0]?.description.length).toBeGreaterThan(0);
+        expect(create?.createManufacturers?.entity).toBe("product_manufacturer");
+        expect(assign?.updateProductManufacturers?.entity).toBe("product");
+        expect(assign?.updateProductManufacturers?.payload).toEqual([
+            { id: "p1", manufacturerId: created[0]?.id },
+            { id: "p2", manufacturerId: created[0]?.id },
+        ]);
+        const saved = mockCache.saveManufacturersMock.mock.calls.at(-1);
+        expect(saved?.[0]).toBe("test-store");
+        expect(saved?.[1].map((m): unknown[] => [m.name, m.id])).toEqual([
+            ["Acme", created[0]?.id],
+        ]);
+    });
+
+    test("searches manufacturers by name with equalsAny", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["A", "B"]) });
+        mockApi.mockPostResponse("search/product", { data: [] });
+
+        await ManufacturerProcessor.process(context);
+
+        const search = mockApi.getCalls().find((c) => c.endpoint === "search/product-manufacturer");
+        expect(search?.body).toEqual({
+            limit: 500,
+            filter: [{ type: "equalsAny", field: "name", value: ["A", "B"] }],
+        });
+    });
+
+    test("matches nested Admin API results by translated name or attribute id", async () => {
+        const { context, mockApi } = createTestContext({
+            blueprint: productsWith(["Acme", "Best", "Gone"]),
+        });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [
+                { id: "m-acme", attributes: { name: "Old", translated: { name: "Acme" } } },
+                { attributes: { id: "m-best", name: "Best" } },
+                { attributes: { name: "Gone" } },
+                { id: "m-none" },
+            ],
+        });
+        mockApi.mockPostResponse("search/product", { data: [] });
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.skipped).toBe(2);
+        expect(result.processed).toBe(1);
+        const [create, assign] = syncBodies(mockApi);
+        const created = create?.createManufacturers?.payload as Array<{ name: string }>;
+        expect(created.map((m) => m.name)).toEqual(["Gone"]);
+        const updates = assign?.updateProductManufacturers?.payload as Array<{
+            id: string;
+            manufacturerId: string;
+        }>;
+        expect(updates.slice(0, 2)).toEqual([
+            { id: "p1", manufacturerId: "m-acme" },
+            { id: "p2", manufacturerId: "m-best" },
+        ]);
+    });
+
+    test("reports a failed create and does not assign", async () => {
+        const { context, mockApi, mockCache } = createTestContext({
+            blueprint: productsWith(["Acme"]),
+        });
+        mockApi.mockPostResponse("search/product-manufacturer", { data: [] });
+        mockApi.mockPostFailure("_action/sync", new Error("boom"));
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.processed).toBe(0);
+        expect(result.errors).toEqual(["Failed to create manufacturers: boom"]);
+        expect(productSearches(mockApi)).toHaveLength(0);
+        expect(mockCache.saveManufacturersMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("stringifies non-Error create failures", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", { data: [] });
+        mockApi.mockPostFailure("_action/sync", "plain" as unknown as Error);
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.errors).toEqual(["Failed to create manufacturers: plain"]);
+    });
+
+    test("reports a failed assignment", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+        mockApi.mockPostResponse("search/product", { data: [] });
+        mockApi.mockPostFailure("_action/sync", new Error("nope"));
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result).toEqual({
+            name: "manufacturers",
+            processed: 0,
+            skipped: 1,
+            errors: ["Failed to assign manufacturers: nope"],
+            durationMs: 0,
+        });
+    });
+
+    test("counts created manufacturers even when the assignment fails afterwards", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", { data: [] });
+        mockApi.mockPostResponse("search/product", { data: [] });
+        const post = mockApi.post.bind(mockApi);
+        let syncCalls = 0;
+        mockApi.post = async (endpoint, body) => {
+            if (endpoint === "_action/sync" && ++syncCalls === 2) throw new Error("nope");
+            return post(endpoint, body);
+        };
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.processed).toBe(1);
+        expect(result.skipped).toBe(0);
+        expect(result.errors).toEqual(["Failed to assign manufacturers: nope"]);
+        expect(syncCalls).toBe(2);
+    });
+
+    test("does not sync when every product already has its manufacturer", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+        mockApi.mockPostResponse("search/product", { data: [{ id: "p1", manufacturerId: "m1" }] });
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(syncBodies(mockApi)).toHaveLength(0);
+        expect(result.errors).toEqual([]);
+    });
+
+    test("reassigns products that have a different manufacturer", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+        mockApi.mockPostResponse("search/product", { data: [{ id: "p1", manufacturerId: "m2" }] });
+
+        await ManufacturerProcessor.process(context);
+
+        expect(syncBodies(mockApi)[0]?.updateProductManufacturers?.payload).toEqual([
+            { id: "p1", manufacturerId: "m1" },
+        ]);
+    });
+
+    test("queries product assignments in batches of 100", async () => {
+        const names = Array.from({ length: 150 }, () => "Acme");
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(names) });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+        mockApi.mockPostResponse("search/product", { data: [] });
+
+        await ManufacturerProcessor.process(context);
+
+        const batches = productSearches(mockApi).map(
+            (c) => c.body as { ids: string[]; includes: unknown }
+        );
+        expect(batches.map((b) => b.ids.length)).toEqual([100, 50]);
+        expect(batches[0]?.ids[0]).toBe("p1");
+        expect(batches[1]?.ids[0]).toBe("p101");
+        expect(batches[0]?.includes).toEqual({ product: ["id", "manufacturerId"] });
+    });
+
+    test("ignores responses without data and assigns everything", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", {});
+        mockApi.mockPostResponse("search/product", {});
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.processed).toBe(1);
+        expect(syncBodies(mockApi)).toHaveLength(2);
+    });
+
+    test("creates all manufacturers when the manufacturer search fails", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostFailure("search/product-manufacturer", new Error("down"));
+        mockApi.mockPostResponse("search/product", { data: [] });
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.processed).toBe(1);
+        expect(result.errors).toEqual([]);
+    });
+
+    test("assigns all products when the assignment search fails", async () => {
+        const { context, mockApi } = createTestContext({ blueprint: productsWith(["Acme"]) });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+        mockApi.mockPostFailure("search/product", new Error("down"));
+        // The pattern also matches the manufacturer search, so nothing is found there either
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.errors).toEqual([]);
+        expect(syncBodies(mockApi)).toHaveLength(2);
+    });
+
+    test("dry run reports existing manufacturers as skipped without syncing", async () => {
+        const { context, mockApi, mockCache } = createTestContext({
+            blueprint: productsWith(["Acme", "Best"]),
+            dryRun: true,
+        });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            data: [{ id: "m1", name: "Acme" }],
+        });
+
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result).toEqual({
+            name: "manufacturers",
+            processed: 1,
+            skipped: 1,
+            errors: [],
+            durationMs: 0,
+        });
+        expect(syncBodies(mockApi)).toHaveLength(0);
+        expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
+    });
+
+    describe("cleanup", () => {
+        test("reports missing API helpers", async () => {
+            const { context } = createTestContext();
+            const result = await ManufacturerProcessor.cleanup!({
+                ...context,
+                api: undefined as unknown as typeof context.api,
+            });
+            expect(result).toEqual({
+                name: "manufacturers",
+                deleted: 0,
+                errors: ["API helpers not available - cannot perform cleanup"],
+                durationMs: 0,
+            });
+        });
+
+        test("unassigns only products with a manufacturer and deletes orphans", async () => {
+            const { context, mockApi, mockCache } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [
+                    { id: "p1", manufacturerId: "m1" },
+                    { id: "p2" },
+                    { id: "p3", manufacturerId: "m1" },
+                    { id: "p4", manufacturerId: "m2" },
+                ],
+                [],
+                [{ id: "other" }],
+            ]);
+
+            const result = await ManufacturerProcessor.cleanup!(context);
+
+            expect(result).toEqual({
+                name: "manufacturers",
+                deleted: 1,
+                errors: [],
+                durationMs: 0,
+            });
+            const [unassign, del] = syncBodies(mockApi);
+            expect(unassign?.unassignManufacturers).toEqual({
+                entity: "product",
+                action: "upsert",
+                payload: [
+                    { id: "p1", manufacturerId: null },
+                    { id: "p3", manufacturerId: null },
+                    { id: "p4", manufacturerId: null },
+                ],
+            } as never);
+            expect(del?.["delete-product_manufacturer"]?.payload).toEqual([{ id: "m1" }]);
+            const orphanChecks = mockApi
+                .getCalls()
+                .filter((c) => c.endpoint === "search/product")
+                .slice(1)
+                .map((c) => c.body);
+            expect(orphanChecks).toEqual([
+                {
+                    _filters: [{ type: "equals", field: "manufacturerId", value: "m1" }],
+                    _options: { limit: 1 },
+                },
+                {
+                    _filters: [{ type: "equals", field: "manufacturerId", value: "m2" }],
+                    _options: { limit: 1 },
+                },
+            ]);
+            expect(mockCache.saveManufacturersMock.mock.calls.at(-1)).toEqual(["test-store", []]);
+        });
+
+        test("filters products by SalesChannel visibility", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("product", []);
+
+            await ManufacturerProcessor.cleanup!(context);
+
+            expect(mockApi.getCalls()[0]?.body).toEqual({
+                _filters: [
+                    {
+                        type: "equals",
+                        field: "visibilities.salesChannelId",
+                        value: context.salesChannelId,
+                    },
+                ],
+                _options: {
+                    limit: 500,
+                    includes: { product: ["id", "manufacturerId"] },
+                    associations: undefined,
+                },
+            });
+        });
+
+        test("clears the cache even when nothing is orphaned", async () => {
+            const { context, mockApi, mockCache } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "p1", manufacturerId: "m1" }],
+                [{ id: "p2" }],
+            ]);
+
+            await ManufacturerProcessor.cleanup!(context);
+
+            expect(syncBodies(mockApi)).toHaveLength(1);
+            expect(mockCache.saveManufacturersMock.mock.calls.at(-1)).toEqual(["test-store", []]);
+        });
+
+        test("reports a failure while unassigning", async () => {
+            const { context, mockApi, mockCache } = createTestContext();
+            mockApi.mockSearchResponse("product", [{ id: "p1", manufacturerId: "m1" }]);
+            mockApi.mockSyncFailure(new Error("locked"));
+
+            const result = await ManufacturerProcessor.cleanup!(context);
+
+            expect(result).toEqual({
+                name: "manufacturers",
+                deleted: 0,
+                errors: ["Manufacturer cleanup failed: locked"],
+                durationMs: 0,
+            });
+            expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
+        });
+
+        test("makes no API calls in dry run mode", async () => {
+            const { context, mockApi, mockCache } = createTestContext({ dryRun: true });
+            mockApi.mockSearchResponse("product", [{ id: "p1", manufacturerId: "m1" }]);
+
+            await ManufacturerProcessor.cleanup!(context);
+
+            expect(mockApi.getCalls()).toHaveLength(0);
+            expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
+        });
+
+        test("does not touch the cache when there are no products", async () => {
+            const { context, mockApi, mockCache } = createTestContext();
+            mockApi.mockSearchResponse("product", []);
+
+            await ManufacturerProcessor.cleanup!(context);
+
+            expect(syncBodies(mockApi)).toHaveLength(0);
+            expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
+        });
     });
 });

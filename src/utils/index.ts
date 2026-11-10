@@ -67,7 +67,11 @@ export { ConcurrencyLimiter } from "./concurrency.js";
 // Image prompt utilities
 export type { ImageFormat } from "./image-format.js";
 export { detectImageFormat } from "./image-format.js";
-export { FICTIONAL_BRANDING_INSTRUCTION, withFictionalBranding } from "./image-prompt.js";
+export {
+    buildBaseImagePrompt,
+    FICTIONAL_BRANDING_INSTRUCTION,
+    withFictionalBranding,
+} from "./image-prompt.js";
 // Logger utilities
 export type { LogLevel, LogOptions } from "./logger.js";
 export { logger } from "./logger.js";

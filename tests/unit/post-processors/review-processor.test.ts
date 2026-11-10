@@ -4,6 +4,7 @@ import type { ProductMetadata } from "../../../src/types/index.js";
 
 import { buildProductReviews } from "../../../src/fixtures/review-data.js";
 import {
+    addReviewOutcome,
     buildReviewPayload,
     hasForeignReviews,
     ReviewProcessor,
@@ -222,8 +223,52 @@ describe("ReviewProcessor", () => {
             const result = await ReviewProcessor.process(context);
 
             expect(result.processed).toBe(1);
-            expect(result.errors.length).toBeGreaterThan(0);
-            expect(result.errors[0]).toContain("Failed to create reviews");
+            expect(result.errors).toEqual(["Failed to create reviews for Product 1: API error"]);
+        });
+
+        test("reports a product whose metadata cannot be read and continues", async () => {
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({ id: "p1", name: "Product 1" }),
+                    createTestProduct({ id: "p2", name: "Product 2" }),
+                ],
+            });
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p2", { reviewCount: 2 }],
+            ]);
+            const { context, mockApi, mockCache } = createTestContext({ blueprint, metadataMap });
+            const original = mockCache.loadProductMetadata.bind(mockCache);
+            mockCache.loadProductMetadata = (scName: string, productId: string) => {
+                if (productId === "p1") throw new Error("broken file");
+                return original(scName, productId);
+            };
+            mockApi.mockPostResponse("search/product-review", { total: 0, data: [] });
+            mockApi.mockSyncSuccess();
+
+            const result = await ReviewProcessor.process(context);
+
+            expect(result.errors).toEqual(["Failed to process reviews for Product 1: broken file"]);
+            expect(result.processed).toBe(1);
+            expect(result.skipped).toBe(0);
+        });
+
+        test("dry run writes nothing", async () => {
+            const blueprint = createTestBlueprint({
+                products: [createTestProduct({ id: "p1", name: "Product 1" })],
+            });
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { reviewCount: 3 }],
+            ]);
+            const { context, mockApi } = createTestContext({
+                blueprint,
+                metadataMap,
+                dryRun: true,
+            });
+
+            await ReviewProcessor.process(context);
+
+            expect(mockApi.syncEntitiesMock).not.toHaveBeenCalled();
+            expect(mockApi.getCalls()).toHaveLength(0);
         });
 
         test("handles various review counts", async () => {
@@ -431,5 +476,46 @@ describe("ReviewProcessor re-run", () => {
         expect(result.processed).toBe(1);
         expect(result.skipped).toBe(0);
         expect(mockApi.syncEntitiesMock).toHaveBeenCalled();
+    });
+});
+
+describe("addReviewOutcome", () => {
+    const emptyTally = () => ({
+        processed: 0,
+        skipped: 0,
+        totalReviews: 0,
+        legacyProducts: 0,
+        errors: new Array<string>(),
+    });
+
+    test("counts written products and their reviews", () => {
+        const tally = emptyTally();
+        addReviewOutcome(tally, { kind: "written", reviews: 3 });
+        addReviewOutcome(tally, { kind: "written", reviews: 2, error: "boom" });
+
+        expect(tally).toEqual({
+            processed: 2,
+            skipped: 0,
+            totalReviews: 5,
+            legacyProducts: 0,
+            errors: ["boom"],
+        });
+    });
+
+    test("counts skipped and legacy products separately", () => {
+        const tally = emptyTally();
+        addReviewOutcome(tally, { kind: "skipped", legacy: false });
+        addReviewOutcome(tally, { kind: "skipped", legacy: true });
+
+        expect(tally.skipped).toBe(2);
+        expect(tally.legacyProducts).toBe(1);
+        expect(tally.processed).toBe(0);
+    });
+
+    test("failed products only add an error", () => {
+        const tally = emptyTally();
+        addReviewOutcome(tally, { kind: "failed", error: "nope" });
+
+        expect(tally).toEqual({ ...emptyTally(), errors: ["nope"] });
     });
 });

@@ -15,6 +15,7 @@ import type {
     ProductSyncResult,
     SalesChannelFull,
 } from "../types/index.js";
+import type { BlueprintValidationResult } from "../utils/index.js";
 import type { ShopwareConnection } from "./shopware-context.js";
 
 import { applyColorSystem, hasVariantOverrides } from "../blueprint/index.js";
@@ -145,32 +146,13 @@ export async function runGenerate(
     description: string | undefined,
     options: GenerateOptions = {}
 ): Promise<GenerateRun> {
-    const { dryRun = false } = options;
     const progress = options.hooks?.onProgress ?? (() => {});
 
     logger.configure({ enabled: true });
 
     const out = new RunOutput(options.hooks?.onLine);
     const cache = createCacheFromEnv();
-
-    if (options.clearCache) {
-        cache.clearSalesChannel(salesChannelName);
-    }
-    const inspirationLines = await runInspirationStep(salesChannelName, options.inspirationUrl);
-    const effectiveDescription =
-        description ||
-        cache.loadInspiration(salesChannelName)?.brandDescription ||
-        `${salesChannelName} webshop`;
-
-    out.push(
-        `=== Shopware Data Generator v2 ===`,
-        `Name: ${salesChannelName}`,
-        `Description: ${effectiveDescription}`,
-        `Log file: ${logger.getLogFile()}`,
-        ``
-    );
-    if (options.clearCache) out.push(`Cleared cached data for "${salesChannelName}"`);
-    out.push(...inspirationLines);
+    const effectiveDescription = await startRun(salesChannelName, description, options, cache, out);
 
     const connection = options.connection ?? shopwareConnectionFromEnv();
     if (!connection) {
@@ -190,21 +172,82 @@ export async function runGenerate(
 
     const loaded = await loadValidatedBlueprint(salesChannelName, connection, out);
     if (typeof loaded === "string") return out.end(loaded);
-    const blueprint = loaded;
 
-    const translation = await runTranslationStep(salesChannelName, options.languages, dryRun);
+    const translation = await runTranslationStep(
+        salesChannelName,
+        options.languages,
+        Boolean(options.dryRun)
+    );
     out.push(...translation.lines);
     if (translation.error) return out.end(translation.error);
 
     out.push(`Step 3: Syncing to Shopware...`);
 
-    if (dryRun) {
+    if (options.dryRun) {
         return out.end(
             `  [DRY RUN] Would sync to ${connection.url}`,
             ``,
             `=== Dry Run Complete ===`
         );
     }
+
+    return syncToShopware(
+        { salesChannelName, blueprint: loaded, cache, connection, locales: translation.locales },
+        options,
+        out,
+        progress
+    );
+}
+
+/**
+ * Clear the cache if asked, crawl inspiration and print the run header.
+ * Returns the description used for the blueprint.
+ */
+async function startRun(
+    salesChannelName: string,
+    description: string | undefined,
+    options: GenerateOptions,
+    cache: DataCache,
+    out: RunOutput
+): Promise<string> {
+    if (options.clearCache) {
+        cache.clearSalesChannel(salesChannelName);
+    }
+    const inspirationLines = await runInspirationStep(salesChannelName, options.inspirationUrl);
+    const effectiveDescription =
+        description ||
+        cache.loadInspiration(salesChannelName)?.brandDescription ||
+        `${salesChannelName} webshop`;
+
+    out.push(
+        `=== Shopware Data Generator v2 ===`,
+        `Name: ${salesChannelName}`,
+        `Description: ${effectiveDescription}`,
+        `Log file: ${logger.getLogFile()}`,
+        ``
+    );
+    if (options.clearCache) out.push(`Cleared cached data for "${salesChannelName}"`);
+    out.push(...inspirationLines);
+    return effectiveDescription;
+}
+
+interface SyncInput {
+    salesChannelName: string;
+    blueprint: HydratedBlueprint;
+    cache: DataCache;
+    connection: ShopwareConnection;
+    /** Locales with a translation, created as SalesChannel domains */
+    locales: string[];
+}
+
+/** Steps 3 and 4: connect, upload the catalog and run the post-processors */
+async function syncToShopware(
+    input: SyncInput,
+    options: GenerateOptions,
+    out: RunOutput,
+    progress: ProgressFn
+): Promise<GenerateRun> {
+    const { salesChannelName, blueprint, cache, connection } = input;
 
     let dataHydrator: DataHydrator;
     try {
@@ -220,14 +263,7 @@ export async function runGenerate(
     out.push(`  Shopware: ${shopware.describe()}`);
 
     const upload = await uploadCatalog(
-        {
-            salesChannelName,
-            blueprint,
-            cache,
-            dataHydrator,
-            shopware,
-            locales: translation.locales,
-        },
+        { salesChannelName, blueprint, cache, dataHydrator, shopware, locales: input.locales },
         out,
         progress
     );
@@ -408,42 +444,39 @@ async function runInspirationStep(
     }
 }
 
-/** Steps 1 and 2: template, blueprint and hydration. Returns an "Error:" line on failure. */
-async function prepareBlueprints(
+/** Pre-generated template, only when nothing is hydrated yet. Returns whether it was used. */
+async function tryUseTemplate(
+    salesChannelName: string,
+    options: GenerateOptions,
+    cache: DataCache,
+    out: RunOutput
+): Promise<boolean> {
+    if (options.noTemplate || cache.hasHydratedBlueprint(salesChannelName)) return false;
+
+    out.push(`Checking for pre-generated template...`);
+    const usedTemplate = await createTemplateFetcherFromEnv().tryUseTemplate(
+        salesChannelName,
+        cache
+    );
+    if (!usedTemplate) {
+        out.push(`No template found, will generate from scratch`);
+        return false;
+    }
+    out.push(`Using pre-generated template for "${salesChannelName}"`);
+    const templateInfo = cache.loadTemplateInfo(salesChannelName);
+    if (templateInfo) out.push(`  Template: ${summarizeTemplateInfo(templateInfo)}`);
+    return true;
+}
+
+/** Step 1: create the blueprint unless a template or an earlier run provides one */
+async function ensureBlueprint(
     salesChannelName: string,
     description: string,
     options: GenerateOptions,
-    connection: ShopwareConnection,
+    usedTemplate: boolean,
     out: RunOutput
 ): Promise<string | undefined> {
-    const cache = createCacheFromEnv();
-
-    let usedTemplate = false;
-    if (!options.noTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
-        out.push(`Checking for pre-generated template...`);
-        const templateFetcher = createTemplateFetcherFromEnv();
-        usedTemplate = await templateFetcher.tryUseTemplate(salesChannelName, cache);
-        if (usedTemplate) {
-            out.push(`Using pre-generated template for "${salesChannelName}"`);
-            const templateInfo = cache.loadTemplateInfo(salesChannelName);
-            if (templateInfo) out.push(`  Template: ${summarizeTemplateInfo(templateInfo)}`);
-        } else {
-            out.push(`No template found, will generate from scratch`);
-        }
-    }
-
-    if (!usedTemplate && !cache.hasBlueprint(salesChannelName)) {
-        out.push(`Step 1: Creating blueprint...`);
-        const lines = await createBlueprint(
-            salesChannelName,
-            description,
-            options.products ?? 90,
-            options.variants
-        );
-        const createError = lines.find((l) => l.startsWith("Error:"));
-        if (createError) return createError;
-        out.push(...lines.filter((l) => !l.startsWith("===")));
-    } else {
+    if (usedTemplate || createCacheFromEnv().hasBlueprint(salesChannelName)) {
         if (options.variants && hasVariantOverrides(options.variants)) {
             out.push(
                 `⚠ Variant settings are ignored for an existing blueprint. ` +
@@ -453,7 +486,41 @@ async function prepareBlueprints(
         out.push(
             usedTemplate ? `Step 1: Using template blueprint` : `Step 1: Using existing blueprint`
         );
+        return undefined;
     }
+
+    out.push(`Step 1: Creating blueprint...`);
+    const lines = await createBlueprint(
+        salesChannelName,
+        description,
+        options.products ?? 90,
+        options.variants
+    );
+    const createError = lines.find((l) => l.startsWith("Error:"));
+    if (createError) return createError;
+    out.push(...lines.filter((l) => !l.startsWith("===")));
+    return undefined;
+}
+
+/** Steps 1 and 2: template, blueprint and hydration. Returns an "Error:" line on failure. */
+async function prepareBlueprints(
+    salesChannelName: string,
+    description: string,
+    options: GenerateOptions,
+    connection: ShopwareConnection,
+    out: RunOutput
+): Promise<string | undefined> {
+    const cache = createCacheFromEnv();
+    const usedTemplate = await tryUseTemplate(salesChannelName, options, cache, out);
+
+    const blueprintError = await ensureBlueprint(
+        salesChannelName,
+        description,
+        options,
+        usedTemplate,
+        out
+    );
+    if (blueprintError) return blueprintError;
     options.hooks?.onProgress?.("blueprint", 1, 2);
 
     if (!usedTemplate && !cache.hasHydratedBlueprint(salesChannelName)) {
@@ -467,6 +534,78 @@ async function prepareBlueprints(
     return undefined;
 }
 
+interface ValidatedBlueprint {
+    blueprint: HydratedBlueprint;
+    validation: BlueprintValidationResult;
+}
+
+function validateWithFixes(blueprint: HydratedBlueprint): ValidatedBlueprint {
+    return {
+        blueprint,
+        validation: validateBlueprint(blueprint, { autoFix: true, logFixes: false }),
+    };
+}
+
+/**
+ * Load and validate the hydrated blueprint. A broken one from a failed run (no products or
+ * categories) is deleted and hydrated again. Returns an "Error:" line on failure.
+ */
+async function loadOrRehydrate(
+    salesChannelName: string,
+    connection: ShopwareConnection,
+    out: RunOutput
+): Promise<ValidatedBlueprint | string> {
+    const cache = createCacheFromEnv();
+    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
+    if (!blueprint) return `Error: Failed to load hydrated blueprint`;
+
+    const loaded = validateWithFixes(blueprint);
+    if (loaded.validation.valid || !isIncompleteHydration(loaded.validation)) return loaded;
+
+    out.push(
+        `  Detected incomplete hydrated blueprint (likely from a previous failed attempt). Re-hydrating...`
+    );
+    cache.deleteHydratedBlueprint(salesChannelName);
+
+    const hydrateError = await runHydration(salesChannelName, connection, out);
+    if (hydrateError) return hydrateError;
+
+    const rehydrated = cache.loadHydratedBlueprint(salesChannelName);
+    if (!rehydrated) return `Error: Failed to load hydrated blueprint after re-hydration`;
+    return validateWithFixes(rehydrated);
+}
+
+function formatValidationError(
+    salesChannelName: string,
+    validation: BlueprintValidationResult
+): string {
+    const issues = validation.issues.map((i) => `  - ${i.message}`).join("\n");
+    return [
+        `Error: Blueprint validation failed:`,
+        issues,
+        ``,
+        `This may be caused by an interrupted hydration (e.g., API credits exhausted).`,
+        `To retry: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+    ].join("\n");
+}
+
+/** Warning lines when fewer products were hydrated than the blueprint has */
+function partialHydrationWarning(
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    cache: DataCache
+): string[] {
+    const expectedProducts = cache.loadBlueprint(salesChannelName)?.products.length ?? 0;
+    if (blueprint.products.length >= expectedProducts) return [];
+    return [
+        ``,
+        `  ⚠ Partial hydration: ${blueprint.products.length}/${expectedProducts} products were generated.`,
+        `  Some branches may have failed (e.g., API rate limit or credits exhausted).`,
+        `  To regenerate all products: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
+        ``,
+    ];
+}
+
 /**
  * Load the hydrated blueprint, re-hydrate a broken one from a failed run, validate it and
  * apply the colour system. Returns the blueprint or an "Error:" line.
@@ -476,60 +615,22 @@ async function loadValidatedBlueprint(
     connection: ShopwareConnection,
     out: RunOutput
 ): Promise<HydratedBlueprint | string> {
-    const cache = createCacheFromEnv();
-    let blueprint = cache.loadHydratedBlueprint(salesChannelName);
-    if (!blueprint) {
-        return `Error: Failed to load hydrated blueprint`;
-    }
+    const loaded = await loadOrRehydrate(salesChannelName, connection, out);
+    if (typeof loaded === "string") return loaded;
 
-    let validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
-
-    if (!validationResult.valid && isIncompleteHydration(validationResult)) {
-        out.push(
-            `  Detected incomplete hydrated blueprint (likely from a previous failed attempt). Re-hydrating...`
-        );
-        cache.deleteHydratedBlueprint(salesChannelName);
-
-        const hydrateError = await runHydration(salesChannelName, connection, out);
-        if (hydrateError) return hydrateError;
-
-        blueprint = cache.loadHydratedBlueprint(salesChannelName);
-        if (!blueprint) {
-            return `Error: Failed to load hydrated blueprint after re-hydration`;
-        }
-        validationResult = validateBlueprint(blueprint, { autoFix: true, logFixes: false });
-    }
-
-    if (!validationResult.valid) {
-        const issues = validationResult.issues.map((i) => `  - ${i.message}`).join("\n");
-        return [
-            `Error: Blueprint validation failed:`,
-            issues,
-            ``,
-            `This may be caused by an interrupted hydration (e.g., API credits exhausted).`,
-            `To retry: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
-        ].join("\n");
-    }
-    if (validationResult.fixesApplied > 0) {
-        out.push(`  Auto-fixed ${validationResult.fixesApplied} blueprint issue(s)`);
+    const { blueprint, validation } = loaded;
+    if (!validation.valid) return formatValidationError(salesChannelName, validation);
+    if (validation.fixesApplied > 0) {
+        out.push(`  Auto-fixed ${validation.fixesApplied} blueprint issue(s)`);
     }
 
     // Blueprints from older runs and templates get the colour system before translation
     // and upload (no AI: unknown shades are estimated)
+    const cache = createCacheFromEnv();
     applyColorSystem(blueprint, cache.loadColorShades(salesChannelName));
     cache.saveHydratedBlueprint(salesChannelName, blueprint);
 
-    const originalBlueprint = cache.loadBlueprint(salesChannelName);
-    const expectedProducts = originalBlueprint?.products.length ?? 0;
-    if (blueprint.products.length < expectedProducts) {
-        out.push(
-            ``,
-            `  ⚠ Partial hydration: ${blueprint.products.length}/${expectedProducts} products were generated.`,
-            `  Some branches may have failed (e.g., API rate limit or credits exhausted).`,
-            `  To regenerate all products: bun run blueprint hydrate --name=${salesChannelName} --rehydrate`,
-            ``
-        );
-    }
+    out.push(...partialHydrationWarning(salesChannelName, blueprint, cache));
     return blueprint;
 }
 

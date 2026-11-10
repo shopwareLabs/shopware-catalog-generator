@@ -13,6 +13,77 @@ import type {
 import { DEFAULT_POLLINATIONS_IMAGE_MODEL } from "../types/index.js";
 import { logger } from "../utils/index.js";
 
+const BALANCE_TIP = [
+    `\n💡 TIP: Your Pollinations account has insufficient pollen balance.`,
+    `   Top up your balance at https://enter.pollinations.ai`,
+    `   Or switch to a secret key (sk_*) which has no balance constraints.`,
+];
+
+interface TextErrorTip {
+    /** HTTP status, also matched as text in the error message */
+    status: number;
+    /** Text in the error message that identifies the error */
+    phrase: string;
+    lines: string[];
+}
+
+/** Checked in order, the first match wins */
+const TEXT_ERROR_TIPS: TextErrorTip[] = [
+    { status: 402, phrase: "Insufficient balance", lines: BALANCE_TIP },
+    {
+        status: 401,
+        phrase: "Invalid API key",
+        lines: [
+            `\n💡 TIP: Authentication failed with Pollinations.`,
+            `   Check your AI_API_KEY in .env is correct.`,
+            `   Get a key at https://enter.pollinations.ai`,
+        ],
+    },
+    {
+        status: 429,
+        phrase: "rate",
+        lines: [`\n💡 TIP: Rate limited by Pollinations.`, `   Wait a moment and try again.`],
+    },
+];
+
+function logTips(lines: string[]): void {
+    lines.forEach((line) => logger.info(line, { cli: true }));
+}
+
+/** `value.status` when it is a number */
+function numericStatus(value: unknown): number | null {
+    if (!value || typeof value !== "object" || !("status" in value)) return null;
+    return typeof value.status === "number" ? value.status : null;
+}
+
+/** HTTP status of an OpenAI SDK error (`status`) or a nested error (`error.status`) */
+function extractStatusCode(error: unknown): number | null {
+    const status = numericStatus(error);
+    if (status !== null) return status;
+    if (!error || typeof error !== "object" || !("error" in error)) return null;
+    return numericStatus(error.error);
+}
+
+function findTextErrorTip(status: number | null, message: string): TextErrorTip | undefined {
+    return TEXT_ERROR_TIPS.find(
+        (tip) =>
+            status === tip.status ||
+            message.includes(String(tip.status)) ||
+            message.includes(tip.phrase)
+    );
+}
+
+/** Log a failed text request with a tip for balance, authentication and rate limit errors */
+function logTextApiError(error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const status = extractStatusCode(error);
+
+    logger.error(`\n❌ Pollinations AI text generation failed`);
+    logger.error(`   Error: ${errorMessage}`);
+    logTips(findTextErrorTip(status, errorMessage)?.lines ?? []);
+    logger.info(""); // Empty line for readability
+}
+
 /** Pollinations.ai text generation provider (requires API key from enter.pollinations.ai) */
 export class PollinationsTextProvider implements TextProvider {
     private readonly client: OpenAI;
@@ -59,79 +130,66 @@ export class PollinationsTextProvider implements TextProvider {
             const completion = await this.client.chat.completions.create(requestOptions);
             return completion.choices[0]?.message.content || "";
         } catch (error) {
-            this.handleApiError(error);
+            logTextApiError(error);
             throw error;
         }
-    }
-
-    /**
-     * Parse API errors and provide helpful messages
-     */
-    private handleApiError(error: unknown): void {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const status = this.extractStatusCode(error);
-
-        logger.error(`\n❌ Pollinations AI text generation failed`);
-        logger.error(`   Error: ${errorMessage}`);
-
-        if (
-            status === 402 ||
-            errorMessage.includes("402") ||
-            errorMessage.includes("Insufficient balance")
-        ) {
-            logger.info(`\n💡 TIP: Your Pollinations account has insufficient pollen balance.`, {
-                cli: true,
-            });
-            logger.info(`   Top up your balance at https://enter.pollinations.ai`, { cli: true });
-            logger.info(`   Or switch to a secret key (sk_*) which has no balance constraints.`, {
-                cli: true,
-            });
-        } else if (
-            status === 401 ||
-            errorMessage.includes("401") ||
-            errorMessage.includes("Invalid API key")
-        ) {
-            logger.info(`\n💡 TIP: Authentication failed with Pollinations.`, { cli: true });
-            logger.info(`   Check your AI_API_KEY in .env is correct.`, { cli: true });
-            logger.info(`   Get a key at https://enter.pollinations.ai`, { cli: true });
-        } else if (
-            status === 429 ||
-            errorMessage.includes("429") ||
-            errorMessage.includes("rate")
-        ) {
-            logger.info(`\n💡 TIP: Rate limited by Pollinations.`, { cli: true });
-            logger.info(`   Wait a moment and try again.`, { cli: true });
-        }
-
-        logger.info(""); // Empty line for readability
-    }
-
-    /**
-     * Try to extract HTTP status code from error
-     */
-    private extractStatusCode(error: unknown): number | null {
-        if (error && typeof error === "object") {
-            // OpenAI SDK error format
-            if ("status" in error && typeof error.status === "number") {
-                return error.status;
-            }
-            // Nested error format
-            if (
-                "error" in error &&
-                error.error &&
-                typeof error.error === "object" &&
-                "status" in error.error &&
-                typeof error.error.status === "number"
-            ) {
-                return error.error.status;
-            }
-        }
-        return null;
     }
 }
 
 /** Available Pollinations image models */
 const POLLINATIONS_IMAGE_MODELS = ["flux", "klein", "zimage"] as const;
+
+/** Image requests are cut off after 2 minutes */
+const IMAGE_TIMEOUT_MS = 120000;
+
+/**
+ * Prompts are cut to avoid URL length limits (URLs max ~2000 chars).
+ * After URL encoding, characters can triple in size.
+ */
+const MAX_PROMPT_LENGTH = 500;
+
+/** `value.message`, or undefined for values without one */
+function messageField(value: unknown): unknown {
+    if (!value || typeof value !== "object" || !("message" in value)) return undefined;
+    return value.message;
+}
+
+/** The message of a JSON-encoded error inside the message, or the message itself */
+function unwrapNestedMessage(message: string): string {
+    if (!message.startsWith("{")) return message;
+    try {
+        const nested = messageField(JSON.parse(message));
+        return typeof nested === "string" && nested ? nested : message;
+    } catch {
+        return message; // Keep original message if parsing fails
+    }
+}
+
+/**
+ * Error message of a failed image response (`error.message`, then `message`, else "").
+ * Returns null when the body is not a JSON error object.
+ */
+async function readErrorMessage(response: Response): Promise<string | null> {
+    try {
+        const data: unknown = await response.json();
+        if (data === null) return null;
+        const nested = typeof data === "object" && "error" in data ? data.error : undefined;
+        const message = messageField(nested) || messageField(data) || "";
+        return typeof message === "string" ? unwrapNestedMessage(message) : null;
+    } catch {
+        return null;
+    }
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
 
 /** Pollinations.ai image generation provider. Works without API key (free, rate-limited). */
 export class PollinationsImageProvider implements ImageProvider {
@@ -158,42 +216,40 @@ export class PollinationsImageProvider implements ImageProvider {
 
     async generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null> {
         try {
-            // Truncate prompt to avoid URL length limits (URLs max ~2000 chars)
-            // After URL encoding, characters can triple in size, so limit to ~500 chars
-            const truncatedPrompt = prompt.length > 500 ? prompt.slice(0, 500) : prompt;
-            const encodedPrompt = encodeURIComponent(truncatedPrompt);
-            const width = options?.width ?? 1792;
-            const height = options?.height ?? 1024;
-            const keyParam = this.apiKey ? `&key=${this.apiKey}` : "";
-            const url = `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${this.model}${keyParam}`;
-
-            // Add timeout (2 minutes for image generation)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-            const response = await fetch(url, { signal: controller.signal });
-            clearTimeout(timeoutId);
-
+            const response = await fetchWithTimeout(
+                this.imageUrl(prompt, options),
+                IMAGE_TIMEOUT_MS
+            );
             if (!response.ok) {
                 await this.handleErrorResponse(response);
                 return null;
             }
 
             const buffer = await response.arrayBuffer();
-            const base64 = Buffer.from(buffer).toString("base64");
-
-            return base64;
+            return Buffer.from(buffer).toString("base64");
         } catch (error) {
-            if (error instanceof Error && error.name === "AbortError") {
-                logger.warn("Pollinations image generation timed out after 2 minutes");
-                logger.info(`TIP: Try a different model with ${this.alternativeModelHint()}`, {
-                    cli: true,
-                });
-            } else {
-                logger.warn("Pollinations image generation failed:", { data: error });
-            }
+            this.logRequestFailure(error);
             return null;
         }
+    }
+
+    private imageUrl(prompt: string, options?: ImageGenerationOptions): string {
+        const encodedPrompt = encodeURIComponent(prompt.slice(0, MAX_PROMPT_LENGTH));
+        const width = options?.width ?? 1792;
+        const height = options?.height ?? 1024;
+        const keyParam = this.apiKey ? `&key=${this.apiKey}` : "";
+        return `https://gen.pollinations.ai/image/${encodedPrompt}?width=${width}&height=${height}&model=${this.model}${keyParam}`;
+    }
+
+    private logRequestFailure(error: unknown): void {
+        if (error instanceof Error && error.name === "AbortError") {
+            logger.warn("Pollinations image generation timed out after 2 minutes");
+            logger.info(`TIP: Try a different model with ${this.alternativeModelHint()}`, {
+                cli: true,
+            });
+            return;
+        }
+        logger.warn("Pollinations image generation failed:", { data: error });
     }
 
     /**
@@ -201,78 +257,45 @@ export class PollinationsImageProvider implements ImageProvider {
      */
     private async handleErrorResponse(response: Response): Promise<void> {
         const statusText = `${response.status} ${response.statusText}`;
+        const errorMessage = await readErrorMessage(response);
 
-        try {
-            const errorData = (await response.json()) as {
-                error?: { message?: string };
-                message?: string;
-            };
-
-            // Try to extract the actual error message
-            let errorMessage = errorData.error?.message || errorData.message || "";
-
-            // Parse nested JSON error if present
-            if (errorMessage.startsWith("{")) {
-                try {
-                    const nestedError = JSON.parse(errorMessage) as { message?: string };
-                    errorMessage = nestedError.message || errorMessage;
-                } catch {
-                    // Keep original message if parsing fails
-                }
-            }
-
-            logger.error(`\n❌ Pollinations image generation failed: ${statusText}`);
-
-            if (errorMessage) {
-                logger.error(`   Error: ${errorMessage}`);
-            }
-
-            // Provide helpful tips based on error
-            if (response.status === 402 || errorMessage.includes("Insufficient balance")) {
-                logger.info(
-                    `\n💡 TIP: Your Pollinations account has insufficient pollen balance.`,
-                    { cli: true }
-                );
-                logger.info(`   Top up your balance at https://enter.pollinations.ai`, {
-                    cli: true,
-                });
-                logger.info(
-                    `   Or switch to a secret key (sk_*) which has no balance constraints.`,
-                    { cli: true }
-                );
-            } else if (
-                errorMessage.includes("No active") &&
-                errorMessage.includes("servers available")
-            ) {
-                const otherModels = this.alternativeModels();
-                logger.info(`\n💡 TIP: The "${this.model}" model is currently unavailable.`, {
-                    cli: true,
-                });
-                logger.info(`   Try switching to a different model in your .env file:`, {
-                    cli: true,
-                });
-                otherModels.forEach((m) => {
-                    logger.info(`   IMAGE_MODEL=${m}`, { cli: true });
-                });
-            } else if (response.status === 401) {
-                logger.info(
-                    `\n💡 TIP: Authentication failed. Check your API key at https://enter.pollinations.ai`,
-                    { cli: true }
-                );
-            } else if (response.status === 429) {
-                logger.info(`\n💡 TIP: Rate limited. Wait a moment and try again.`, {
-                    cli: true,
-                });
-            }
-
-            logger.info(""); // Empty line for readability
-        } catch {
-            // If JSON parsing fails, just show the status
+        if (errorMessage === null) {
             logger.error(`Pollinations image generation failed: ${statusText}`);
             logger.info(`TIP: Try a different model with ${this.alternativeModelHint()}`, {
                 cli: true,
             });
+            return;
         }
+
+        logger.error(`\n❌ Pollinations image generation failed: ${statusText}`);
+        if (errorMessage) {
+            logger.error(`   Error: ${errorMessage}`);
+        }
+        logTips(this.imageErrorTips(response.status, errorMessage));
+        logger.info(""); // Empty line for readability
+    }
+
+    /** Tips for a failed image response, based on status and error message */
+    private imageErrorTips(status: number, errorMessage: string): string[] {
+        if (status === 402 || errorMessage.includes("Insufficient balance")) {
+            return BALANCE_TIP;
+        }
+        if (errorMessage.includes("No active") && errorMessage.includes("servers available")) {
+            return [
+                `\n💡 TIP: The "${this.model}" model is currently unavailable.`,
+                `   Try switching to a different model in your .env file:`,
+                ...this.alternativeModels().map((m) => `   IMAGE_MODEL=${m}`),
+            ];
+        }
+        if (status === 401) {
+            return [
+                `\n💡 TIP: Authentication failed. Check your API key at https://enter.pollinations.ai`,
+            ];
+        }
+        if (status === 429) {
+            return [`\n💡 TIP: Rate limited. Wait a moment and try again.`];
+        }
+        return [];
     }
 
     /** Free image models other than the current one */

@@ -1205,7 +1205,13 @@ server.addTool({
 - **Formatter:** `oxfmt` (via `bun run format`). Scripts use `npx oxfmt` so formatting runs under Node; under Bun, oxfmt’s worker threads trigger DataCloneError for JSON/markdown (see [bun#25610](https://github.com/oven-sh/bun/issues/25610)).
 - **Build:** `bun run build` runs lint + format + bun build
 - **Code quality:** [fallow](https://fallow.tools/) (`.fallowrc.jsonc`) for complexity, duplication
-  and mutation testing only. It does not replace knip, oxlint or oxfmt (its dead-code checks are off).
+  and mutation testing only. Unused code is knip's job: fallow's dead-code rules are off, so never
+  use fallow for that. It does not replace oxlint or oxfmt either.
+  Complexity limits are errors: cyclomatic 15, cognitive 15, CRAP 30, 60 lines per function.
+  `bun run lint:complexity` checks them (part of `bun run lint`, and a CI step in the Lint job).
+  Split the function instead of raising a limit. Without `--coverage`, fallow assumes 40% coverage
+  for non-exported functions, so those need cyclomatic 9 or less to pass CRAP; tests alone don't help.
+    - `bun run lint:complexity` — complexity guard (fails on any function over the limits)
     - `bun run quality` — health score + top complex functions + top clones (src only, `--production`)
     - `bun run quality:health` — hotspots (churn × complexity) and refactoring targets
     - `bun run quality:dupes` — full duplication report

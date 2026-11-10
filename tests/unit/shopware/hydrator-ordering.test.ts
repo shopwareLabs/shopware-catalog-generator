@@ -200,10 +200,13 @@ function buildProductMockClient(opts: {
     capturedSyncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }>;
     /** Zero-based index of the `_action/sync` call that should be rejected */
     rejectSyncCall?: number;
+    /** Receives every invoked operation name */
+    operations?: string[];
 }): AdminApiClient {
     let syncCalls = 0;
     return createMockAdminClientWithInvoke(
         async (operation: string, params: { body?: unknown }) => {
+            opts.operations?.push(operation);
             if (operation.includes("search/tax")) {
                 return { data: { data: [{ id: "tax-standard" }], total: 1 } };
             }
@@ -310,6 +313,20 @@ describe("ShopwareHydrator hydrateEnvWithProductsDirect — tiered pricing", () 
         const product = productSync!.payload[0]!;
         // No tiered prices when rule is unavailable
         expect(product.prices).toBeUndefined();
+    });
+
+    test("does not look up the rule when no product has tiered pricing", async () => {
+        const operations: string[] = [];
+        const client = buildProductMockClient({
+            hasAlwaysValidRule: true,
+            capturedSyncs: [],
+            operations,
+        });
+        const hydrator = new ShopwareHydrator(client);
+
+        await hydrator.hydrateEnvWithProductsDirect([makeProduct("prod-1")], "sc-id", "nav-id");
+
+        expect(operations.some((op) => op.includes("search/rule"))).toBe(false);
     });
 });
 
@@ -418,5 +435,38 @@ describe("ShopwareHydrator hydrateEnvWithProductsDirect — rejected batches", (
         // First batch (50) rejected, second batch (10) still sent and accepted
         expect(synced).toBe(10);
         expect(syncs.filter((s) => s.entity === "product")).toHaveLength(1);
+    });
+
+    test("splits products into batches of 50", async () => {
+        const syncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }> = [];
+        const client = buildProductMockClient({ hasAlwaysValidRule: false, capturedSyncs: syncs });
+        const hydrator = new ShopwareHydrator(client);
+
+        await hydrator.hydrateEnvWithProductsDirect(products, "sc-id", "nav-id");
+
+        expect(syncs.map((s) => s.payload.length)).toEqual([50, 10]);
+    });
+
+    test("sends no empty batch when the count is a multiple of 50", async () => {
+        const syncs: Array<{ entity: string; action: string; payload: ProductSyncPayload[] }> = [];
+        const client = buildProductMockClient({ hasAlwaysValidRule: false, capturedSyncs: syncs });
+        const hydrator = new ShopwareHydrator(client);
+
+        const synced = await hydrator.hydrateEnvWithProductsDirect(
+            products.slice(0, 50),
+            "sc-id",
+            "nav-id"
+        );
+
+        expect(synced).toBe(50);
+        expect(syncs.map((s) => s.payload.length)).toEqual([50]);
+    });
+
+    test("returns 0 without calling Shopware when not authenticated", async () => {
+        const hydrator = new ShopwareHydrator();
+
+        const synced = await hydrator.hydrateEnvWithProductsDirect(products, "sc-id", "nav-id");
+
+        expect(synced).toBe(0);
     });
 });

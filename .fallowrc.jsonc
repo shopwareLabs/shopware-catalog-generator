@@ -3,7 +3,7 @@
     // Fallow is used for complexity, duplication and mutation testing only.
     // Dead code stays with knip, linting with oxlint, formatting with oxfmt.
     "health": {
-        "maxCyclomatic": 20,
+        "maxCyclomatic": 15,
         "maxCognitive": 15,
         "maxCrap": 30,
         "maxUnitSize": 60,
@@ -17,12 +17,12 @@
         "runner": "bun-test",
     },
     "rules": {
-        // Complexity is reported, not enforced yet (122 functions above the limits on
-        // 2026-11-10). Switch to "error" once the worst functions are split.
-        "complexity-cyclomatic": "warn",
-        "complexity-cognitive": "warn",
-        "complexity-crap": "warn",
-        "complexity-file-lines": "warn",
+        // Enforced: every function stays within the limits in "health" above.
+        // Split a function (or add tests, for CRAP) instead of raising a limit.
+        "complexity-cyclomatic": "error",
+        "complexity-cognitive": "error",
+        "complexity-crap": "error",
+        "complexity-file-lines": "error",
         // Owned by knip (see knip.json)
         "unused-files": "off",
         "unused-exports": "off",

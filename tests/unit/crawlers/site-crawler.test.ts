@@ -384,3 +384,289 @@ describe("crawlForInspiration", () => {
         }
     });
 });
+
+describe("crawlForInspiration — characterization", () => {
+    /** Route fetches by exact URL; unknown URLs (robots.txt, sitemap, icons) fail. Records page fetches. */
+    function routeHtml(routes: Record<string, string>): string[] {
+        const calls: string[] = [];
+        mockFetch(async (input) => {
+            const url = input.toString();
+            calls.push(url);
+            const html = routes[url];
+            if (html === undefined) {
+                return { ok: false, headers: { get: () => "text/html" }, text: async () => "" };
+            }
+            return { ok: true, headers: { get: () => "text/html" }, text: async () => html };
+        });
+        return calls;
+    }
+
+    function html(head: string, body = ""): string {
+        return `<!DOCTYPE html><html><head>${head}</head><body>${body}</body></html>`;
+    }
+
+    const PRICES = Array(10).fill("19,99 €").join(" ");
+
+    test("homepage link discovery skips anchors, mail, phone, external, query and duplicate links", async () => {
+        const origFetch = globalThis.fetch;
+        const home = html(
+            "",
+            `<a href="#top">Top</a>
+             <a href="mailto:a@example.com">Mail</a>
+             <a href="tel:123">Call</a>
+             <a href="https://other.com/x">External</a>
+             <a href="/search?q=1">Query</a>
+             <a href="/page#section">Fragment</a>
+             <a href="https://example.com/">Root</a>
+             <a href="/b">B</a>
+             <a href="/b">B again</a>
+             <a href="http://[bad">Bad</a>
+             <a href="/c">C</a>`
+        );
+        const calls = routeHtml({ "https://example.com": home });
+
+        try {
+            await crawlForInspiration("https://example.com");
+            const pageFetches = calls.filter(
+                (c) => !c.includes("robots.txt") && !c.includes("sitemap") && !c.includes("icon")
+            );
+            expect(pageFetches.slice(1).sort()).toEqual([
+                "https://example.com/b",
+                "https://example.com/c",
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("homepage link discovery stops at 100 links", async () => {
+        const origFetch = globalThis.fetch;
+        const links = Array.from({ length: 120 }, (_, i) => `<a href="/p-${i}">P</a>`).join("");
+        const calls = routeHtml({ "https://example.com": html("", links) });
+
+        try {
+            await crawlForInspiration("https://example.com");
+            const pageFetches = calls.filter((c) => /\/p-\d+$/.test(c));
+            // sampleUrls caps at 30; all sampled links come from the first 100
+            expect(pageFetches).toHaveLength(30);
+            expect(pageFetches.every((c) => Number(c.split("-").pop()) < 100)).toBe(true);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("JSON-LD product without description uses og:description, cut to 300 chars", async () => {
+        const origFetch = globalThis.fetch;
+        const longDesc = "x".repeat(400);
+        routeHtml({
+            "https://example.com": html("", `<a href="/p1">1</a><a href="/p2">2</a>`),
+            "https://example.com/p1": html(
+                `<meta property="og:description" content="  ${longDesc}  ">
+                 <script type="application/ld+json">{"@type":"Product","name":"Lamp One","offers":{}}</script>`
+            ),
+            "https://example.com/p2": html(
+                `<meta name="description" content="Meta text">
+                 <script type="application/ld+json">{"@type":"Product","name":"Lamp Two","offers":{}}</script>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            const byName = new Map(result.exampleProducts.map((p) => [p.name, p]));
+            expect(byName.get("Lamp One")?.description).toBe("x".repeat(300));
+            expect(byName.get("Lamp Two")?.description).toBe("Meta text");
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("product without JSON-LD: h1 length bounds, microdata and meta descriptions", async () => {
+        const origFetch = globalThis.fetch;
+        const og = `<meta property="og:type" content="product">`;
+        routeHtml({
+            "https://example.com": html(
+                "",
+                `<a href="/a">a</a><a href="/b">b</a><a href="/c">c</a>`
+            ),
+            // single h1 with microdata description
+            "https://example.com/a": html(
+                og,
+                `<h1>  Desk   Lamp </h1>
+                 <div itemscope itemtype="https://schema.org/Product">
+                    <span itemprop="description">Warm light</span>
+                 </div>`
+            ),
+            // h1 too short, falls back to itemprop name; meta description
+            "https://example.com/b": html(
+                `${og}<meta name="description" content="From meta">`,
+                `<h1>Ab</h1>
+                 <div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Floor Lamp</span></div>`
+            ),
+            // no usable name at all
+            "https://example.com/c": html(og, `<h1>X</h1>`),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.exampleProducts).toEqual([
+                { name: "Desk Lamp", description: "Warm light" },
+                { name: "Floor Lamp", description: "From meta" },
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("product breadcrumbs skip home, account-like and duplicate categories", async () => {
+        const origFetch = globalThis.fetch;
+        routeHtml({
+            "https://example.com": html("", `<a href="/p">p</a>`),
+            "https://example.com/p": html(
+                `<script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[
+                    {"name":"Home"},{"name":"Kontakt"},{"name":"Lamps"},{"name":"lamps"},
+                    {"name":"${"y".repeat(59)}"}]}</script>
+                 <script type="application/ld+json">{"@type":"Product","name":"Lamp","offers":{}}</script>`,
+                `<ol itemscope itemtype="https://schema.org/BreadcrumbList">
+                    <li itemprop="itemListElement"><span itemprop="name">Desk Lamps</span></li>
+                 </ol>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.categories).toEqual(["Lamps", "y".repeat(59), "Desk Lamps"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("category name prefers the last non-home breadcrumb over the h1", async () => {
+        const origFetch = globalThis.fetch;
+        routeHtml({
+            "https://example.com": html("", `<a href="/c1">1</a><a href="/c2">2</a>`),
+            "https://example.com/c1": html(
+                `<script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[
+                    {"name":"Shop"},{"name":"Outdoor"},{"name":"Startseite"}]}</script>`,
+                `<h1>Ignored</h1>${PRICES}`
+            ),
+            "https://example.com/c2": html(
+                "",
+                `<ol itemscope itemtype="https://schema.org/BreadcrumbList">
+                    <li itemprop="itemListElement"><span itemprop="name">Garden</span></li>
+                    <li itemprop="itemListElement"><span itemprop="name">Home</span></li>
+                 </ol><h1>Ignored too</h1>${PRICES}`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.categories).toEqual(["Outdoor", "Garden"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("category page microdata products are used when no JSON-LD or data attributes exist", async () => {
+        const origFetch = globalThis.fetch;
+        routeHtml({
+            "https://example.com": html("", `<a href="/c">c</a>`),
+            "https://example.com/c": html(
+                "",
+                `<h1>Chairs</h1>
+                 <div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Oak Chair</span>
+                    <span itemprop="description">Solid oak</span></div>
+                 <div itemscope itemtype="https://schema.org/Product"><span itemprop="name">Ash Chair</span></div>
+                 <div itemscope itemtype="https://schema.org/Product"><span itemprop="name">No</span></div>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.exampleProducts).toEqual([
+                { name: "Oak Chair", description: "Solid oak" },
+                { name: "Ash Chair", description: undefined },
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("Phase 4 follows a second level when the first level is all category pages", async () => {
+        const origFetch = globalThis.fetch;
+        routeHtml({
+            "https://example.com": html("", `<a href="/a">a</a>`),
+            "https://example.com/a": html("", `<h1>Level A</h1>${PRICES}<a href="/a/sub">sub</a>`),
+            "https://example.com/a/sub": html(
+                "",
+                `<h1>Level B</h1>${PRICES}<a href="/a">back</a><a href="/a/sub/p">p</a>`
+            ),
+            "https://example.com/a/sub/p": html(
+                `<meta property="og:type" content="product">`,
+                `<h1>Deep Product</h1>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.exampleProducts.map((p) => p.name)).toEqual(["Deep Product"]);
+            // Level-1 category names are not added to the category list
+            expect(result.categories).toEqual(["Level A"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("Phase 4 is skipped when the sample already yields five products", async () => {
+        const origFetch = globalThis.fetch;
+        const cards = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]
+            .map(
+                (n) =>
+                    `<div data-product-information='{"name":"${n}","description":"${n} text"}'></div>`
+            )
+            .join("");
+        const calls = routeHtml({
+            "https://example.com": html("", `<a href="/c">c</a>`),
+            "https://example.com/c": html(
+                "",
+                `<h1>Cards</h1>${PRICES}${cards}<a href="/c/p">p</a>`
+            ),
+            "https://example.com/c/p": html(
+                `<meta property="og:type" content="product">`,
+                `<h1>Followed Product</h1>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.exampleProducts.map((p) => p.name)).toEqual([
+                "Alpha",
+                "Bravo",
+                "Charlie",
+                "Delta",
+                "Echo",
+            ]);
+            expect(result.exampleProducts[0]?.description).toBe("Alpha text");
+            expect(calls).not.toContain("https://example.com/c/p");
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("deduplicates products case-insensitively, keeping the first", async () => {
+        const origFetch = globalThis.fetch;
+        routeHtml({
+            "https://example.com": html("", `<a href="/c">c</a>`),
+            "https://example.com/c": html(
+                `<script type="application/ld+json">{"@type":"ItemList","itemListElement":[
+                    {"@type":"Product","name":"Oak Chair"},{"@type":"Product","name":"OAK CHAIR"}]}</script>`
+            ),
+        });
+
+        try {
+            const result = await crawlForInspiration("https://example.com");
+            expect(result.exampleProducts.map((p) => p.name)).toEqual(["Oak Chair"]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+});

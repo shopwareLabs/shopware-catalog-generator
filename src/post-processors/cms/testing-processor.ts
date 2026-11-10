@@ -63,6 +63,10 @@ const PRODUCT_CATEGORIES: ReadonlyArray<{
 /** Cache file for digital product info */
 const DIGITAL_PRODUCT_CACHE_FILE = "digital-product.json";
 
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Testing Processor - Orchestrator for CMS demo pages and product demos
  */
@@ -82,113 +86,20 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
      * Override process to create full hierarchy
      */
     override async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { options } = context;
+        if (context.options.dryRun) {
+            return this.dryRunHierarchy();
+        }
+
         const errors: string[] = [];
-
-        if (options.dryRun) {
-            logger.info(`    [DRY RUN] Would create Testing category hierarchy`, { cli: true });
-            logger.info(
-                `    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`,
-                { cli: true }
-            );
-            logger.info(
-                `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`,
-                { cli: true }
-            );
-            logger.info(`    [DRY RUN] Would create Cookie settings external link category`, {
-                cli: true,
-            });
-            return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
-        }
-
+        let completed = false;
         try {
-            // Step 1: Get root category for the navigation
-            const rootCategoryId = await this.getRootCategoryId(context);
-            if (!rootCategoryId) {
-                errors.push("Could not find root category for navigation");
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 2: Create Testing placeholder CMS page and landing page
-            const testingLandingPageId = await this.createTestingLandingPage(context, errors);
-            if (!testingLandingPageId) {
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 3: Create "Testing" main category (last among root children)
-            const lastRootChildId = await this.getLastRootChildId(context, rootCategoryId);
-            const testingCategoryId = await this.ensureCategory(
-                context,
-                "Testing",
-                rootCategoryId,
-                testingLandingPageId,
-                errors,
-                lastRootChildId ?? undefined
-            );
-            if (!testingCategoryId) {
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 4: Create CMS showcase landing page
-            const cmsLandingPageId = await this.createCmsShowcaseLandingPage(context, errors);
-            if (!cmsLandingPageId) {
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 5: Create "CMS" sub-category under Testing (first child)
-            const cmsCategoryId = await this.ensureCategory(
-                context,
-                "CMS",
-                testingCategoryId,
-                cmsLandingPageId,
-                errors,
-                undefined
-            );
-            if (!cmsCategoryId) {
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 6: Create CMS element sub-categories under CMS
-            await this.createCmsElementCategories(context, cmsCategoryId, errors);
-
-            // Step 7: Create "Products" navigation category (after CMS)
-            const productsCategoryId = await this.ensureNavigationCategory(
-                context,
-                "Products",
-                testingCategoryId,
-                errors,
-                cmsCategoryId
-            );
-            if (!productsCategoryId) {
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Step 8: Create product type sub-categories under Products
-            await this.createProductCategories(context, productsCategoryId, errors);
-
-            // Step 9: Create "Cookie settings" external link (after Products)
-            await this.ensureCookieSettingsCategory(
-                context,
-                testingCategoryId,
-                productsCategoryId,
-                errors
-            );
-
-            // Step 10: Validate all expected sub-categories exist
-            await this.validateHierarchy(context, cmsCategoryId, productsCategoryId, errors);
+            completed = await this.createHierarchy(context, errors);
         } catch (error) {
-            errors.push(
-                `Testing processor failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Testing processor failed: ${errorMessage(error)}`);
         }
 
-        return {
-            name: this.name,
-            processed: errors.length === 0 ? 1 : 0,
-            skipped: 0,
-            errors,
-            durationMs: 0,
-        };
+        const processed = completed && errors.length === 0 ? 1 : 0;
+        return { name: this.name, processed, skipped: 0, errors, durationMs: 0 };
     }
 
     /**
@@ -200,83 +111,218 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
         }
 
-        let deleted = 0;
-        const errors: string[] = [];
-
+        const result: PostProcessorCleanupResult = {
+            name: this.name,
+            deleted: 0,
+            errors: [],
+            durationMs: 0,
+        };
         try {
-            const rootCategoryId = await this.getRootCategoryId(context);
-            if (!rootCategoryId) {
-                return {
-                    name: this.name,
-                    deleted: 0,
-                    errors: ["Could not find root category"],
-                    durationMs: 0,
-                };
-            }
-
-            const testingCategoryId = await findCategoryIdByName(
-                context,
-                "Testing",
-                rootCategoryId
-            );
-            if (!testingCategoryId) {
-                logger.info(`    ⊘ "Testing" category not found`, { cli: true });
-                return { name: this.name, deleted: 0, errors: [], durationMs: 0 };
-            }
-
-            // Find CMS, Products, and Cookie settings sub-categories
-            const cmsCategoryId = await findCategoryIdByName(context, "CMS", testingCategoryId);
-            const productsCategoryId = await findCategoryIdByName(
-                context,
-                "Products",
-                testingCategoryId
-            );
-            const cookieSettingsCategoryId = await findCategoryIdByName(
-                context,
-                "Cookie settings",
-                testingCategoryId
-            );
-
-            // Delete Cookie settings category (no children)
-            if (cookieSettingsCategoryId) {
-                deleted += await this.deleteCategoryById(
-                    context,
-                    cookieSettingsCategoryId,
-                    "Cookie settings"
-                );
-            }
-
-            // Delete CMS element categories (deepest first)
-            if (cmsCategoryId) {
-                for (const cat of [...CMS_CATEGORIES].reverse()) {
-                    deleted += await this.deleteSubCategory(context, cat.name, cmsCategoryId);
-                }
-                // Delete CMS category
-                deleted += await this.deleteCategoryById(context, cmsCategoryId, "CMS");
-            }
-
-            // Delete Product type categories
-            if (productsCategoryId) {
-                for (const cat of [...PRODUCT_CATEGORIES].reverse()) {
-                    deleted += await this.deleteSubCategory(context, cat.name, productsCategoryId);
-                }
-                // Delete Products category
-                deleted += await this.deleteCategoryById(context, productsCategoryId, "Products");
-            }
-
-            // Delete Testing category
-            deleted += await this.deleteCategoryById(context, testingCategoryId, "Testing");
-
-            // Cleanup landing pages and CMS layouts (using store-scoped names)
-            await this.cleanupLandingPage(context, TESTING_PLACEHOLDER_PAGE.name, errors);
-            await this.cleanupLandingPage(context, WELCOME_PAGE.name, errors);
+            await this.deleteHierarchy(context, result);
         } catch (error) {
-            errors.push(
-                `Cleanup failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            result.errors.push(`Cleanup failed: ${errorMessage(error)}`);
+        }
+        return result;
+    }
+
+    // =========================================================================
+    // Hierarchy Steps
+    // =========================================================================
+
+    private dryRunHierarchy(): PostProcessorResult {
+        logger.info(`    [DRY RUN] Would create Testing category hierarchy`, { cli: true });
+        logger.info(
+            `    [DRY RUN] Would create CMS sub-section with ${CMS_CATEGORIES.length} pages`,
+            { cli: true }
+        );
+        logger.info(
+            `    [DRY RUN] Would create Products sub-section with ${PRODUCT_CATEGORIES.length} links`,
+            { cli: true }
+        );
+        logger.info(`    [DRY RUN] Would create Cookie settings external link category`, {
+            cli: true,
+        });
+        return { name: this.name, processed: 1, skipped: 0, errors: [], durationMs: 0 };
+    }
+
+    /**
+     * Create Testing → CMS → Products → Cookie settings in order.
+     * Returns false when a step could not create its category (later steps need its ID).
+     */
+    private async createHierarchy(
+        context: PostProcessorContext,
+        errors: string[]
+    ): Promise<boolean> {
+        const rootCategoryId = await this.getRootCategoryId(context);
+        if (!rootCategoryId) {
+            errors.push("Could not find root category for navigation");
+            return false;
         }
 
-        return { name: this.name, deleted, errors, durationMs: 0 };
+        const testingCategoryId = await this.createTestingCategory(context, rootCategoryId, errors);
+        if (!testingCategoryId) return false;
+
+        const cmsCategoryId = await this.createCmsSection(context, testingCategoryId, errors);
+        if (!cmsCategoryId) return false;
+
+        const productsCategoryId = await this.createProductsSection(
+            context,
+            testingCategoryId,
+            cmsCategoryId,
+            errors
+        );
+        if (!productsCategoryId) return false;
+
+        // "Cookie settings" external link (after Products)
+        await this.ensureCookieSettingsCategory(
+            context,
+            testingCategoryId,
+            productsCategoryId,
+            errors
+        );
+
+        // Validate all expected sub-categories exist
+        await this.validateHierarchy(context, cmsCategoryId, productsCategoryId, errors);
+        return true;
+    }
+
+    /** "Testing" main category with its placeholder landing page (last among root children) */
+    private async createTestingCategory(
+        context: PostProcessorContext,
+        rootCategoryId: string,
+        errors: string[]
+    ): Promise<string | null> {
+        const testingLandingPageId = await this.createTestingLandingPage(context, errors);
+        if (!testingLandingPageId) return null;
+
+        const lastRootChildId = await this.getLastRootChildId(context, rootCategoryId);
+        return this.ensureCategory(
+            context,
+            "Testing",
+            rootCategoryId,
+            testingLandingPageId,
+            errors,
+            lastRootChildId ?? undefined
+        );
+    }
+
+    /** "CMS" sub-category (first child of Testing) with showcase page and element categories */
+    private async createCmsSection(
+        context: PostProcessorContext,
+        testingCategoryId: string,
+        errors: string[]
+    ): Promise<string | null> {
+        const cmsLandingPageId = await this.createCmsShowcaseLandingPage(context, errors);
+        if (!cmsLandingPageId) return null;
+
+        const cmsCategoryId = await this.ensureCategory(
+            context,
+            "CMS",
+            testingCategoryId,
+            cmsLandingPageId,
+            errors,
+            undefined
+        );
+        if (!cmsCategoryId) return null;
+
+        await this.createCmsElementCategories(context, cmsCategoryId, errors);
+        return cmsCategoryId;
+    }
+
+    /** "Products" navigation category (after CMS) with the product type links */
+    private async createProductsSection(
+        context: PostProcessorContext,
+        testingCategoryId: string,
+        cmsCategoryId: string,
+        errors: string[]
+    ): Promise<string | null> {
+        const productsCategoryId = await this.ensureNavigationCategory(
+            context,
+            "Products",
+            testingCategoryId,
+            errors,
+            cmsCategoryId
+        );
+        if (!productsCategoryId) return null;
+
+        await this.createProductCategories(context, productsCategoryId, errors);
+        return productsCategoryId;
+    }
+
+    /** Delete the Testing tree (children first), then its landing pages and CMS layouts */
+    private async deleteHierarchy(
+        context: PostProcessorContext,
+        result: PostProcessorCleanupResult
+    ): Promise<void> {
+        const rootCategoryId = await this.getRootCategoryId(context);
+        if (!rootCategoryId) {
+            result.errors.push("Could not find root category");
+            return;
+        }
+
+        const testingCategoryId = await findCategoryIdByName(context, "Testing", rootCategoryId);
+        if (!testingCategoryId) {
+            logger.info(`    ⊘ "Testing" category not found`, { cli: true });
+            return;
+        }
+
+        await this.deleteTestingChildren(context, testingCategoryId, result);
+        result.deleted += await this.deleteCategoryById(context, testingCategoryId, "Testing");
+
+        // Cleanup landing pages and CMS layouts (using store-scoped names)
+        await this.cleanupLandingPage(context, TESTING_PLACEHOLDER_PAGE.name, result.errors);
+        await this.cleanupLandingPage(context, WELCOME_PAGE.name, result.errors);
+    }
+
+    /** Delete Cookie settings, the CMS tree and the Products tree under Testing */
+    private async deleteTestingChildren(
+        context: PostProcessorContext,
+        testingCategoryId: string,
+        result: PostProcessorCleanupResult
+    ): Promise<void> {
+        const cmsCategoryId = await findCategoryIdByName(context, "CMS", testingCategoryId);
+        const productsCategoryId = await findCategoryIdByName(
+            context,
+            "Products",
+            testingCategoryId
+        );
+        const cookieSettingsCategoryId = await findCategoryIdByName(
+            context,
+            "Cookie settings",
+            testingCategoryId
+        );
+
+        if (cookieSettingsCategoryId) {
+            result.deleted += await this.deleteCategoryById(
+                context,
+                cookieSettingsCategoryId,
+                "Cookie settings"
+            );
+        }
+        await this.deleteCategoryTree(context, cmsCategoryId, "CMS", CMS_CATEGORIES, result);
+        await this.deleteCategoryTree(
+            context,
+            productsCategoryId,
+            "Products",
+            PRODUCT_CATEGORIES,
+            result
+        );
+    }
+
+    /** Delete the sub-categories (last first), then the category itself */
+    private async deleteCategoryTree(
+        context: PostProcessorContext,
+        categoryId: string | null,
+        name: string,
+        children: ReadonlyArray<{ name: string }>,
+        result: PostProcessorCleanupResult
+    ): Promise<void> {
+        if (!categoryId) return;
+
+        for (const child of [...children].reverse()) {
+            result.deleted += await this.deleteSubCategory(context, child.name, categoryId);
+        }
+        result.deleted += await this.deleteCategoryById(context, categoryId, name);
     }
 
     // =========================================================================
@@ -913,8 +959,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 }
             }
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            errors.push(`Landing page lookup failed for "${fixturePageName}": ${message}`);
+            errors.push(
+                `Landing page lookup failed for "${fixturePageName}": ${errorMessage(error)}`
+            );
         }
 
         try {
@@ -928,8 +975,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 }
             }
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            errors.push(`CMS page lookup failed for "${fixturePageName}": ${message}`);
+            errors.push(`CMS page lookup failed for "${fixturePageName}": ${errorMessage(error)}`);
         }
     }
 

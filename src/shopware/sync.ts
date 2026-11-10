@@ -5,14 +5,22 @@
  * These orchestrate the DataHydrator to sync data to Shopware.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import type {
+    BlueprintPropertyGroup,
+    BlueprintPropertyOption,
     HydratedBlueprint,
     ProductCustomFieldValues,
     ProductPackaging,
     ProductSyncResult,
     ProductType,
+    PropertyGroup,
+    PropertyOption,
     SalesChannelFull,
 } from "../types/index.js";
+import type { ExistingProperty } from "../utils/index.js";
 import type { DataHydrator } from "./index.js";
 import type { ShopwareCapabilities } from "./version.js";
 
@@ -146,165 +154,174 @@ export async function syncPropertyGroups(
     dataHydrator: DataHydrator,
     blueprint: HydratedBlueprint
 ): Promise<void> {
-    // Fetch existing property groups from Shopware
     const existingGroups = await dataHydrator.getExistingPropertyGroups();
     const existingByName = new Map(existingGroups.map((g) => [g.name.toLowerCase(), g]));
 
-    let created = 0;
-    let updated = 0;
-    let skipped = 0;
-
-    const propertyGroupsToSync: Array<{
-        id: string;
-        name: string;
-        description: string;
-        displayType: string;
-        filterable?: boolean;
-        options: Array<{ id: string; name: string; colorHexCode?: string }>;
-    }> = [];
+    const counts = { created: 0, updated: 0, skipped: 0 };
+    const propertyGroupsToSync: PropertyGroup[] = [];
 
     for (const blueprintGroup of blueprint.propertyGroups) {
         const existing = existingByName.get(blueprintGroup.name.toLowerCase());
-
-        // New group - create with blueprint IDs
         if (!existing) {
-            const isColorType = blueprintGroup.displayType === "color";
-            propertyGroupsToSync.push({
-                id: blueprintGroup.id,
-                name: blueprintGroup.name,
-                description: `Properties for ${blueprintGroup.name}`,
-                displayType: blueprintGroup.displayType,
-                filterable: blueprintGroup.filterable,
-                options: blueprintGroup.options.map((o) => ({
-                    id: o.id,
-                    name: o.name,
-                    // Only include colorHexCode for color-type property groups
-                    colorHexCode: isColorType ? o.colorHexCode : undefined,
-                })),
-            });
-            created++;
+            propertyGroupsToSync.push(newPropertyGroupPayload(blueprintGroup));
+            counts.created++;
             continue;
         }
 
-        // Group exists - use Shopware's ID and update blueprint IDs
-        blueprintGroup.id = existing.id;
-
-        // Update blueprint option IDs to match Shopware for existing options
-        const existingOptionById = new Map(
-            existing.options.map((o) => [o.name.toLowerCase(), o.id])
-        );
-        blueprintGroup.options.forEach((blueprintOption) => {
-            const existingId = existingOptionById.get(blueprintOption.name.toLowerCase());
-            if (existingId) {
-                blueprintOption.id = existingId;
-            }
-        });
-
-        // Find options that need to be added
-        const existingOptionNames = new Set(existing.options.map((o) => o.name.toLowerCase()));
-        const missingOptions = blueprintGroup.options.filter(
-            (o) => !existingOptionNames.has(o.name.toLowerCase())
-        );
-
-        // Check what the blueprint wants (not what Shopware currently has)
-        const blueprintWantsColor = blueprintGroup.displayType === "color";
-        const needsDisplayTypeUpdate = blueprintWantsColor && existing.displayType !== "color";
-        const needsFilterableUpdate =
-            blueprintGroup.filterable !== undefined &&
-            existing.filterable !== blueprintGroup.filterable;
-
-        // For color groups, check if existing options need hex code updates
-        let optionsNeedingHexUpdate: typeof blueprintGroup.options = [];
-        if (blueprintWantsColor) {
-            const existingOptionMap = new Map(
-                existing.options.map((o) => [o.name.toLowerCase(), o])
-            );
-            optionsNeedingHexUpdate = blueprintGroup.options.filter((o) => {
-                const existingOpt = existingOptionMap.get(o.name.toLowerCase());
-                // Option exists but has no hex code (or wrong hex), and we have one to provide
-                return existingOpt && o.colorHexCode && existingOpt.colorHexCode !== o.colorHexCode;
-            });
-        }
-
-        // No changes needed - skip
-        if (
-            missingOptions.length === 0 &&
-            optionsNeedingHexUpdate.length === 0 &&
-            !needsDisplayTypeUpdate &&
-            !needsFilterableUpdate
-        ) {
-            skipped++;
+        const update = existingPropertyGroupUpdate(blueprintGroup, existing);
+        if (!update) {
+            counts.skipped++;
             continue;
         }
-
-        // When updating displayType to color, we need to include ALL options with hex codes
-        const allOptionsToSync = needsDisplayTypeUpdate
-            ? blueprintGroup.options.map((o) => ({
-                  id:
-                      existing.options.find((e) => e.name.toLowerCase() === o.name.toLowerCase())
-                          ?.id ?? o.id,
-                  name: o.name,
-                  colorHexCode: o.colorHexCode,
-              }))
-            : [
-                  ...missingOptions.map((o) => ({
-                      id: o.id,
-                      name: o.name,
-                      colorHexCode: blueprintWantsColor ? o.colorHexCode : undefined,
-                  })),
-                  ...optionsNeedingHexUpdate.map((o) => ({
-                      id:
-                          existing.options.find(
-                              (e) => e.name.toLowerCase() === o.name.toLowerCase()
-                          )?.id ?? o.id,
-                      name: o.name,
-                      colorHexCode: o.colorHexCode,
-                  })),
-              ];
-
-        propertyGroupsToSync.push({
-            id: existing.id,
-            name: existing.name,
-            description: `Properties for ${existing.name}`,
-            displayType: blueprintWantsColor ? "color" : existing.displayType,
-            filterable: blueprintGroup.filterable,
-            options: allOptionsToSync,
-        });
-        updated++;
-
-        if (needsFilterableUpdate) {
-            const state = blueprintGroup.filterable ? "shown in" : "hidden from";
-            logger.info(`  ⊕ "${existing.name}" is now ${state} the listing filter`, { cli: true });
-        }
-
-        if (needsDisplayTypeUpdate) {
-            logger.info(`  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`, {
-                cli: true,
-            });
-        } else if (missingOptions.length > 0) {
-            logger.info(`  ⊕ Adding ${missingOptions.length} options to "${existing.name}"`, {
-                cli: true,
-            });
-        }
-        if (optionsNeedingHexUpdate.length > 0 && !needsDisplayTypeUpdate) {
-            logger.info(
-                `  ⊕ Updating ${optionsNeedingHexUpdate.length} color hex codes in "${existing.name}"`,
-                { cli: true }
-            );
-        }
+        propertyGroupsToSync.push(update);
+        counts.updated++;
     }
 
-    // Sync only the groups that need changes
     if (propertyGroupsToSync.length > 0) {
         await dataHydrator.hydrateEnvWithPropertyGroups(propertyGroupsToSync);
     }
 
-    logger.info(`  Property groups: ${created} created, ${updated} updated, ${skipped} unchanged`, {
-        cli: true,
-    });
+    logger.info(
+        `  Property groups: ${counts.created} created, ${counts.updated} updated, ${counts.skipped} unchanged`,
+        { cli: true }
+    );
 
     // Upload images for color options that can't use hex codes (Multicolor, Rainbow, etc.)
     await uploadColorImages(dataHydrator, blueprint);
+}
+
+/** What differs between a blueprint group and the matching Shopware group */
+interface PropertyGroupDiff {
+    wantsColor: boolean;
+    missingOptions: BlueprintPropertyOption[];
+    hexUpdates: BlueprintPropertyOption[];
+    needsDisplayTypeUpdate: boolean;
+    needsFilterableUpdate: boolean;
+}
+
+/** Payload for a group that does not exist in Shopware yet (blueprint IDs) */
+function newPropertyGroupPayload(group: BlueprintPropertyGroup): PropertyGroup {
+    const isColorType = group.displayType === "color";
+    return {
+        id: group.id,
+        name: group.name,
+        description: `Properties for ${group.name}`,
+        displayType: group.displayType,
+        filterable: group.filterable,
+        options: group.options.map((o) => optionPayload(o, isColorType)),
+    };
+}
+
+/**
+ * Adopt the Shopware IDs of an existing group into the blueprint and return the
+ * update payload, or null when Shopware already matches the blueprint.
+ */
+function existingPropertyGroupUpdate(
+    group: BlueprintPropertyGroup,
+    existing: ExistingProperty
+): PropertyGroup | null {
+    adoptExistingIds(group, existing);
+
+    const diff = diffPropertyGroup(group, existing);
+    const hasChanges =
+        diff.missingOptions.length > 0 ||
+        diff.hexUpdates.length > 0 ||
+        diff.needsDisplayTypeUpdate ||
+        diff.needsFilterableUpdate;
+    if (!hasChanges) return null;
+
+    logPropertyGroupUpdate(existing.name, group, diff);
+
+    return {
+        id: existing.id,
+        name: existing.name,
+        description: `Properties for ${existing.name}`,
+        displayType: diff.wantsColor ? "color" : existing.displayType,
+        filterable: group.filterable,
+        options: optionsToSync(group, diff),
+    };
+}
+
+/** Use Shopware's group ID and the IDs of options Shopware already has */
+function adoptExistingIds(group: BlueprintPropertyGroup, existing: ExistingProperty): void {
+    group.id = existing.id;
+    const existingIdByName = new Map(existing.options.map((o) => [o.name.toLowerCase(), o.id]));
+    for (const option of group.options) {
+        option.id = existingIdByName.get(option.name.toLowerCase()) ?? option.id;
+    }
+}
+
+function diffPropertyGroup(
+    group: BlueprintPropertyGroup,
+    existing: ExistingProperty
+): PropertyGroupDiff {
+    const existingByName = new Map(existing.options.map((o) => [o.name.toLowerCase(), o]));
+    const wantsColor = group.displayType === "color";
+
+    return {
+        wantsColor,
+        missingOptions: group.options.filter((o) => !existingByName.has(o.name.toLowerCase())),
+        hexUpdates: wantsColor
+            ? group.options.filter((o) => {
+                  const existingOption = existingByName.get(o.name.toLowerCase());
+                  return (
+                      existingOption &&
+                      o.colorHexCode &&
+                      existingOption.colorHexCode !== o.colorHexCode
+                  );
+              })
+            : [],
+        needsDisplayTypeUpdate: wantsColor && existing.displayType !== "color",
+        needsFilterableUpdate:
+            group.filterable !== undefined && existing.filterable !== group.filterable,
+    };
+}
+
+/**
+ * Switching to colour resends every option with its hex code. Otherwise only the
+ * missing options and the options with a changed hex code are sent.
+ * Option IDs are already the Shopware IDs where they exist (adoptExistingIds).
+ */
+function optionsToSync(group: BlueprintPropertyGroup, diff: PropertyGroupDiff): PropertyOption[] {
+    if (diff.needsDisplayTypeUpdate) {
+        return group.options.map((o) => optionPayload(o, true));
+    }
+    return [
+        ...diff.missingOptions.map((o) => optionPayload(o, diff.wantsColor)),
+        ...diff.hexUpdates.map((o) => optionPayload(o, true)),
+    ];
+}
+
+/** Hex codes are only sent for colour-type groups */
+function optionPayload(option: BlueprintPropertyOption, withHex: boolean): PropertyOption {
+    return {
+        id: option.id,
+        name: option.name,
+        colorHexCode: withHex ? option.colorHexCode : undefined,
+    };
+}
+
+function logPropertyGroupUpdate(
+    name: string,
+    group: BlueprintPropertyGroup,
+    diff: PropertyGroupDiff
+): void {
+    if (diff.needsFilterableUpdate) {
+        const state = group.filterable ? "shown in" : "hidden from";
+        logger.info(`  ⊕ "${name}" is now ${state} the listing filter`, { cli: true });
+    }
+    if (diff.needsDisplayTypeUpdate) {
+        logger.info(`  ⊕ Updating "${name}" displayType to "color" with hex codes`, { cli: true });
+        return;
+    }
+    if (diff.missingOptions.length > 0) {
+        logger.info(`  ⊕ Adding ${diff.missingOptions.length} options to "${name}"`, { cli: true });
+    }
+    if (diff.hexUpdates.length > 0) {
+        logger.info(`  ⊕ Updating ${diff.hexUpdates.length} color hex codes in "${name}"`, {
+            cli: true,
+        });
+    }
 }
 
 // =============================================================================
@@ -320,14 +337,10 @@ async function uploadColorImages(
     blueprint: HydratedBlueprint
 ): Promise<void> {
     const { colorHasImage, getColorImagePath } = await import("../fixtures/index.js");
-    const fs = await import("fs");
-    const path = await import("path");
 
-    // Find Color property group in blueprint
     const colorGroup = blueprint.propertyGroups.find((g) => g.name.toLowerCase() === "color");
     if (!colorGroup) return;
 
-    // Find color options that use images
     const imageOptions = colorGroup.options.filter((o) => colorHasImage(o.name));
     if (imageOptions.length === 0) return;
 
@@ -335,51 +348,71 @@ async function uploadColorImages(
         cli: true,
     });
 
-    // Get or create media folder for property images
     const folderId = await dataHydrator.getOrCreateMediaFolder("Property Images");
     if (!folderId) {
         logger.warn("Could not create media folder for property images");
         return;
     }
 
-    // Get fixtures directory path
     const fixturesDir = path.join(import.meta.dir, "..", "fixtures");
-
     for (const option of imageOptions) {
-        const imagePath = getColorImagePath(option.name);
-        if (!imagePath) continue;
-
-        const fullPath = path.join(fixturesDir, imagePath);
-        if (!fs.existsSync(fullPath)) {
-            logger.warn(`Color image not found: ${fullPath}`);
-            continue;
-        }
-
-        try {
-            // Read image file
-            const imageBuffer = fs.readFileSync(fullPath);
-            const extension = path.extname(imagePath).slice(1); // "png" or "svg"
-
-            // Create media entity
-            const mediaId = await dataHydrator.createMedia(
-                folderId,
-                `color-${option.name.toLowerCase().replace(/\s+/g, "-")}`
-            );
-            if (!mediaId) continue;
-
-            // Upload image
-            await dataHydrator.uploadMediaFile(mediaId, imageBuffer, extension);
-
-            // Update property option with mediaId
-            await dataHydrator.updatePropertyOptionMedia(option.id, mediaId);
-
-            logger.info(`Uploaded image for color option: ${option.name}`);
-        } catch (error) {
-            logger.warn(
-                `Failed to upload image for ${option.name}: ${error instanceof Error ? error.message : String(error)}`
-            );
-        }
+        await uploadColorImage(dataHydrator, folderId, option, {
+            fixturesDir,
+            imagePath: getColorImagePath(option.name),
+        });
     }
+}
+
+/** Fixture image of one colour option, relative to the fixtures directory */
+interface ColorImageSource {
+    fixturesDir: string;
+    imagePath: string | undefined;
+}
+
+/** Upload one colour image; a missing file or failed upload is logged and skipped */
+async function uploadColorImage(
+    dataHydrator: DataHydrator,
+    folderId: string,
+    option: BlueprintPropertyOption,
+    source: ColorImageSource
+): Promise<void> {
+    if (!source.imagePath) return;
+
+    const fullPath = path.join(source.fixturesDir, source.imagePath);
+    if (!fs.existsSync(fullPath)) {
+        logger.warn(`Color image not found: ${fullPath}`);
+        return;
+    }
+
+    try {
+        const extension = path.extname(source.imagePath).slice(1); // "png" or "svg"
+        await linkColorImage(dataHydrator, folderId, option, fs.readFileSync(fullPath), extension);
+    } catch (error) {
+        logger.warn(
+            `Failed to upload image for ${option.name}: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
+/** Create the media entity, upload the file and set it on the property option */
+async function linkColorImage(
+    dataHydrator: DataHydrator,
+    folderId: string,
+    option: BlueprintPropertyOption,
+    imageBuffer: Buffer,
+    extension: string
+): Promise<void> {
+    const mediaId = await dataHydrator.createMedia(folderId, colorMediaName(option.name));
+    if (!mediaId) return;
+
+    await dataHydrator.uploadMediaFile(mediaId, imageBuffer, extension);
+    await dataHydrator.updatePropertyOptionMedia(option.id, mediaId);
+    logger.info(`Uploaded image for color option: ${option.name}`);
+}
+
+/** Media file name for a colour option, e.g. "Multi Color" → "color-multi-color" */
+function colorMediaName(optionName: string): string {
+    return `color-${optionName.toLowerCase().replace(/\s+/g, "-")}`;
 }
 
 // =============================================================================
@@ -439,91 +472,13 @@ export async function syncProducts(
     const sendOpenGraph = shopware.supports("productOpenGraph");
     const sendCustomFields = await ensureCustomFieldSet(dataHydrator, blueprint, shopware);
 
-    type ProductToCreate = {
-        id: string;
-        name: string;
-        description: string;
-        price: number;
-        stock: number;
-        options?: Array<{ id: string; name: string }>;
-        categoryIds?: string[];
-        hasSalesPrice?: boolean;
-        salePercentage?: number;
-        hasTieredPricing?: boolean;
-        isTopseller: boolean;
-        isNew: boolean;
-        isShippingFree: boolean;
-        weight: number;
-        width: number;
-        height: number;
-        length: number;
-        ean: string;
-        manufacturerNumber: string;
-        minPurchase?: number;
-        maxPurchase?: number;
-        purchaseSteps?: number;
-        metaTitle?: string;
-        metaDescription?: string;
-        type?: ProductType;
-        packaging?: ProductPackaging;
-        customFields?: ProductCustomFieldValues;
-        ogTitle?: string;
-        ogDescription?: string;
+    const lookups: ProductLookups = {
+        categories: blueprint.categories,
+        categoryIdMap,
+        propertyOptionMap,
+        flags: { sendProductType, sendOpenGraph, sendCustomFields },
     };
-
-    const productsToCreate: ProductToCreate[] = blueprint.products.map((p) => {
-        // Map product properties to option IDs
-        const options = p.metadata.properties
-            .map((prop) =>
-                propertyOptionMap.get(`${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`)
-            )
-            .filter((opt): opt is { id: string; name: string } => opt !== undefined);
-
-        // Map blueprint category IDs to Shopware category IDs via paths
-        const resolvedCategoryIds = p.categoryIds
-            .map((catId) => findCategoryPathById(blueprint.categories, catId))
-            .filter((path): path is string => path !== undefined)
-            .map((path) => categoryIdMap.get(path))
-            .filter((id): id is string => id !== undefined);
-
-        return {
-            id: p.id,
-            name: p.name,
-            description: p.description,
-            price: p.price,
-            stock: p.stock,
-            categoryIds: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : p.categoryIds,
-            ...(options.length > 0 && { options }),
-            hasSalesPrice: p.metadata.hasSalesPrice,
-            salePercentage: p.metadata.salePercentage,
-            hasTieredPricing: p.metadata.hasTieredPricing,
-            isTopseller: p.metadata.isTopseller,
-            isNew: p.metadata.isNew,
-            isShippingFree: p.metadata.isShippingFree,
-            weight: p.metadata.weight,
-            width: p.metadata.width,
-            height: p.metadata.height,
-            length: p.metadata.length,
-            ean: p.metadata.ean,
-            manufacturerNumber: p.metadata.manufacturerNumber,
-            ...(p.metadata.minPurchase && {
-                minPurchase: p.metadata.minPurchase,
-                purchaseSteps: p.metadata.purchaseSteps,
-            }),
-            ...(p.metadata.maxPurchase && { maxPurchase: p.metadata.maxPurchase }),
-            ...(p.metaTitle && { metaTitle: p.metaTitle }),
-            ...(p.metaDescription && { metaDescription: p.metaDescription }),
-            ...(p.deliveryTimeIndex !== undefined && { deliveryTimeIndex: p.deliveryTimeIndex }),
-            ...(sendProductType && { type: p.type ?? "physical" }),
-            ...(p.metadata.packaging && { packaging: p.metadata.packaging }),
-            ...(sendCustomFields &&
-                p.metadata.customFields && { customFields: p.metadata.customFields }),
-            ...(sendOpenGraph && {
-                ogTitle: p.metaTitle ?? p.name,
-                ...(p.metaDescription && { ogDescription: p.metaDescription }),
-            }),
-        };
-    });
+    const productsToCreate = blueprint.products.map((p) => toProductToCreate(p, lookups));
 
     const synced = await dataHydrator.hydrateEnvWithProductsDirect(
         productsToCreate,
@@ -538,6 +493,146 @@ export async function syncProducts(
         });
     }
     return { synced, failed };
+}
+
+type HydratedProduct = HydratedBlueprint["products"][number];
+
+/** Product as passed to DataHydrator.hydrateEnvWithProductsDirect */
+interface ProductToCreate {
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+    stock: number;
+    options?: Array<{ id: string; name: string }>;
+    categoryIds?: string[];
+    hasSalesPrice?: boolean;
+    salePercentage?: number;
+    hasTieredPricing?: boolean;
+    isTopseller: boolean;
+    isNew: boolean;
+    isShippingFree: boolean;
+    weight: number;
+    width: number;
+    height: number;
+    length: number;
+    ean: string;
+    manufacturerNumber: string;
+    minPurchase?: number;
+    maxPurchase?: number;
+    purchaseSteps?: number;
+    metaTitle?: string;
+    metaDescription?: string;
+    deliveryTimeIndex?: number;
+    type?: ProductType;
+    packaging?: ProductPackaging;
+    customFields?: ProductCustomFieldValues;
+    ogTitle?: string;
+    ogDescription?: string;
+}
+
+/** Which version-gated product fields the connected shop accepts */
+interface ProductFieldFlags {
+    sendProductType: boolean;
+    sendOpenGraph: boolean;
+    sendCustomFields: boolean;
+}
+
+/** Everything needed to turn a blueprint product into an upload product */
+interface ProductLookups {
+    categories: HydratedBlueprint["categories"];
+    categoryIdMap: Map<string, string>;
+    propertyOptionMap: Map<string, { id: string; name: string }>;
+    flags: ProductFieldFlags;
+}
+
+function toProductToCreate(p: HydratedProduct, lookups: ProductLookups): ProductToCreate {
+    const options = resolveProductOptions(p, lookups.propertyOptionMap);
+    const resolvedCategoryIds = resolveCategoryIds(p, lookups);
+    const { metadata } = p;
+
+    return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        price: p.price,
+        stock: p.stock,
+        // Fall back to the blueprint IDs when no category path resolves
+        categoryIds: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : p.categoryIds,
+        ...(options.length > 0 && { options }),
+        hasSalesPrice: metadata.hasSalesPrice,
+        salePercentage: metadata.salePercentage,
+        hasTieredPricing: metadata.hasTieredPricing,
+        isTopseller: metadata.isTopseller,
+        isNew: metadata.isNew,
+        isShippingFree: metadata.isShippingFree,
+        weight: metadata.weight,
+        width: metadata.width,
+        height: metadata.height,
+        length: metadata.length,
+        ean: metadata.ean,
+        manufacturerNumber: metadata.manufacturerNumber,
+        ...purchaseAndSeoFields(p),
+        ...versionGatedFields(p, lookups.flags),
+    };
+}
+
+/** Product properties mapped to Shopware option IDs ("group::value", lowercase); unknown ones are dropped */
+function resolveProductOptions(
+    p: HydratedProduct,
+    propertyOptionMap: Map<string, { id: string; name: string }>
+): Array<{ id: string; name: string }> {
+    return p.metadata.properties
+        .map((prop) =>
+            propertyOptionMap.get(`${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`)
+        )
+        .filter((opt): opt is { id: string; name: string } => opt !== undefined);
+}
+
+/** Blueprint category IDs mapped to Shopware category IDs via their paths */
+function resolveCategoryIds(p: HydratedProduct, lookups: ProductLookups): string[] {
+    return p.categoryIds
+        .map((catId) => findCategoryPathById(lookups.categories, catId))
+        .filter((path): path is string => path !== undefined)
+        .map((path) => lookups.categoryIdMap.get(path))
+        .filter((id): id is string => id !== undefined);
+}
+
+/** Purchase limits, SEO texts, delivery time and packaging, only when set */
+function purchaseAndSeoFields(p: HydratedProduct): Partial<ProductToCreate> {
+    const { metadata } = p;
+    return {
+        ...(metadata.minPurchase && {
+            minPurchase: metadata.minPurchase,
+            purchaseSteps: metadata.purchaseSteps,
+        }),
+        ...(metadata.maxPurchase && { maxPurchase: metadata.maxPurchase }),
+        ...(p.metaTitle && { metaTitle: p.metaTitle }),
+        ...(p.metaDescription && { metaDescription: p.metaDescription }),
+        ...(p.deliveryTimeIndex !== undefined && { deliveryTimeIndex: p.deliveryTimeIndex }),
+        ...(metadata.packaging && { packaging: metadata.packaging }),
+    };
+}
+
+/** Product type, custom fields and Open Graph texts, only for shops that support them */
+function versionGatedFields(
+    p: HydratedProduct,
+    flags: ProductFieldFlags
+): Partial<ProductToCreate> {
+    return {
+        ...(flags.sendProductType && { type: p.type ?? "physical" }),
+        ...(flags.sendCustomFields &&
+            p.metadata.customFields && { customFields: p.metadata.customFields }),
+        ...(flags.sendOpenGraph && openGraphFields(p)),
+    };
+}
+
+/** Open Graph title (falls back to the name) and description */
+function openGraphFields(p: HydratedProduct): Partial<ProductToCreate> {
+    return {
+        ogTitle: p.metaTitle ?? p.name,
+        ...(p.metaDescription && { ogDescription: p.metaDescription }),
+    };
 }
 
 /**

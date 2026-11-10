@@ -40,29 +40,49 @@ type CliFlags = Record<string, string | boolean>;
 const COMMANDS_WITH_SUBCOMMAND = new Set(["blueprint", "image", "template"]);
 
 /**
+ * `--key=value`, `--key value` or `--key` (true). Returns how many arguments it used:
+ * 2 when the value was the next argument, else 1.
+ */
+function applyLongFlag(flags: CliFlags, arg: string, next: string | undefined): number {
+    const [key = "", ...rest] = arg.slice(2).split("=");
+    const takesNext = rest.length === 0 && next !== undefined && !next.startsWith("-");
+    const value = takesNext ? next : rest.length > 0 ? rest.join("=") : true;
+    if (key) flags[key] = value;
+    return takesNext ? 2 : 1;
+}
+
+/** `-k` is always a boolean flag; a lone `-` is ignored. */
+function applyShortFlag(flags: CliFlags, arg: string): void {
+    if (arg.length > 1) flags[arg.slice(1)] = true;
+}
+
+/** The first positional argument is the subcommand, for commands that have one. */
+function applyPositional(flags: CliFlags, command: string, arg: string): void {
+    if (arg && COMMANDS_WITH_SUBCOMMAND.has(command) && !flags.subcommand) {
+        flags.subcommand = arg;
+    }
+}
+
+/** Apply one argument to `flags` and return how many arguments it used. */
+function applyArg(flags: CliFlags, command: string, arg: string, next: string | undefined): number {
+    if (arg.startsWith("--")) return applyLongFlag(flags, arg, next);
+    if (arg.startsWith("-")) {
+        applyShortFlag(flags, arg);
+        return 1;
+    }
+    applyPositional(flags, command, arg);
+    return 1;
+}
+
+/**
  * Flags after the command: `--key=value`, `--key value`, `--key` (true) and `-k` (true).
  * The first positional argument becomes `subcommand` for commands that have one.
  */
 function parseFlags(command: string, args: string[]): CliFlags {
     const flags: CliFlags = {};
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i] ?? "";
-        if (arg.startsWith("--")) {
-            const [key = "", ...rest] = arg.slice(2).split("=");
-            const next = args[i + 1];
-            const takesNext = rest.length === 0 && next !== undefined && !next.startsWith("-");
-            const value = rest.length > 0 ? rest.join("=") : takesNext ? next : true;
-            if (takesNext) i++;
-            if (key) flags[key] = value;
-            continue;
-        }
-        if (arg.startsWith("-")) {
-            if (arg.length > 1) flags[arg.slice(1)] = true;
-            continue;
-        }
-        if (arg && COMMANDS_WITH_SUBCOMMAND.has(command) && !flags.subcommand) {
-            flags.subcommand = arg;
-        }
+    let i = 0;
+    while (i < args.length) {
+        i += applyArg(flags, command, args[i] ?? "", args[i + 1]);
     }
     return flags;
 }
@@ -177,73 +197,96 @@ Examples:
 // Main Router
 // =============================================================================
 
+type CommandRun = (args: CliArgs) => Promise<void>;
+
+/** What the router does for a parsed command line. */
+type CommandRoute =
+    | { kind: "run"; run: CommandRun }
+    | { kind: "help" }
+    | { kind: "missing-subcommand"; message: string };
+
+interface SubcommandGroup {
+    subcommands: Map<string, CommandRun>;
+    missingMessage: string;
+}
+
+const COMMANDS = new Map<string, CommandRun>([
+    ["generate", generate],
+    ["process", processCommand],
+]);
+
+const SUBCOMMAND_GROUPS = new Map<string, SubcommandGroup>([
+    [
+        "blueprint",
+        {
+            subcommands: new Map<string, CommandRun>([
+                ["create", blueprintCreate],
+                ["estimate", blueprintEstimate],
+                ["hydrate", blueprintHydrate],
+                ["fix", blueprintFix],
+                ["inspire", blueprintInspire],
+                ["translate", blueprintTranslate],
+            ]),
+            missingMessage:
+                "blueprint requires subcommand: create, estimate, hydrate, translate, fix, or inspire",
+        },
+    ],
+    [
+        "image",
+        {
+            subcommands: new Map<string, CommandRun>([["fix", imageFixCommand]]),
+            missingMessage: "image requires subcommand: fix",
+        },
+    ],
+    [
+        "template",
+        {
+            subcommands: new Map<string, CommandRun>([["metadata", templateMetadataCommand]]),
+            missingMessage: "template requires subcommand: metadata",
+        },
+    ],
+]);
+
+/** Find the CLI module for a command (and subcommand). Unknown commands show the help. */
+export function resolveCommand(args: Pick<CliArgs, "command" | "subcommand">): CommandRoute {
+    const run = COMMANDS.get(args.command);
+    if (run) return { kind: "run", run };
+
+    const group = SUBCOMMAND_GROUPS.get(args.command);
+    if (!group) return { kind: "help" };
+
+    const subcommand = group.subcommands.get(args.subcommand ?? "");
+    if (!subcommand) return { kind: "missing-subcommand", message: group.missingMessage };
+    return { kind: "run", run: subcommand };
+}
+
+async function runCommand(args: CliArgs): Promise<void> {
+    const route = resolveCommand(args);
+    if (route.kind === "run") {
+        await route.run(args);
+        return;
+    }
+    showHelp();
+    if (route.kind === "missing-subcommand") {
+        throw new CLIError(route.message, "MISSING_SUBCOMMAND");
+    }
+}
+
+function exitWithError(error: unknown): never {
+    if (error instanceof CLIError) {
+        console.error(`\nError [${error.code}]: ${error.message}`);
+        process.exit(error.exitCode);
+    }
+    console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+}
+
 async function main(): Promise<void> {
     const args = parseCliArgs();
-
     try {
-        switch (args.command) {
-            case "blueprint":
-                if (args.subcommand === "create") {
-                    await blueprintCreate(args);
-                } else if (args.subcommand === "estimate") {
-                    await blueprintEstimate(args);
-                } else if (args.subcommand === "hydrate") {
-                    await blueprintHydrate(args);
-                } else if (args.subcommand === "fix") {
-                    await blueprintFix(args);
-                } else if (args.subcommand === "inspire") {
-                    await blueprintInspire(args);
-                } else if (args.subcommand === "translate") {
-                    await blueprintTranslate(args);
-                } else {
-                    showHelp();
-                    throw new CLIError(
-                        "blueprint requires subcommand: create, estimate, hydrate, translate, fix, or inspire",
-                        "MISSING_SUBCOMMAND"
-                    );
-                }
-                break;
-
-            case "generate":
-                await generate(args);
-                break;
-
-            case "process":
-                await processCommand(args);
-                break;
-
-            case "image":
-                if (args.subcommand === "fix") {
-                    await imageFixCommand(args);
-                } else {
-                    showHelp();
-                    throw new CLIError("image requires subcommand: fix", "MISSING_SUBCOMMAND");
-                }
-                break;
-
-            case "template":
-                if (args.subcommand === "metadata") {
-                    await templateMetadataCommand(args);
-                } else {
-                    showHelp();
-                    throw new CLIError(
-                        "template requires subcommand: metadata",
-                        "MISSING_SUBCOMMAND"
-                    );
-                }
-                break;
-
-            default:
-                showHelp();
-                break;
-        }
+        await runCommand(args);
     } catch (error) {
-        if (error instanceof CLIError) {
-            console.error(`\nError [${error.code}]: ${error.message}`);
-            process.exit(error.exitCode);
-        }
-        console.error(`\nError: ${error instanceof Error ? error.message : String(error)}`);
-        process.exit(1);
+        exitWithError(error);
     }
 }
 

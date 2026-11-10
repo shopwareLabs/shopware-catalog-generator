@@ -59,25 +59,50 @@ export function deriveNameFromUrl(url: string): string | null {
     }
 }
 
+type GenerateBody = z.infer<typeof generateBodySchema>;
+
+/** "Error: Invalid request - path: message; ..." (an empty path is the body itself) */
+function formatBodyIssues(error: z.ZodError): string {
+    const issues = error.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`);
+    return `Error: Invalid request - ${issues.join("; ")}`;
+}
+
+/** name, then the old salesChannel alias, then the inspiration URL host, then demo-store */
+function resolveBodyName(data: GenerateBody): string {
+    const inspirationName = data.inspirationUrl ? deriveNameFromUrl(data.inspirationUrl) : null;
+    return data.name || data.salesChannel || inspirationName || DEFAULT_NAME;
+}
+
+/** Server-only options: Shopware admin user, cache, inspiration crawl, processors */
+function buildServerOptions(data: GenerateBody): GenerateOptions {
+    return {
+        connection: {
+            url: data.envPath,
+            credentials: {
+                kind: "user",
+                username: data.shopwareUser,
+                password: data.shopwarePassword,
+            },
+        },
+        clearCache: data.cache?.clearFirst === true,
+        inspirationUrl: data.inspirationUrl,
+        skipProcessors: data.skipProcessors === true,
+    };
+}
+
 /** Validate a POST /generate body. Returns an "Error: ..." line for invalid input. */
 export function parseGenerateBody(
     body: unknown,
     env: Record<string, string | undefined> = process.env
 ): ServerGenerateRequest | { error: string } {
     const parsed = generateBodySchema.safeParse(body);
-    if (!parsed.success) {
-        const issues = parsed.error.issues.map(
-            (i) => `${i.path.join(".") || "body"}: ${i.message}`
-        );
-        return { error: `Error: Invalid request - ${issues.join("; ")}` };
-    }
-    const data = parsed.data;
-    const inspirationName = data.inspirationUrl ? deriveNameFromUrl(data.inspirationUrl) : null;
+    if (!parsed.success) return { error: formatBodyIssues(parsed.error) };
 
+    const data = parsed.data;
     const built = buildGenerateRequest(
         generateInputFromParams({
             ...data,
-            name: data.name || data.salesChannel || inspirationName || DEFAULT_NAME,
+            name: resolveBodyName(data),
             products: data.products ?? data.productCount,
             noTemplate: data.noTemplate ?? data.skipTemplate,
         }),
@@ -85,22 +110,7 @@ export function parseGenerateBody(
     );
     if ("error" in built) return built;
 
-    return {
-        request: built.request,
-        serverOptions: {
-            connection: {
-                url: data.envPath,
-                credentials: {
-                    kind: "user",
-                    username: data.shopwareUser,
-                    password: data.shopwarePassword,
-                },
-            },
-            clearCache: data.cache?.clearFirst === true,
-            inspirationUrl: data.inspirationUrl,
-            skipProcessors: data.skipProcessors === true,
-        },
-    };
+    return { request: built.request, serverOptions: buildServerOptions(data) };
 }
 
 /** Background task: the result is the run summary, a run without one fails the process */

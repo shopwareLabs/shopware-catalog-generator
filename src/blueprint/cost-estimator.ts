@@ -305,33 +305,37 @@ export function formatTranslationEstimate(estimate: TranslationCostEstimate): st
 // Text
 // =============================================================================
 
+/** One text step of the hydration: the scopes it runs in and how many calls it makes */
+interface TextStep {
+    scopes: HydrationScope[];
+    build: (input: CostEstimateInput) => TextCostItem | null;
+}
+
+const TEXT_STEPS: TextStep[] = [
+    { scopes: ["full", "categories"], build: (input) => categoryItem(input.blueprint.categories) },
+    {
+        scopes: ["full"],
+        build: (input) =>
+            input.hasInspirationColors ? null : fixedItem("Brand colors", 1, TOKENS.brandColors),
+    },
+    { scopes: ["full"], build: (input) => productItem(input.blueprint.products) },
+    { scopes: ["properties"], build: (input) => propertyBatchItem(input.blueprint.products) },
+    {
+        scopes: ["full", "properties"],
+        build: (input) => propertyOptionsItem(input.blueprint.products.length),
+    },
+    { scopes: ["full", "cms"], build: (input) => cmsItem(input.cms) },
+    {
+        scopes: ["variants"],
+        build: (input) =>
+            input.variants ? variantColorItem(input.blueprint.products, input.variants) : null,
+    },
+];
+
 function buildTextItems(input: CostEstimateInput): TextCostItem[] {
-    const { scope } = input;
-    const items: TextCostItem[] = [];
-
-    if (scope === "full" || scope === "categories") {
-        items.push(categoryItem(input.blueprint.categories));
-    }
-    if (scope === "full" && !input.hasInspirationColors) {
-        items.push(fixedItem("Brand colors", 1, TOKENS.brandColors));
-    }
-    if (scope === "full") {
-        items.push(productItem(input.blueprint.products));
-    }
-    if (scope === "properties") {
-        items.push(propertyBatchItem(input.blueprint.products));
-    }
-    if (scope === "full" || scope === "properties") {
-        items.push(propertyOptionsItem(input.blueprint.products.length));
-    }
-    if (scope === "full" || scope === "cms") {
-        items.push(cmsItem(input.cms));
-    }
-    if (scope === "variants" && input.variants) {
-        items.push(variantColorItem(input.blueprint.products, input.variants));
-    }
-
-    return items.filter((i) => i.calls > 0);
+    return TEXT_STEPS.filter((step) => step.scopes.includes(input.scope))
+        .map((step) => step.build(input))
+        .filter((item): item is TextCostItem => item !== null && item.calls > 0);
 }
 
 function categoryItem(categories: BlueprintCategory[]): TextCostItem {
@@ -473,15 +477,23 @@ function lookupImageUnitPrice(
 ): number | null {
     if (selection.imageProvider === "none") return 0;
     if (selection.imageProvider === "pollinations") return selection.imageFreeTier ? 0 : null;
+    return lookupOpenAiImagePrice(selection, kind);
+}
 
+function lookupOpenAiImagePrice(
+    selection: ModelSelection,
+    kind: "generate" | "edit"
+): number | null {
     const price = OPENAI_IMAGE_PRICES[stripSnapshotDate(selection.imageModel ?? "")];
     if (!price) return null;
-
     const table = kind === "edit" ? (price.edit ?? price) : price;
-    const quality = selection.imageQuality ?? "low";
-    if (quality === "medium" || quality === "high" || quality === "low") return table[quality];
-    // "auto" lets OpenAI pick; forecast as medium
-    return table.medium;
+    return table[forecastImageQuality(selection.imageQuality)];
+}
+
+/** Quality tier to price, low by default. "auto" (or anything else) lets OpenAI pick: forecast as medium */
+function forecastImageQuality(quality = "low"): "low" | "medium" | "high" {
+    if (quality === "low" || quality === "medium" || quality === "high") return quality;
+    return "medium";
 }
 
 function priceTokens(price: TextModelPrice, inputTokens: number, outputTokens: number): number {
@@ -500,32 +512,51 @@ function stripSnapshotDate(model: string): string {
 // Notes & formatting
 // =============================================================================
 
-function buildNotes(input: CostEstimateInput): string[] {
-    const { selection } = input;
-    const notes: string[] = [];
+/** A forecast note and when it applies */
+interface CostNote {
+    applies: (input: CostEstimateInput) => boolean;
+    text: (input: CostEstimateInput) => string;
+}
 
-    if (selection.textProvider === "pollinations") {
-        notes.push("Pollinations text is billed in pollen; check enter.pollinations.ai.");
-    }
-    if (selection.textProvider === "openai" && !lookupTextPrice(selection)) {
-        notes.push(`No price data for text model "${selection.textModel}".`);
-    }
-    if (selection.imageProvider === "pollinations" && !selection.imageFreeTier) {
-        notes.push("Pollinations images with a key are billed in pollen.");
-    }
-    if (selection.imageProvider === "openai" && lookupImageUnitPrice(selection) === null) {
-        notes.push(`No price data for image model "${selection.imageModel}".`);
-    }
-    if (input.scope === "full" && input.pendingImages.product > 0) {
-        notes.push("Product and category images are counted in full; renamed products regenerate.");
-    }
-    if (input.scope === "full" || input.scope === "properties") {
-        notes.push("Property options calls only happen for properties missing from the cache.");
-    }
-    notes.push(...variantNotes(input));
-    notes.push(...variantImageNotes(input));
-    notes.push(`List prices as of ${PRICING_AS_OF}. Actual cost may differ.`);
-    return notes;
+const PROVIDER_AND_SCOPE_NOTES: CostNote[] = [
+    {
+        applies: ({ selection }) => selection.textProvider === "pollinations",
+        text: () => "Pollinations text is billed in pollen; check enter.pollinations.ai.",
+    },
+    {
+        applies: ({ selection }) =>
+            selection.textProvider === "openai" && !lookupTextPrice(selection),
+        text: ({ selection }) => `No price data for text model "${selection.textModel}".`,
+    },
+    {
+        applies: ({ selection }) =>
+            selection.imageProvider === "pollinations" && !selection.imageFreeTier,
+        text: () => "Pollinations images with a key are billed in pollen.",
+    },
+    {
+        applies: ({ selection }) =>
+            selection.imageProvider === "openai" && lookupImageUnitPrice(selection) === null,
+        text: ({ selection }) => `No price data for image model "${selection.imageModel}".`,
+    },
+    {
+        applies: ({ scope, pendingImages }) => scope === "full" && pendingImages.product > 0,
+        text: () => "Product and category images are counted in full; renamed products regenerate.",
+    },
+    {
+        applies: ({ scope }) => scope === "full" || scope === "properties",
+        text: () => "Property options calls only happen for properties missing from the cache.",
+    },
+];
+
+function buildNotes(input: CostEstimateInput): string[] {
+    return [
+        ...PROVIDER_AND_SCOPE_NOTES.filter((note) => note.applies(input)).map((note) =>
+            note.text(input)
+        ),
+        ...variantNotes(input),
+        ...variantImageNotes(input),
+        `List prices as of ${PRICING_AS_OF}. Actual cost may differ.`,
+    ];
 }
 
 function variantNotes(input: CostEstimateInput): string[] {

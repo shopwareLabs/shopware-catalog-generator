@@ -43,51 +43,70 @@ interface ColorPair {
     secondary?: string;
 }
 
+/** Bucket key ("r,g,b", each a multiple of 32) as a hex color. */
+function bucketToHex(key: string): string {
+    return `#${key
+        .split(",")
+        .map((channel) => Number(channel).toString(16).padStart(2, "0"))
+        .join("")}`;
+}
+
+function bucketChannels(key: string): number[] {
+    return key.split(",").map(Number);
+}
+
+/** Manhattan distance between two bucket keys. */
+function bucketDistance(a: string, b: string): number {
+    const ca = bucketChannels(a);
+    const cb = bucketChannels(b);
+    return ca.reduce((sum, value, i) => sum + Math.abs(value - (cb[i] ?? 0)), 0);
+}
+
+function isCountedPixel(r: number, g: number, b: number, includeNearBlack: boolean): boolean {
+    if (r > 230 && g > 230 && b > 230) return false; // near-white
+    if (includeNearBlack) return true;
+    if (r < 25 && g < 25 && b < 25) return false; // near-black
+    return Math.max(r, g, b) - Math.min(r, g, b) >= 40; // low saturation
+}
+
+function countColorBuckets(pixels: Buffer, includeNearBlack: boolean): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < pixels.length; i += 3) {
+        const r = pixels[i]!;
+        const g = pixels[i + 1]!;
+        const b = pixels[i + 2]!;
+        if (!isCountedPixel(r, g, b, includeNearBlack)) continue;
+        const key = `${Math.floor(r / 32) * 32},${Math.floor(g / 32) * 32},${Math.floor(b / 32) * 32}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+}
+
+/** Most frequent bucket is primary; secondary is the next frequent one that differs enough. */
+function pickColorPair(counts: Map<string, number>): ColorPair | null {
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const primaryKey = sorted[0]?.[0];
+    if (!primaryKey) return null;
+    const secondaryKey = sorted
+        .slice(1, 15)
+        .map(([key]) => key)
+        .find((key) => bucketDistance(primaryKey, key) > 80);
+    return {
+        primary: bucketToHex(primaryKey),
+        secondary: secondaryKey ? bucketToHex(secondaryKey) : undefined,
+    };
+}
+
 /**
  * Extract dominant colors from raw RGB pixel data.
  * First pass: colored (saturated) pixels only.
  * Second pass (fallback): includes near-black pixels to support monochrome logos like Foot Locker.
  */
 function extractDominantColors(pixels: Buffer): ColorPair | null {
-    const toHex = (key: string) => {
-        const [r, g, b] = key.split(",").map(Number);
-        return `#${r!.toString(16).padStart(2, "0")}${g!.toString(16).padStart(2, "0")}${b!.toString(16).padStart(2, "0")}`;
-    };
-
     for (const includeNearBlack of [false, true]) {
-        const counts = new Map<string, number>();
-
-        for (let i = 0; i < pixels.length; i += 3) {
-            const r = pixels[i]!;
-            const g = pixels[i + 1]!;
-            const b = pixels[i + 2]!;
-
-            if (r > 230 && g > 230 && b > 230) continue; // near-white
-            if (!includeNearBlack && r < 25 && g < 25 && b < 25) continue; // near-black
-            if (!includeNearBlack && Math.max(r, g, b) - Math.min(r, g, b) < 40) continue; // low saturation
-
-            const key = `${Math.floor(r / 32) * 32},${Math.floor(g / 32) * 32},${Math.floor(b / 32) * 32}`;
-            counts.set(key, (counts.get(key) ?? 0) + 1);
-        }
-
-        if (counts.size === 0) continue;
-
-        const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-        const primary = toHex(sorted[0]![0]);
-        const [pr, pg, pb] = sorted[0]![0].split(",").map(Number);
-
-        let secondary: string | undefined;
-        for (const [key] of sorted.slice(1, 15)) {
-            const [sr, sg, sb] = key.split(",").map(Number);
-            if (Math.abs(pr! - sr!) + Math.abs(pg! - sg!) + Math.abs(pb! - sb!) > 80) {
-                secondary = toHex(key);
-                break;
-            }
-        }
-
-        return { primary, secondary };
+        const colors = pickColorPair(countColorBuckets(pixels, includeNearBlack));
+        if (colors) return colors;
     }
-
     return null;
 }
 

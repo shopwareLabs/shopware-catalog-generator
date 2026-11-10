@@ -509,6 +509,116 @@ describe("hydrateProductImages", () => {
         expect(result.total).toBe(1);
     });
 
+    test("skips cached banners and categories without an image description", async () => {
+        const imageProvider = new MockImageProvider();
+        const cache = createTestCache();
+        const category = (
+            id: string,
+            overrides: Partial<HydratedBlueprint["categories"][number]> = {}
+        ): HydratedBlueprint["categories"][number] => ({
+            id,
+            name: `Category ${id}`,
+            description: "",
+            level: 1,
+            hasImage: true,
+            imageDescription: `Banner of ${id}`,
+            children: [],
+            ...overrides,
+        });
+        const categories = [
+            category("cached", {
+                children: [
+                    category("nested", { level: 2 }),
+                    category("no-text", { level: 2, imageDescription: undefined }),
+                ],
+            }),
+        ];
+        cache.images.saveImageWithView(
+            "test-store",
+            "cached",
+            "banner",
+            "dGVzdA==",
+            "Banner of cached",
+            "mock",
+            "category_media"
+        );
+
+        const result = await hydrateProductImages(
+            imageProvider,
+            cache,
+            "test-store",
+            createMinimalBlueprint([], categories)
+        );
+
+        expect(result.skipped).toBe(1);
+        expect(result.generated).toBe(1);
+        expect(imageProvider.getPrompts()).toEqual([
+            `Banner of nested. ${FICTIONAL_BRANDING_INSTRUCTION}`,
+        ]);
+    });
+
+    test("uses the view prompt and the product name without a base prompt", async () => {
+        const imageProvider = new MockImageProvider();
+        const cache = createTestCache();
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                imageDescriptions: [
+                    { view: "front", prompt: "Guitar front" },
+                    { view: "side", prompt: "Guitar side" },
+                ],
+            },
+        ]);
+        // Cached with the product name as prompt: fresh, not stale
+        cache.images.saveImageWithView(
+            "test-store",
+            "p1",
+            "front",
+            "dGVzdA==",
+            "Guitar",
+            "mock",
+            "product_media"
+        );
+
+        const result = await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
+
+        expect(result.skipped).toBe(1);
+        expect(result.stale).toBe(0);
+        expect(imageProvider.getPrompts()).toEqual([
+            `Guitar side. ${FICTIONAL_BRANDING_INSTRUCTION}`,
+        ]);
+    });
+
+    test("deletes a stale image before generating it again", async () => {
+        const imageProvider = new FailingImageProvider();
+        const cache = createTestCache();
+        const blueprint = createMinimalBlueprint([
+            {
+                id: "p1",
+                name: "Guitar",
+                baseImagePrompt: "A new guitar",
+                imageDescriptions: [{ view: "front", prompt: "Guitar front" }],
+            },
+        ]);
+        cache.images.saveImageWithView(
+            "test-store",
+            "p1",
+            "front",
+            "dGVzdA==",
+            "An old guitar",
+            "mock",
+            "product_media"
+        );
+
+        const result = await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
+
+        expect(result.stale).toBe(1);
+        expect(cache.images.hasImageWithView("test-store", "p1", "front", "product_media")).toBe(
+            false
+        );
+    });
+
     test("handles NoOpImageProvider gracefully", async () => {
         const imageProvider = new NoOpImageProvider();
         const cache = createTestCache();

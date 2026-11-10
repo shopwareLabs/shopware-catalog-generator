@@ -74,6 +74,22 @@ describe("parseCliArgs", () => {
             expect(parse("process", "--name=shop", "--dry-run").dryRun).toBe(true);
         });
 
+        test("-i and --interactive enable the wizard", () => {
+            expect(parse("generate", "-i").interactive).toBe(true);
+            expect(parse("generate", "--interactive").interactive).toBe(true);
+            expect(parse("generate", "--name=shop").interactive).toBe(false);
+        });
+
+        test("--force and --no-template are true when given", () => {
+            const args = parse("generate", "--name=shop", "--force", "--no-template");
+            expect(args.force).toBe(true);
+            expect(args.noTemplate).toBe(true);
+        });
+
+        test("-h anywhere returns help", () => {
+            expect(parse("generate", "--name=shop", "-h").command).toBe("help");
+        });
+
         test("--rehydrate does not consume next arg as value", () => {
             const args = parse(
                 "blueprint",
@@ -135,6 +151,31 @@ describe("parseCliArgs", () => {
 
         test("an empty --description= stays an empty string", () => {
             expect(parse("generate", "--name=shop", "--description=").description).toBe("");
+        });
+
+        test("a space value starting with a dash is not taken as the value", () => {
+            const args = parse("generate", "--name", "-x");
+            expect(args.name).toBeUndefined();
+        });
+
+        test("a lone dash and an empty long flag are ignored", () => {
+            const args = parse("blueprint", "-", "--", "--name=shop", "create");
+            expect(args.subcommand).toBe("create");
+            expect(args.name).toBe("shop");
+        });
+
+        test("a bare -- still consumes a following value", () => {
+            expect(parse("blueprint", "--", "create").subcommand).toBeUndefined();
+        });
+
+        test("a flag with an empty key does not consume the next argument", () => {
+            expect(parse("blueprint", "--=x", "create").subcommand).toBe("create");
+        });
+
+        test("a long flag with a space value does not become the subcommand", () => {
+            const args = parse("blueprint", "--name", "shop", "hydrate");
+            expect(args.name).toBe("shop");
+            expect(args.subcommand).toBe("hydrate");
         });
 
         test("only the first positional becomes the subcommand", () => {

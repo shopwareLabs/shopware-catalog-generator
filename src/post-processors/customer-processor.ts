@@ -19,6 +19,71 @@ import type {
 
 import { B2B_CUSTOMER_GROUP, DEMO_CUSTOMERS, DEMO_PASSWORD } from "../fixtures/demo-customers.js";
 import { generateUUID, logger } from "../utils/index.js";
+import { errorMessage } from "./processor-utils.js";
+
+/** Reference IDs every demo customer needs */
+interface CustomerReferences {
+    salutations: Map<string, string>;
+    defaultGroupId: string;
+    countryId: string;
+    paymentMethodId: string;
+}
+
+/** IDs of one new demo customer's relations */
+export interface CustomerPayloadRefs {
+    salesChannelId: string;
+    groupId: string;
+    paymentMethodId: string;
+    languageId: string;
+    salutationId: string;
+    countryId: string;
+}
+
+interface CustomerTally {
+    processed: number;
+    skipped: number;
+    errors: string[];
+}
+
+/** Sync payload for a new demo customer with its default billing/shipping address */
+export function buildCustomerPayload(
+    customer: DemoCustomer,
+    refs: CustomerPayloadRefs
+): CustomerSyncPayload {
+    const customerId = generateUUID();
+    const billingAddressId = generateUUID();
+
+    return {
+        id: customerId,
+        customerNumber: `DEMO-${customer.email.split("@")[0]?.toUpperCase() ?? "UNKNOWN"}`,
+        salesChannelId: refs.salesChannelId,
+        groupId: refs.groupId,
+        defaultPaymentMethodId: refs.paymentMethodId,
+        languageId: refs.languageId,
+        email: customer.email,
+        ...buildBusinessAccountFields(customer),
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        salutationId: refs.salutationId,
+        password: DEMO_PASSWORD,
+        defaultBillingAddressId: billingAddressId,
+        defaultShippingAddressId: billingAddressId,
+        addresses: [
+            {
+                id: billingAddressId,
+                customerId,
+                salutationId: refs.salutationId,
+                firstName: customer.firstName,
+                lastName: customer.lastName,
+                ...(customer.company && { company: customer.company }),
+                street: customer.address.street,
+                zipcode: customer.address.zipcode,
+                city: customer.address.city,
+                countryId: refs.countryId,
+            },
+        ],
+    };
+}
 
 class CustomerProcessorImpl implements PostProcessor {
     readonly name = "customers";
@@ -26,12 +91,9 @@ class CustomerProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { options, salesChannelId } = context;
         const errors: string[] = [];
-        let processed = 0;
-        let skipped = 0;
 
-        if (options.dryRun) {
+        if (context.options.dryRun) {
             logger.info(
                 `    [DRY RUN] Would create ${DEMO_CUSTOMERS.length} demo customers and B2B group`,
                 { cli: true }
@@ -50,109 +112,122 @@ class CustomerProcessorImpl implements PostProcessor {
             return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
         }
 
+        const tally: CustomerTally = { processed: 0, skipped: 0, errors };
         try {
-            // Resolve required reference IDs in parallel
-            const [salutations, defaultGroupId, countryId, paymentMethodId] = await Promise.all([
-                this.getSalutationIds(context),
-                this.getDefaultCustomerGroupId(context),
-                this.getCountryId(context),
-                this.getDefaultPaymentMethodId(context),
-            ]);
-
-            if (!defaultGroupId) {
-                errors.push("No default customer group found");
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            if (!countryId) {
-                errors.push("No country found for SalesChannel");
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            if (!paymentMethodId) {
-                errors.push("No payment method found for SalesChannel");
-                return { name: this.name, processed: 0, skipped: 0, errors, durationMs: 0 };
-            }
-
-            // Create B2B customer group (idempotent)
-            const b2bGroupId = await this.getOrCreateB2bGroup(context);
-
-            // Find existing customers to support idempotency
-            const existingCustomers = await this.findExistingCustomers(context);
-
-            // Build customer payloads
-            const customerPayloads: CustomerSyncPayload[] = [];
-
-            for (const customer of DEMO_CUSTOMERS) {
-                if (existingCustomers.has(customer.email)) {
-                    logger.info(`    ⊘ Customer "${customer.email}" already exists`, { cli: true });
-                    skipped++;
-                    continue;
-                }
-
-                const groupId = customer.group === "b2b" ? b2bGroupId : defaultGroupId;
-                const salutationId = salutations.get(customer.salutationKey);
-
-                if (!salutationId) {
-                    errors.push(`No salutation found for key "${customer.salutationKey}"`);
-                    continue;
-                }
-
-                const customerId = generateUUID();
-                const billingAddressId = generateUUID();
-
-                customerPayloads.push({
-                    id: customerId,
-                    customerNumber: `DEMO-${customer.email.split("@")[0]?.toUpperCase() ?? "UNKNOWN"}`,
-                    salesChannelId,
-                    groupId,
-                    defaultPaymentMethodId: paymentMethodId,
-                    languageId: await this.getLanguageId(context),
-                    email: customer.email,
-                    ...buildBusinessAccountFields(customer),
-                    firstName: customer.firstName,
-                    lastName: customer.lastName,
-                    salutationId,
-                    password: DEMO_PASSWORD,
-                    defaultBillingAddressId: billingAddressId,
-                    defaultShippingAddressId: billingAddressId,
-                    addresses: [
-                        {
-                            id: billingAddressId,
-                            customerId,
-                            salutationId,
-                            firstName: customer.firstName,
-                            lastName: customer.lastName,
-                            ...(customer.company && { company: customer.company }),
-                            street: customer.address.street,
-                            zipcode: customer.address.zipcode,
-                            city: customer.address.city,
-                            countryId,
-                        },
-                    ],
-                });
-            }
-
-            await this.upgradeToBusinessAccounts(context, existingCustomers);
-
-            if (customerPayloads.length > 0) {
-                await context.api.syncEntities({
-                    "create-customers": {
-                        entity: "customer",
-                        action: "upsert",
-                        payload: customerPayloads,
-                    },
-                });
-                processed = customerPayloads.length;
-                logger.info(`    ✓ Created ${processed} demo customer accounts`, { cli: true });
-            }
+            await this.createDemoCustomers(context, tally);
         } catch (error) {
-            errors.push(
-                `Customer creation failed: ${error instanceof Error ? error.message : String(error)}`
+            errors.push(`Customer creation failed: ${errorMessage(error)}`);
+        }
+
+        return {
+            name: this.name,
+            processed: tally.processed,
+            skipped: tally.skipped,
+            errors,
+            durationMs: 0,
+        };
+    }
+
+    /** B2B group, new demo customers and business account upgrades */
+    private async createDemoCustomers(
+        context: PostProcessorContext,
+        tally: CustomerTally
+    ): Promise<void> {
+        const refs = await this.resolveReferences(context);
+        if (typeof refs === "string") {
+            tally.errors.push(refs);
+            return;
+        }
+
+        // Create B2B customer group (idempotent)
+        const b2bGroupId = await this.getOrCreateB2bGroup(context);
+
+        // Find existing customers to support idempotency
+        const existingCustomers = await this.findExistingCustomers(context);
+
+        const payloads = await this.buildNewCustomerPayloads(
+            context,
+            refs,
+            b2bGroupId,
+            existingCustomers,
+            tally
+        );
+
+        await this.upgradeToBusinessAccounts(context, existingCustomers);
+        await this.syncNewCustomers(context, payloads, tally);
+    }
+
+    /** Reference IDs every demo customer needs, or the error why they are missing */
+    private async resolveReferences(
+        context: PostProcessorContext
+    ): Promise<CustomerReferences | string> {
+        const [salutations, defaultGroupId, countryId, paymentMethodId] = await Promise.all([
+            this.getSalutationIds(context),
+            this.getDefaultCustomerGroupId(context),
+            this.getCountryId(context),
+            this.getDefaultPaymentMethodId(context),
+        ]);
+
+        if (!defaultGroupId) return "No default customer group found";
+        if (!countryId) return "No country found for SalesChannel";
+        if (!paymentMethodId) return "No payment method found for SalesChannel";
+        return { salutations, defaultGroupId, countryId, paymentMethodId };
+    }
+
+    /** Payloads for demo customers that do not exist yet */
+    private async buildNewCustomerPayloads(
+        context: PostProcessorContext,
+        refs: CustomerReferences,
+        b2bGroupId: string,
+        existingCustomers: Map<string, ExistingCustomer>,
+        tally: CustomerTally
+    ): Promise<CustomerSyncPayload[]> {
+        const payloads: CustomerSyncPayload[] = [];
+
+        for (const customer of DEMO_CUSTOMERS) {
+            if (existingCustomers.has(customer.email)) {
+                logger.info(`    ⊘ Customer "${customer.email}" already exists`, { cli: true });
+                tally.skipped++;
+                continue;
+            }
+
+            const salutationId = refs.salutations.get(customer.salutationKey);
+            if (!salutationId) {
+                tally.errors.push(`No salutation found for key "${customer.salutationKey}"`);
+                continue;
+            }
+
+            payloads.push(
+                buildCustomerPayload(customer, {
+                    salesChannelId: context.salesChannelId,
+                    groupId: customer.group === "b2b" ? b2bGroupId : refs.defaultGroupId,
+                    paymentMethodId: refs.paymentMethodId,
+                    languageId: await this.getLanguageId(context),
+                    salutationId,
+                    countryId: refs.countryId,
+                })
             );
         }
 
-        return { name: this.name, processed, skipped, errors, durationMs: 0 };
+        return payloads;
+    }
+
+    private async syncNewCustomers(
+        context: PostProcessorContext,
+        payloads: CustomerSyncPayload[],
+        tally: CustomerTally
+    ): Promise<void> {
+        if (payloads.length === 0 || !context.api) return;
+
+        await context.api.syncEntities({
+            "create-customers": {
+                entity: "customer",
+                action: "upsert",
+                payload: payloads,
+            },
+        });
+        tally.processed = payloads.length;
+        logger.info(`    ✓ Created ${tally.processed} demo customer accounts`, { cli: true });
     }
 
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {
@@ -225,9 +300,7 @@ class CustomerProcessorImpl implements PostProcessor {
                 }
             }
         } catch (error) {
-            errors.push(
-                `Customer cleanup failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Customer cleanup failed: ${errorMessage(error)}`);
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };

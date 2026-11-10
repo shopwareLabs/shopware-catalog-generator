@@ -11,6 +11,7 @@
  * Names are translated, so lookups never use the name.
  */
 
+import type { PromotionDefinition } from "../fixtures/promotions.js";
 import type { PromotionDiscountPayload } from "../types/index.js";
 import type {
     PostProcessor,
@@ -21,8 +22,11 @@ import type {
 
 import { PROMOTIONS } from "../fixtures/promotions.js";
 import { generateUUID, logger } from "../utils/index.js";
+import { errorMessage } from "./processor-utils.js";
 
 const PROMOTION_PREFIX = "demo-promo";
+
+type PromotionOutcome = "linked" | "created" | { error: string };
 
 class PromotionProcessorImpl implements PostProcessor {
     readonly name = "promotions";
@@ -30,12 +34,11 @@ class PromotionProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { salesChannelId, options } = context;
         const errors: string[] = [];
         let processed = 0;
         let skipped = 0;
 
-        if (options.dryRun) {
+        if (context.options.dryRun) {
             logger.info(
                 `    [DRY RUN] Would create ${PROMOTIONS.length} promotions with discount codes`,
                 { cli: true }
@@ -58,36 +61,50 @@ class PromotionProcessorImpl implements PostProcessor {
 
         for (const promo of PROMOTIONS) {
             const existingId = existingByCode.get(promo.code);
+            const outcome = existingId
+                ? await this.linkExistingPromotion(context, promo, existingId)
+                : await this.createNewPromotion(context, promo);
 
-            if (existingId) {
-                // Promotion code already exists — associate it with this SalesChannel
-                try {
-                    await this.addSalesChannelToPromotion(context, existingId, salesChannelId);
-                    logger.info(
-                        `    ⊘ Promotion "${promo.name}" already exists — linked to SalesChannel`,
-                        { cli: true }
-                    );
-                    skipped++;
-                } catch (error) {
-                    const msg = error instanceof Error ? error.message : String(error);
-                    errors.push(`Failed to link promotion "${promo.name}" to SalesChannel: ${msg}`);
-                }
-                continue;
-            }
-
-            try {
-                await this.createPromotion(context, promo, salesChannelId);
-                logger.info(`    ✓ Created promotion "${promo.name}" (code: ${promo.code})`, {
-                    cli: true,
-                });
-                processed++;
-            } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                errors.push(`Failed to create promotion "${promo.name}": ${msg}`);
-            }
+            if (outcome === "linked") skipped++;
+            if (outcome === "created") processed++;
+            if (typeof outcome === "object") errors.push(outcome.error);
         }
 
         return { name: this.name, processed, skipped, errors, durationMs: 0 };
+    }
+
+    /** Promotion code already exists — associate it with this SalesChannel */
+    private async linkExistingPromotion(
+        context: PostProcessorContext,
+        promo: PromotionDefinition,
+        promotionId: string
+    ): Promise<PromotionOutcome> {
+        try {
+            await this.addSalesChannelToPromotion(context, promotionId, context.salesChannelId);
+            logger.info(`    ⊘ Promotion "${promo.name}" already exists — linked to SalesChannel`, {
+                cli: true,
+            });
+            return "linked";
+        } catch (error) {
+            return {
+                error: `Failed to link promotion "${promo.name}" to SalesChannel: ${errorMessage(error)}`,
+            };
+        }
+    }
+
+    private async createNewPromotion(
+        context: PostProcessorContext,
+        promo: PromotionDefinition
+    ): Promise<PromotionOutcome> {
+        try {
+            await this.createPromotion(context, promo, context.salesChannelId);
+            logger.info(`    ✓ Created promotion "${promo.name}" (code: ${promo.code})`, {
+                cli: true,
+            });
+            return "created";
+        } catch (error) {
+            return { error: `Failed to create promotion "${promo.name}": ${errorMessage(error)}` };
+        }
     }
 
     async cleanup(context: PostProcessorContext): Promise<PostProcessorCleanupResult> {

@@ -316,10 +316,12 @@ describe("TemplateFetcher", () => {
         });
 
         test("updateRepo resets to the remote after a history rewrite (force push)", () => {
+            // Ignore the global git config (commit signing makes each commit slow)
             const git = (cwd: string, command: string): string =>
                 execSync(`git -c user.name=test -c user.email=test@example.com ${command}`, {
                     cwd,
                     stdio: "pipe",
+                    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
                 })
                     .toString()
                     .trim();

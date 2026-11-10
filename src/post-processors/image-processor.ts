@@ -8,6 +8,7 @@
  * 3. Sets cover image and gallery images
  */
 
+import type { BlueprintCategory, BlueprintProduct, ProductMetadata } from "../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -26,6 +27,36 @@ import {
 } from "../utils/index.js";
 import { CategoryImageProcessor } from "./category-image-processor.js";
 import { uploadImageWithRetry } from "./image-utils.js";
+import { errorMessage } from "./processor-utils.js";
+
+/** Product with metadata and the number of its views that have a cached image */
+interface ProductWithCachedImages {
+    product: BlueprintProduct;
+    metadata: ProductMetadata;
+    imageCount: number;
+}
+
+/** Cached product image ready for upload, with pre-generated IDs */
+interface ProductImageUpload {
+    mediaId: string;
+    productMediaId: string;
+    view: string;
+    base64Data: string;
+}
+
+/** Product image with resolved media ID; `isNew` when no media with its file name exists */
+interface LinkedProductImage extends ProductImageUpload {
+    isNew: boolean;
+}
+
+/** Result of uploading the images of one product */
+interface ProductUploadOutcome {
+    uploaded: boolean;
+    processed: boolean;
+}
+
+/** Result of uploading one media file */
+type MediaFileUploadResult = "uploaded" | "duplicate" | "error";
 
 /**
  * Image Processor implementation
@@ -36,179 +67,95 @@ class ImageProcessorImpl implements PostProcessor {
     readonly dependsOn: string[] = [];
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
-        const { blueprint, cache, options } = context;
-
-        let processed = 0;
-        let skipped = 0;
-        const errors: string[] = [];
         const startTime = Date.now();
+        const products = this.collectProductsWithCachedImages(context);
+        const categories = this.collectCategoriesWithCachedImages(context);
 
-        const productsWithCachedImages = this.collectProductsWithCachedImages(context);
-        const categoriesWithCachedImages = this.collectCategoriesWithCachedImages(context);
-
-        const totalProducts = productsWithCachedImages.length;
-        const totalCategories = categoriesWithCachedImages.length;
-
-        if (totalProducts === 0 && totalCategories === 0) {
+        if (products.length === 0 && categories.length === 0) {
             logger.info(`    No cached images to upload (run blueprint hydrate first)`, {
                 cli: true,
             });
             return {
                 name: this.name,
                 processed: 0,
-                skipped: blueprint.products.length,
-                errors,
+                skipped: context.blueprint.products.length,
+                errors: [],
                 durationMs: 0,
             };
         }
 
-        const totalImages =
-            productsWithCachedImages.reduce((sum, p) => sum + p.imageCount, 0) + totalCategories;
-        logger.info(`    Uploading ${totalImages} cached images to Shopware`, { cli: true });
-        logger.info(`      - ${totalProducts} products with images`, { cli: true });
-        logger.info(`      - ${totalCategories} category banners`, { cli: true });
+        logUploadPlan(products, categories.length);
 
-        if (options.dryRun) {
-            for (const { product, imageCount } of productsWithCachedImages) {
-                logger.info(`    [DRY RUN] ${product.name}: ${imageCount} images to upload`, {
-                    cli: true,
-                });
-                processed++;
-            }
-            for (const category of categoriesWithCachedImages) {
-                logger.info(`    [DRY RUN] Category ${category.name}: banner to upload`, {
-                    cli: true,
-                });
-            }
+        if (context.options.dryRun) {
+            logDryRunPlan(products, categories);
             return {
                 name: this.name,
-                processed,
-                skipped,
-                errors,
+                processed: products.length,
+                skipped: 0,
+                errors: [],
                 durationMs: Date.now() - startTime,
             };
         }
 
-        // Upload product images (parallel across products)
-        logger.info(`    Uploading product images to Shopware...`, { cli: true });
-        let uploadedProducts = 0;
-        const uploadLimiter = new ConcurrencyLimiter(3);
-
-        const uploadResults = await uploadLimiter.all(
-            productsWithCachedImages.map(({ product, metadata }) => async () => {
-                try {
-                    const mediaToUpload: Array<{
-                        mediaId: string;
-                        productMediaId: string;
-                        view: string;
-                        base64Data: string;
-                    }> = [];
-
-                    for (const desc of metadata.imageDescriptions) {
-                        const cachedImage = cache.images.loadImageWithView(
-                            context.salesChannelName,
-                            product.id,
-                            desc.view,
-                            "product_media"
-                        );
-                        if (cachedImage) {
-                            mediaToUpload.push({
-                                mediaId: generateUUID(),
-                                productMediaId: generateUUID(),
-                                view: desc.view,
-                                base64Data: cachedImage,
-                            });
-                        }
-                    }
-
-                    if (mediaToUpload.length > 0) {
-                        await this.uploadProductImages(
-                            context,
-                            product.id,
-                            product.name,
-                            mediaToUpload
-                        );
-                        return { uploaded: true, processed: true };
-                    }
-
-                    return { uploaded: false, processed: true };
-                } catch (error) {
-                    errors.push(
-                        `Failed to upload images for ${product.name}: ${error instanceof Error ? error.message : String(error)}`
-                    );
-                    return { uploaded: false, processed: false };
-                }
-            })
-        );
-
-        for (const result of uploadResults) {
-            if (result.processed) processed++;
-            else skipped++;
-            if (result.uploaded) uploadedProducts++;
-        }
-
-        logger.info(`    ✓ Uploaded images for ${uploadedProducts} products`, { cli: true });
-
-        // Upload category banners (parallel)
-        if (categoriesWithCachedImages.length > 0) {
-            logger.info(`    Uploading category banners to Shopware...`, { cli: true });
-            const categoryLimiter = new ConcurrencyLimiter(3);
-            const categoryProcessor = new CategoryImageProcessor();
-
-            const categoryResults = await categoryLimiter.all(
-                categoriesWithCachedImages.map((category) => async () => {
-                    try {
-                        const cachedImage = cache.images.loadImageWithView(
-                            context.salesChannelName,
-                            category.id,
-                            "banner",
-                            "category_media"
-                        );
-
-                        if (cachedImage) {
-                            return await categoryProcessor.uploadCategoryImage(
-                                context,
-                                category.id,
-                                category.name,
-                                cachedImage,
-                                true
-                            );
-                        }
-                        return false;
-                    } catch (error) {
-                        errors.push(
-                            `Failed to upload banner for ${category.name}: ${error instanceof Error ? error.message : String(error)}`
-                        );
-                        return false;
-                    }
-                })
-            );
-
-            const uploadedCategories = categoryResults.filter(Boolean).length;
-            logger.info(`    ✓ Uploaded banners for ${uploadedCategories} categories`, {
-                cli: true,
-            });
-        }
+        const errors: string[] = [];
+        const tally = await this.uploadAllProductImages(context, products, errors);
+        await uploadAllCategoryBanners(context, categories, errors);
 
         return {
             name: this.name,
-            processed,
-            skipped,
+            processed: tally.processed,
+            skipped: tally.skipped,
             errors,
             durationMs: Date.now() - startTime,
         };
     }
 
-    private collectProductsWithCachedImages(context: PostProcessorContext): Array<{
-        product: PostProcessorContext["blueprint"]["products"][0];
-        metadata: NonNullable<ReturnType<typeof context.cache.loadProductMetadata>>;
-        imageCount: number;
-    }> {
-        const result: Array<{
-            product: PostProcessorContext["blueprint"]["products"][0];
-            metadata: NonNullable<ReturnType<typeof context.cache.loadProductMetadata>>;
-            imageCount: number;
-        }> = [];
+    /**
+     * Upload product images (parallel across products) and count the outcomes
+     */
+    private async uploadAllProductImages(
+        context: PostProcessorContext,
+        products: ProductWithCachedImages[],
+        errors: string[]
+    ): Promise<{ processed: number; skipped: number }> {
+        logger.info(`    Uploading product images to Shopware...`, { cli: true });
+        const uploadLimiter = new ConcurrencyLimiter(3);
+        const outcomes = await uploadLimiter.all(
+            products.map((entry) => () => this.uploadProductEntry(context, entry, errors))
+        );
+
+        const uploadedProducts = outcomes.filter((o) => o.uploaded).length;
+        logger.info(`    ✓ Uploaded images for ${uploadedProducts} products`, { cli: true });
+
+        const processed = outcomes.filter((o) => o.processed).length;
+        return { processed, skipped: outcomes.length - processed };
+    }
+
+    /**
+     * Upload the cached images of one product; failures are collected in `errors`
+     */
+    private async uploadProductEntry(
+        context: PostProcessorContext,
+        { product, metadata }: ProductWithCachedImages,
+        errors: string[]
+    ): Promise<ProductUploadOutcome> {
+        try {
+            const mediaToUpload = loadCachedProductImages(context, product.id, metadata);
+            if (mediaToUpload.length === 0) {
+                return { uploaded: false, processed: true };
+            }
+            await this.uploadProductImages(context, product.id, product.name, mediaToUpload);
+            return { uploaded: true, processed: true };
+        } catch (error) {
+            errors.push(`Failed to upload images for ${product.name}: ${errorMessage(error)}`);
+            return { uploaded: false, processed: false };
+        }
+    }
+
+    private collectProductsWithCachedImages(
+        context: PostProcessorContext
+    ): ProductWithCachedImages[] {
+        const result: ProductWithCachedImages[] = [];
 
         for (const product of context.blueprint.products) {
             const metadata = context.cache.loadProductMetadata(
@@ -275,210 +222,55 @@ class ImageProcessorImpl implements PostProcessor {
         context: PostProcessorContext,
         productId: string,
         productName: string,
-        images: Array<{
-            mediaId: string;
-            productMediaId: string;
-            view: string;
-            base64Data: string;
-        }>
+        images: ProductImageUpload[]
     ): Promise<void> {
-        const hasExistingImages = await this.productHasImages(context, productId);
-        if (hasExistingImages) {
-            logger.info(`      ✓ ${this.truncateName(productName)}: reused existing images`, {
-                cli: true,
-            });
+        const shortName = this.truncateName(productName);
+        if (await this.productHasImages(context, productId)) {
+            logger.info(`      ✓ ${shortName}: reused existing images`, { cli: true });
             return;
         }
 
-        // Get or create Product Media folder
         const mediaFolderId = await this.getProductMediaFolderId(context);
-
-        // Process each image: check for existing media or create new
         const sanitizedName = productName.replace(/[^a-zA-Z0-9]/g, "-");
-        const mediaToLink: Array<{
-            mediaId: string;
-            productMediaId: string;
-            isNew: boolean;
-            view: string;
-            base64Data: string;
-        }> = [];
+        const mediaToLink = await this.resolveMediaToLink(context, sanitizedName, images);
+        const newMedia = mediaToLink.filter((m) => m.isNew);
 
-        const shortName = this.truncateName(productName);
+        const product = { id: productId, name: productName };
+        await createProductMediaEntities(context, product, newMedia, mediaFolderId);
 
+        const cover = mediaToLink[0];
+        if (!cover) return;
+        await linkProductMedia(context, product, mediaToLink, cover);
+
+        const fileLimiter = new ConcurrencyLimiter(5);
+        const fileResults = await fileLimiter.all(
+            newMedia.map(
+                (img) => () =>
+                    uploadProductMediaFile(context, img, `${sanitizedName}-${img.view}`, shortName)
+            )
+        );
+        logUploadSummary(shortName, fileResults, mediaToLink.length - newMedia.length);
+    }
+
+    /**
+     * Reuse existing media with the same file name, otherwise mark the image as new
+     */
+    private async resolveMediaToLink(
+        context: PostProcessorContext,
+        sanitizedName: string,
+        images: ProductImageUpload[]
+    ): Promise<LinkedProductImage[]> {
+        const result: LinkedProductImage[] = [];
         for (const img of images) {
             const fileName = `${sanitizedName}-${img.view}`;
             const existingMediaId = await this.findMediaByFileName(context, fileName);
-
-            if (existingMediaId) {
-                // Reuse existing media (logged as summary at end)
-                mediaToLink.push({
-                    mediaId: existingMediaId,
-                    productMediaId: img.productMediaId,
-                    isNew: false,
-                    view: img.view,
-                    base64Data: img.base64Data,
-                });
-            } else {
-                // Need to create new media
-                mediaToLink.push({
-                    mediaId: img.mediaId,
-                    productMediaId: img.productMediaId,
-                    isNew: true,
-                    view: img.view,
-                    base64Data: img.base64Data,
-                });
-            }
-        }
-
-        // Create only NEW media entities
-        const newMedia = mediaToLink.filter((m) => m.isNew);
-        if (newMedia.length > 0) {
-            const mediaPayload = newMedia.map((img) => ({
-                id: img.mediaId,
-                private: false,
-                ...(mediaFolderId && { mediaFolderId }),
-                ...buildProductMediaTexts(productName, img.view),
-            }));
-
-            const mediaResponse = await apiPost(context, "_action/sync", {
-                createMedia: {
-                    entity: "media",
-                    action: "upsert",
-                    payload: mediaPayload,
-                },
+            result.push({
+                ...img,
+                mediaId: existingMediaId ?? img.mediaId,
+                isNew: !existingMediaId,
             });
-
-            if (!mediaResponse.ok) {
-                const errorText = await mediaResponse.text();
-                logger.apiError("_action/sync (create media)", mediaResponse.status, {
-                    productId,
-                    error: errorText,
-                });
-                throw new Error(`Failed to create media entities: ${mediaResponse.status}`);
-            }
         }
-
-        // Create product_media relations for ALL media (new and existing)
-        const productMediaPayload = mediaToLink.map((img, index) => ({
-            id: img.productMediaId,
-            productId,
-            mediaId: img.mediaId,
-            position: index,
-        }));
-
-        // Set cover image (first image)
-        const firstMedia = mediaToLink[0];
-        if (!firstMedia) {
-            return; // No images to link
-        }
-        const coverUpdate = {
-            id: productId,
-            coverId: firstMedia.productMediaId,
-            // Social sharing image (Shopware 6.7.10+): same image as the cover
-            ...(context.shopware.supports("productOpenGraph") && {
-                openGraphMediaId: firstMedia.mediaId,
-            }),
-        };
-
-        // Sync product_media relations and cover
-        const syncResponse = await apiPost(context, "_action/sync", {
-            createProductMedia: {
-                entity: "product_media",
-                action: "upsert",
-                payload: productMediaPayload,
-            },
-            updateCover: {
-                entity: "product",
-                action: "upsert",
-                payload: [coverUpdate],
-            },
-        });
-
-        if (!syncResponse.ok) {
-            const errorText = await syncResponse.text();
-            logger.apiError("_action/sync (product_media)", syncResponse.status, {
-                productId,
-                productName,
-                error: errorText,
-            });
-            throw new Error(`Failed to link media to product: ${syncResponse.status}`);
-        }
-
-        // Upload actual image files for NEW media only (parallel, with retry for transient failures)
-        let uploadedCount = 0;
-        let duplicateCount = 0;
-        const fileLimiter = new ConcurrencyLimiter(5);
-
-        const fileResults = await fileLimiter.all(
-            newMedia.map((img) => async () => {
-                const imageBuffer = Buffer.from(img.base64Data, "base64");
-                const fileName = `${sanitizedName}-${img.view}`;
-
-                const format = detectImageFormat(imageBuffer);
-
-                try {
-                    const uploadResponse = await uploadImageWithRetry(
-                        context,
-                        img.mediaId,
-                        fileName,
-                        imageBuffer,
-                        format
-                    );
-
-                    if (!uploadResponse.ok) {
-                        const errorText = await uploadResponse.text();
-
-                        // Skip if file already exists (not an error)
-                        if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) {
-                            return "duplicate" as const;
-                        }
-
-                        logger.apiError("_action/media/upload", uploadResponse.status, {
-                            mediaId: img.mediaId,
-                            view: img.view,
-                            error: errorText,
-                        });
-                        logger.error(
-                            `      ✗ ${shortName} (${img.view}) upload failed: ${uploadResponse.status}`,
-                            { cli: true }
-                        );
-                        return "error" as const;
-                    }
-                    return "uploaded" as const;
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    logger.error(`Failed to upload image after retries`, {
-                        data: {
-                            mediaId: img.mediaId,
-                            view: img.view,
-                            error: message,
-                        },
-                    });
-                    logger.error(`      ✗ ${shortName} (${img.view}) upload failed: ${message}`, {
-                        cli: true,
-                    });
-                    return "error" as const;
-                }
-            })
-        );
-
-        for (const result of fileResults) {
-            if (result === "uploaded") uploadedCount++;
-            if (result === "duplicate") duplicateCount++;
-        }
-
-        // Log summary for this product
-        const reusedMedia = mediaToLink.filter((m) => !m.isNew);
-        const reusedCount = reusedMedia.length + duplicateCount;
-        if (uploadedCount > 0 && reusedCount > 0) {
-            logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`, {
-                cli: true,
-            });
-        } else if (uploadedCount > 0) {
-            logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded`, { cli: true });
-        } else if (reusedCount > 0) {
-            logger.info(`      ✓ ${shortName}: ${reusedCount} images reused`, { cli: true });
-        }
+        return result;
     }
 
     private productMediaFolderId: string | null = null;
@@ -679,9 +471,7 @@ class ImageProcessorImpl implements PostProcessor {
             const categoryProcessor = new CategoryImageProcessor();
             await categoryProcessor.cleanupCategoryImages(context);
         } catch (error) {
-            errors.push(
-                `Image cleanup failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Image cleanup failed: ${errorMessage(error)}`);
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
@@ -700,4 +490,244 @@ export function buildProductMediaTexts(
     view: string
 ): { alt: string; title: string } {
     return productMediaTexts(productName, view);
+}
+
+/** Log how many images and banners are about to be uploaded */
+function logUploadPlan(products: ProductWithCachedImages[], categoryCount: number): void {
+    const totalImages = products.reduce((sum, p) => sum + p.imageCount, 0) + categoryCount;
+    logger.info(`    Uploading ${totalImages} cached images to Shopware`, { cli: true });
+    logger.info(`      - ${products.length} products with images`, { cli: true });
+    logger.info(`      - ${categoryCount} category banners`, { cli: true });
+}
+
+/** Log what a real run would upload */
+function logDryRunPlan(products: ProductWithCachedImages[], categories: BlueprintCategory[]): void {
+    for (const { product, imageCount } of products) {
+        logger.info(`    [DRY RUN] ${product.name}: ${imageCount} images to upload`, {
+            cli: true,
+        });
+    }
+    for (const category of categories) {
+        logger.info(`    [DRY RUN] Category ${category.name}: banner to upload`, { cli: true });
+    }
+}
+
+/** Load every cached view image of a product and give each new media IDs */
+function loadCachedProductImages(
+    context: PostProcessorContext,
+    productId: string,
+    metadata: ProductMetadata
+): ProductImageUpload[] {
+    return metadata.imageDescriptions.flatMap((desc) => {
+        const cachedImage = context.cache.images.loadImageWithView(
+            context.salesChannelName,
+            productId,
+            desc.view,
+            "product_media"
+        );
+        if (!cachedImage) return [];
+        return [
+            {
+                mediaId: generateUUID(),
+                productMediaId: generateUUID(),
+                view: desc.view,
+                base64Data: cachedImage,
+            },
+        ];
+    });
+}
+
+/** Upload category banners (parallel); failures are collected in `errors` */
+async function uploadAllCategoryBanners(
+    context: PostProcessorContext,
+    categories: BlueprintCategory[],
+    errors: string[]
+): Promise<void> {
+    if (categories.length === 0) return;
+
+    logger.info(`    Uploading category banners to Shopware...`, { cli: true });
+    const categoryLimiter = new ConcurrencyLimiter(3);
+    const categoryProcessor = new CategoryImageProcessor();
+    const results = await categoryLimiter.all(
+        categories.map(
+            (category) => () => uploadCategoryBanner(context, categoryProcessor, category, errors)
+        )
+    );
+
+    const uploadedCategories = results.filter(Boolean).length;
+    logger.info(`    ✓ Uploaded banners for ${uploadedCategories} categories`, { cli: true });
+}
+
+/** Upload the cached banner of one category; returns true when it was linked */
+async function uploadCategoryBanner(
+    context: PostProcessorContext,
+    categoryProcessor: CategoryImageProcessor,
+    category: BlueprintCategory,
+    errors: string[]
+): Promise<boolean> {
+    try {
+        const cachedImage = context.cache.images.loadImageWithView(
+            context.salesChannelName,
+            category.id,
+            "banner",
+            "category_media"
+        );
+        if (!cachedImage) return false;
+        return await categoryProcessor.uploadCategoryImage(
+            context,
+            category.id,
+            category.name,
+            cachedImage,
+            true
+        );
+    } catch (error) {
+        errors.push(`Failed to upload banner for ${category.name}: ${errorMessage(error)}`);
+        return false;
+    }
+}
+
+/** Create media entities for images that have no existing media yet */
+async function createProductMediaEntities(
+    context: PostProcessorContext,
+    product: { id: string; name: string },
+    newMedia: LinkedProductImage[],
+    mediaFolderId: string | null
+): Promise<void> {
+    if (newMedia.length === 0) return;
+
+    const mediaPayload = newMedia.map((img) => ({
+        id: img.mediaId,
+        private: false,
+        ...(mediaFolderId && { mediaFolderId }),
+        ...buildProductMediaTexts(product.name, img.view),
+    }));
+    const mediaResponse = await apiPost(context, "_action/sync", {
+        createMedia: { entity: "media", action: "upsert", payload: mediaPayload },
+    });
+    if (mediaResponse.ok) return;
+
+    const errorText = await mediaResponse.text();
+    logger.apiError("_action/sync (create media)", mediaResponse.status, {
+        productId: product.id,
+        error: errorText,
+    });
+    throw new Error(`Failed to create media entities: ${mediaResponse.status}`);
+}
+
+/**
+ * Link all media (new and existing) to the product in view order and set the cover.
+ * On Shopware 6.7.10+ the cover also becomes the social sharing image.
+ */
+async function linkProductMedia(
+    context: PostProcessorContext,
+    product: { id: string; name: string },
+    mediaToLink: LinkedProductImage[],
+    cover: LinkedProductImage
+): Promise<void> {
+    const productMediaPayload = mediaToLink.map((img, index) => ({
+        id: img.productMediaId,
+        productId: product.id,
+        mediaId: img.mediaId,
+        position: index,
+    }));
+    const coverUpdate = {
+        id: product.id,
+        coverId: cover.productMediaId,
+        ...(context.shopware.supports("productOpenGraph") && {
+            openGraphMediaId: cover.mediaId,
+        }),
+    };
+
+    const syncResponse = await apiPost(context, "_action/sync", {
+        createProductMedia: {
+            entity: "product_media",
+            action: "upsert",
+            payload: productMediaPayload,
+        },
+        updateCover: { entity: "product", action: "upsert", payload: [coverUpdate] },
+    });
+    if (syncResponse.ok) return;
+
+    const errorText = await syncResponse.text();
+    logger.apiError("_action/sync (product_media)", syncResponse.status, {
+        productId: product.id,
+        productName: product.name,
+        error: errorText,
+    });
+    throw new Error(`Failed to link media to product: ${syncResponse.status}`);
+}
+
+/** Upload one image file (with retry for transient failures); never throws */
+async function uploadProductMediaFile(
+    context: PostProcessorContext,
+    img: LinkedProductImage,
+    fileName: string,
+    shortName: string
+): Promise<MediaFileUploadResult> {
+    const imageBuffer = Buffer.from(img.base64Data, "base64");
+    const format = detectImageFormat(imageBuffer);
+    try {
+        const response = await uploadImageWithRetry(
+            context,
+            img.mediaId,
+            fileName,
+            imageBuffer,
+            format
+        );
+        return await classifyUploadResponse(response, img, shortName);
+    } catch (error) {
+        const message = errorMessage(error);
+        logger.error(`Failed to upload image after retries`, {
+            data: { mediaId: img.mediaId, view: img.view, error: message },
+        });
+        logger.error(`      ✗ ${shortName} (${img.view}) upload failed: ${message}`, {
+            cli: true,
+        });
+        return "error";
+    }
+}
+
+/** Map an upload response to its result; a duplicated file name is not an error */
+async function classifyUploadResponse(
+    response: Response,
+    img: LinkedProductImage,
+    shortName: string
+): Promise<MediaFileUploadResult> {
+    if (response.ok) return "uploaded";
+
+    const errorText = await response.text();
+    if (errorText.includes("MEDIA_DUPLICATED_FILE_NAME")) return "duplicate";
+
+    logger.apiError("_action/media/upload", response.status, {
+        mediaId: img.mediaId,
+        view: img.view,
+        error: errorText,
+    });
+    logger.error(`      ✗ ${shortName} (${img.view}) upload failed: ${response.status}`, {
+        cli: true,
+    });
+    return "error";
+}
+
+/** Log how many images of a product were uploaded and how many were reused */
+function logUploadSummary(
+    shortName: string,
+    results: MediaFileUploadResult[],
+    reusedExisting: number
+): void {
+    const uploadedCount = results.filter((r) => r === "uploaded").length;
+    const reusedCount = reusedExisting + results.filter((r) => r === "duplicate").length;
+    if (uploadedCount > 0 && reusedCount > 0) {
+        logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded, ${reusedCount} reused`, {
+            cli: true,
+        });
+        return;
+    }
+    if (uploadedCount > 0) {
+        logger.info(`      ✓ ${shortName}: ${uploadedCount} uploaded`, { cli: true });
+        return;
+    }
+    if (reusedCount > 0) {
+        logger.info(`      ✓ ${shortName}: ${reusedCount} images reused`, { cli: true });
+    }
 }

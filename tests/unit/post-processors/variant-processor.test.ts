@@ -1,7 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
+import type { PostProcessorContext } from "../../../src/post-processors/index.js";
 import type {
     BlueprintPropertyGroup,
+    CachedPropertyGroup,
     ProductMetadata,
     VariantConfig,
 } from "../../../src/types/index.js";
@@ -811,6 +816,703 @@ describe("VariantProcessor", () => {
             const result = await VariantProcessor.cleanup!(context);
             expect(result.deleted).toBe(2);
             expect(result.errors).toHaveLength(0);
+        });
+
+        test("reports an error when api helpers are missing", async () => {
+            const { context: baseContext } = createTestContext();
+            const { api: _api, ...rest } = baseContext;
+            const contextWithoutApi = { ...rest } as PostProcessorContext;
+
+            const result = await VariantProcessor.cleanup!(contextWithoutApi);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toEqual(["API helpers not available - cannot perform cleanup"]);
+        });
+
+        test("deletes configurator settings of parents that have them", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "parent-1" }, { id: "parent-2" }],
+                [],
+                [
+                    { id: "parent-1", configuratorSettings: [{ id: "cs-1" }] },
+                    { id: "parent-2", configuratorSettings: [] },
+                ],
+            ]);
+            mockApi.mockSearchResponse("product-configurator-setting", [
+                { id: "cs-1" },
+                { id: "cs-2" },
+            ]);
+
+            const result = await VariantProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toHaveLength(0);
+            const settingSearches = mockApi.getCallsByEndpoint(
+                "search/product-configurator-setting"
+            );
+            expect(settingSearches).toHaveLength(1);
+            expect(JSON.stringify(settingSearches[0]?.body)).toContain('"value":"parent-1"');
+            const deleteBodies = mockApi
+                .getCallsByEndpoint("_action/sync")
+                .map((call) => JSON.stringify(call.body));
+            expect(deleteBodies).toEqual([
+                JSON.stringify({
+                    "delete-product_configurator_setting": {
+                        entity: "product_configurator_setting",
+                        action: "delete",
+                        payload: [{ id: "cs-1" }, { id: "cs-2" }],
+                    },
+                }),
+            ]);
+        });
+
+        test("deletes variants by id and searches them by parent id", async () => {
+            const { context, mockApi } = createTestContext({ salesChannelId: "sc-clean" });
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "parent-1" }],
+                [{ id: "variant-1" }],
+                [],
+            ]);
+
+            await VariantProcessor.cleanup!(context);
+
+            const searches = mockApi.getCallsByEndpoint("search/product");
+            expect(JSON.stringify(searches[0]?.body)).toContain('"value":"sc-clean"');
+            expect(JSON.stringify(searches[1]?.body)).toContain(
+                '"type":"equalsAny","field":"parentId","value":["parent-1"]'
+            );
+            const deleteBody = JSON.stringify(mockApi.getCallsByEndpoint("_action/sync")[0]?.body);
+            expect(deleteBody).toContain('"delete-product"');
+            expect(deleteBody).toContain('"payload":[{"id":"variant-1"}]');
+        });
+
+        test("ignores errors while clearing configurator settings of one parent", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "parent-1" }],
+                [],
+                [{ id: "parent-1", configuratorSettings: [{ id: "cs-1" }] }],
+            ]);
+            let searchCount = 0;
+            mockApi.searchEntitiesMock.mockImplementation(() => {
+                searchCount++;
+                if (searchCount === 4) throw new Error("settings search failed");
+                return Promise.resolve([]);
+            });
+
+            const result = await VariantProcessor.cleanup!(context);
+
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("reports a failed cleanup with the error message", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.searchEntitiesMock.mockImplementation(() => {
+                throw new Error("search down");
+            });
+
+            const result = await VariantProcessor.cleanup!(context);
+
+            expect(result.deleted).toBe(0);
+            expect(result.errors).toEqual(["Variant cleanup failed: search down"]);
+        });
+    });
+
+    describe("property group resolution", () => {
+        function setupVariantRun(opts: {
+            productId: string;
+            configs: VariantConfig[];
+            propertyGroups?: BlueprintPropertyGroup[];
+            salesChannelName?: string;
+        }): { context: PostProcessorContext; mockApi: ReturnType<typeof createMockApiHelpers> } {
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: opts.productId,
+                        name: `Product ${opts.productId}`,
+                        metadata: createMockProductMetadata({
+                            isVariant: true,
+                            variantConfigs: opts.configs,
+                        }),
+                    }),
+                ],
+                propertyGroups: opts.propertyGroups ?? [],
+            });
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                [opts.productId, { isVariant: true, variantConfigs: opts.configs }],
+            ]);
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/product", {
+                data: [{ id: opts.productId, children: [], configuratorSettings: [] }],
+            });
+            mockApi.mockSearchResponse("currency", [{ id: "currency-eur" }]);
+            mockApi.mockSyncSuccess();
+            const { context } = createTestContext({
+                blueprint,
+                metadataMap,
+                dryRun: false,
+                mockApi,
+                salesChannelName: opts.salesChannelName,
+            });
+            return { context, mockApi };
+        }
+
+        function configuratorOptionIds(mockApi: ReturnType<typeof createMockApiHelpers>): string[] {
+            const call = mockApi
+                .getCallsByEndpoint("_action/sync")
+                .find((c) => JSON.stringify(c.body).includes("updateParent"));
+            const body = call?.body as
+                | {
+                      updateParent: {
+                          payload: Array<{ configuratorSettings: Array<{ optionId: string }> }>;
+                      };
+                  }
+                | undefined;
+            return body?.updateParent.payload[0]?.configuratorSettings.map((c) => c.optionId) ?? [];
+        }
+
+        function syncBodies(mockApi: ReturnType<typeof createMockApiHelpers>): string[] {
+            return mockApi.getCallsByEndpoint("_action/sync").map((c) => JSON.stringify(c.body));
+        }
+
+        /** Answer property-group searches by filter type ("equals" / "contains") */
+        function answerGroupSearch(
+            mockApi: ReturnType<typeof createMockApiHelpers>,
+            respond: (filterType: string) => unknown
+        ): void {
+            mockApi.postMock.mockImplementation(() => {
+                const last = mockApi.getCalls().at(-1);
+                if (last?.endpoint !== "search/property-group") return Promise.resolve({});
+                const body = last.body as { filter: Array<{ type: string }> };
+                mockApi.mockPostResponse(
+                    "search/property-group",
+                    respond(body.filter[0]?.type ?? "")
+                );
+                return Promise.resolve({});
+            });
+        }
+
+        test("skips a group with fewer than two options", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-one-option",
+                configs: [{ group: "Single", selectedOptions: ["Only"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-single",
+                        name: "Single",
+                        displayType: "text",
+                        options: [{ id: "opt-only", name: "Only" }],
+                    },
+                ],
+            });
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.skipped).toBe(1);
+            expect(result.processed).toBe(0);
+            expect(syncBodies(mockApi)).toHaveLength(0);
+        });
+
+        test("uses the first three options when the selected options do not match", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-fallback",
+                configs: [{ group: "Pattern", selectedOptions: ["Zigzag"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-pattern",
+                        name: "Pattern",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-a", name: "Dots" },
+                            { id: "opt-a", name: "Dots" },
+                            { id: "opt-b", name: "Stripes" },
+                            { id: "opt-c", name: "Checks" },
+                            { id: "opt-d", name: "Plain" },
+                        ],
+                    },
+                ],
+            });
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-a", "opt-b", "opt-c"]);
+        });
+
+        test("matches selected options case-insensitively and keeps group order", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-case",
+                configs: [{ group: "Shade", selectedOptions: ["BLUE", "red"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-shade",
+                        name: "Shade",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-red", name: "Red" },
+                            { id: "opt-green", name: "Green" },
+                            { id: "opt-blue", name: "Blue" },
+                        ],
+                    },
+                ],
+            });
+
+            await VariantProcessor.process(context);
+
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-red", "opt-blue"]);
+        });
+
+        test("creates variants for the resolved groups when one group is missing", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-partial",
+                configs: [
+                    { group: "Width", selectedOptions: ["Narrow", "Wide"], priceModifiers: {} },
+                    { group: "Missing Group Xyz", selectedOptions: ["A", "B"], priceModifiers: {} },
+                ],
+                propertyGroups: [
+                    {
+                        id: "pg-width",
+                        name: "Width",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-narrow", name: "Narrow" },
+                            { id: "opt-wide", name: "Wide" },
+                        ],
+                    },
+                ],
+            });
+            mockApi.mockPostResponse("search/property-group", { data: [] });
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-narrow", "opt-wide"]);
+        });
+
+        test("finds a group in Shopware by exact name when not in the blueprint", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-exact",
+                configs: [
+                    { group: "Grip Exact", selectedOptions: ["Soft", "Hard"], priceModifiers: {} },
+                ],
+            });
+            answerGroupSearch(mockApi, (type) =>
+                type === "equals"
+                    ? {
+                          data: [
+                              {
+                                  id: "pg-grip",
+                                  name: "Grip Exact",
+                                  options: [
+                                      { id: "opt-soft", name: "Soft" },
+                                      { id: "opt-hard", name: "Hard" },
+                                  ],
+                              },
+                          ],
+                      }
+                    : { data: [] }
+            );
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            const searches = mockApi.getCallsByEndpoint("search/property-group");
+            expect(searches).toHaveLength(1);
+            expect(searches[0]?.body).toEqual({
+                filter: [{ type: "equals", field: "name", value: "Grip Exact" }],
+                associations: { options: {} },
+                limit: 1,
+            });
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-soft", "opt-hard"]);
+        });
+
+        test("falls back to a contains search when the exact search has no options", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-contains",
+                configs: [
+                    { group: "Grip Fuzzy", selectedOptions: ["Soft", "Hard"], priceModifiers: {} },
+                ],
+            });
+            answerGroupSearch(mockApi, (type) =>
+                type === "contains"
+                    ? {
+                          data: [
+                              {
+                                  id: "pg-grip-fuzzy",
+                                  name: "Grip Fuzzy Type",
+                                  options: [
+                                      { id: "opt-soft-f", name: "Soft" },
+                                      { id: "opt-hard-f", name: "Hard" },
+                                  ],
+                              },
+                          ],
+                      }
+                    : { data: [{ id: "pg-no-options", name: "Grip Fuzzy" }] }
+            );
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+            const searches = mockApi.getCallsByEndpoint("search/property-group");
+            expect(searches).toHaveLength(2);
+            expect(searches[1]?.body).toEqual({
+                filter: [{ type: "contains", field: "name", value: "Grip Fuzzy" }],
+                associations: { options: {} },
+                limit: 1,
+            });
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-soft-f", "opt-hard-f"]);
+        });
+
+        test("reuses a group found in Shopware for later products", async () => {
+            const config: VariantConfig = {
+                group: "Grip Cached",
+                selectedOptions: ["Soft", "Hard"],
+                priceModifiers: {},
+            };
+            const group = {
+                id: "pg-grip-cached",
+                name: "Grip Cached",
+                options: [
+                    { id: "opt-soft-c", name: "Soft" },
+                    { id: "opt-hard-c", name: "Hard" },
+                ],
+            };
+            const first = setupVariantRun({ productId: "res-cached-1", configs: [config] });
+            answerGroupSearch(first.mockApi, () => ({ data: [group] }));
+            await VariantProcessor.process(first.context);
+
+            const second = setupVariantRun({ productId: "res-cached-2", configs: [config] });
+            const result = await VariantProcessor.process(second.context);
+
+            expect(result.processed).toBe(1);
+            expect(second.mockApi.getCallsByEndpoint("search/property-group")).toHaveLength(0);
+            expect(configuratorOptionIds(second.mockApi)).toEqual(["opt-soft-c", "opt-hard-c"]);
+        });
+
+        test("skips the product when the property group search throws", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-throw",
+                configs: [
+                    { group: "Grip Broken", selectedOptions: ["A", "B"], priceModifiers: {} },
+                ],
+            });
+            mockApi.mockPostFailure("search/property-group", new Error("search failed"));
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.skipped).toBe(1);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test("creates variants when the variant check fails", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-check-fails",
+                configs: [{ group: "Depth", selectedOptions: ["Low", "High"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-depth",
+                        name: "Depth",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-low", name: "Low" },
+                            { id: "opt-high", name: "High" },
+                        ],
+                    },
+                ],
+            });
+            mockApi.mockPostFailure("search/product", new Error("product search failed"));
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(1);
+        });
+
+        test("checks for existing variants with children and configurator settings", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-check-body",
+                configs: [{ group: "Depth", selectedOptions: ["Low", "High"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-depth",
+                        name: "Depth",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-low", name: "Low" },
+                            { id: "opt-high", name: "High" },
+                        ],
+                    },
+                ],
+            });
+
+            await VariantProcessor.process(context);
+
+            expect(mockApi.getCallsByEndpoint("search/product")[0]?.body).toEqual({
+                ids: ["res-check-body"],
+                associations: { children: {}, configuratorSettings: {} },
+            });
+        });
+
+        test("reports an error when the parent update fails", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-sync-fails",
+                configs: [{ group: "Depth", selectedOptions: ["Low", "High"], priceModifiers: {} }],
+                propertyGroups: [
+                    {
+                        id: "pg-depth",
+                        name: "Depth",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-low", name: "Low" },
+                            { id: "opt-high", name: "High" },
+                        ],
+                    },
+                ],
+            });
+            mockApi.mockPostFailure("_action/sync", new Error("sync rejected"));
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.processed).toBe(0);
+            expect(result.skipped).toBe(0);
+            expect(result.errors).toEqual([
+                "Failed to create variants for Product res-sync-fails: Failed to update parent product: 500",
+            ]);
+        });
+
+        describe("with a cached property group definition", () => {
+            const previousCacheDir = process.env.CACHE_DIR;
+            let cacheDir = "";
+
+            beforeEach(() => {
+                cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "variant-cache-"));
+                process.env.CACHE_DIR = cacheDir;
+            });
+
+            afterEach(() => {
+                fs.rmSync(cacheDir, { recursive: true, force: true });
+                if (previousCacheDir === undefined) {
+                    delete process.env.CACHE_DIR;
+                    return;
+                }
+                process.env.CACHE_DIR = previousCacheDir;
+            });
+
+            function writeCachedGroup(store: string, group: CachedPropertyGroup): void {
+                const dir = path.join(cacheDir, "sales-channels", store, "properties");
+                fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(path.join(dir, `${group.slug}.json`), JSON.stringify(group));
+            }
+
+            function cachedGroup(name: string, options: string[]): CachedPropertyGroup {
+                return {
+                    name,
+                    slug: name.toLowerCase().replace(/\s+/g, "-"),
+                    displayType: "text",
+                    options,
+                    source: "ai-generated",
+                    createdAt: "2026-01-01T00:00:00.000Z",
+                };
+            }
+
+            test("creates the group in Shopware with all cached options", async () => {
+                writeCachedGroup("cache-store-a", cachedGroup("Finish New", ["Matte", "Gloss"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-create",
+                    configs: [
+                        {
+                            group: "Finish New",
+                            selectedOptions: ["Matte", "Gloss"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "Cache Store A",
+                });
+                let created = false;
+                answerGroupSearch(mockApi, () => {
+                    created = syncBodies(mockApi).some((b) => b.includes("createPropertyGroup"));
+                    if (!created) return { data: [] };
+                    return {
+                        data: [
+                            {
+                                id: "pg-finish-new",
+                                name: "Finish New",
+                                options: [
+                                    { id: "opt-matte", name: "Matte" },
+                                    { id: "opt-gloss", name: "Gloss" },
+                                ],
+                            },
+                        ],
+                    };
+                });
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                const groupSync = mockApi
+                    .getCallsByEndpoint("_action/sync")
+                    .find((c) => JSON.stringify(c.body).includes("createPropertyGroup"));
+                const body = groupSync?.body as {
+                    createPropertyGroup: {
+                        entity: string;
+                        action: string;
+                        payload: Array<{
+                            id: string;
+                            name: string;
+                            sortingType: string;
+                            displayType: string;
+                            options: Array<{ id: string; name: string }>;
+                        }>;
+                    };
+                };
+                expect(body.createPropertyGroup.entity).toBe("property_group");
+                expect(body.createPropertyGroup.action).toBe("upsert");
+                const payload = body.createPropertyGroup.payload[0];
+                expect(payload?.name).toBe("Finish New");
+                expect(payload?.sortingType).toBe("alphanumeric");
+                expect(payload?.displayType).toBe("text");
+                expect(payload?.id).toHaveLength(32);
+                expect(payload?.options.map((o) => o.name)).toEqual(["Matte", "Gloss"]);
+                expect(configuratorOptionIds(mockApi)).toEqual(["opt-matte", "opt-gloss"]);
+            });
+
+            test("keeps an existing group that already has enough options", async () => {
+                writeCachedGroup("cache-store-b", cachedGroup("Finish Full", ["Matte", "Gloss"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-existing",
+                    configs: [
+                        {
+                            group: "Finish Full",
+                            selectedOptions: ["Matte", "Gloss"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-b",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-finish-full",
+                            name: "Finish Full",
+                            options: [
+                                { id: "opt-matte-f", name: "Matte" },
+                                { id: "opt-gloss-f", name: "Gloss" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                expect(syncBodies(mockApi).some((b) => b.includes("createPropertyGroup"))).toBe(
+                    false
+                );
+                expect(configuratorOptionIds(mockApi)).toEqual(["opt-matte-f", "opt-gloss-f"]);
+            });
+
+            test("adds missing cached options to an existing group", async () => {
+                writeCachedGroup(
+                    "cache-store-c",
+                    cachedGroup("Finish Partial", ["Matte", "Gloss", "Satin"])
+                );
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-partial",
+                    configs: [
+                        {
+                            group: "Finish Partial",
+                            selectedOptions: ["Matte", "Satin"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-c",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-finish-partial",
+                            name: "Finish Partial",
+                            options: [
+                                { id: "opt-matte-p", name: "Matte" },
+                                { id: "opt-gloss-p", name: "Gloss" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                const groupSync = syncBodies(mockApi).find((b) =>
+                    b.includes("createPropertyGroup")
+                );
+                expect(groupSync).toContain('"id":"pg-finish-partial"');
+                expect(groupSync).toContain('{"id":"opt-matte-p","name":"Matte"}');
+                expect(groupSync).toContain('{"id":"opt-gloss-p","name":"Gloss"}');
+                expect(groupSync).toContain('"name":"Satin"');
+                // Group search is repeated after the sync (cache cleared)
+                expect(mockApi.getCallsByEndpoint("search/property-group")).toHaveLength(2);
+            });
+
+            test("does not sync when every cached option name already exists", async () => {
+                writeCachedGroup(
+                    "cache-store-d",
+                    cachedGroup("Finish Dupes", ["Matte", "Matte", "Gloss"])
+                );
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-dupes",
+                    configs: [
+                        {
+                            group: "Finish Dupes",
+                            selectedOptions: ["Matte", "Gloss"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-d",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-finish-dupes",
+                            name: "Finish Dupes",
+                            options: [
+                                { id: "opt-matte-d", name: "Matte" },
+                                { id: "opt-gloss-d", name: "Gloss" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                expect(syncBodies(mockApi).some((b) => b.includes("createPropertyGroup"))).toBe(
+                    false
+                );
+            });
+
+            test("skips the product when the group sync fails", async () => {
+                writeCachedGroup("cache-store-e", cachedGroup("Finish Fail", ["Matte", "Gloss"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-fail",
+                    configs: [
+                        {
+                            group: "Finish Fail",
+                            selectedOptions: ["Matte", "Gloss"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-e",
+                });
+                mockApi.mockPostResponse("search/property-group", { data: [] });
+                mockApi.mockPostFailure("_action/sync", new Error("sync rejected"));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.skipped).toBe(1);
+                expect(result.errors).toHaveLength(0);
+                expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(1);
+            });
         });
     });
 });

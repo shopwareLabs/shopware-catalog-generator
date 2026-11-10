@@ -274,3 +274,190 @@ describe("sampleUrls", () => {
         expect(sampleUrls(urls, 6)).toHaveLength(6);
     });
 });
+
+describe("discoverFromSitemap — sitemap index handling", () => {
+    function urlset(locs: string[]): string {
+        return `<urlset>${locs.map((l) => `<url><loc>${l}</loc></url>`).join("")}</urlset>`;
+    }
+
+    function sitemapIndex(locs: string[]): string {
+        return `<sitemapindex>${locs.map((l) => `<sitemap><loc>${l}</loc></sitemap>`).join("")}</sitemapindex>`;
+    }
+
+    test("returns empty for an unparsable base URL", async () => {
+        expect(await discoverFromSitemap("not a url")).toEqual([]);
+    });
+
+    test("orders sub-sitemaps: products, then categories, then the rest", async () => {
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch({
+            "https://shop.test/sitemap.xml": sitemapIndex([
+                "https://shop.test/sitemap-pages.xml",
+                "https://shop.test/sitemap-categories.xml",
+                "https://shop.test/sitemap-products.xml",
+            ]),
+            "https://shop.test/sitemap-pages.xml": urlset(["https://shop.test/about"]),
+            "https://shop.test/sitemap-categories.xml": urlset(["https://shop.test/shoes"]),
+            "https://shop.test/sitemap-products.xml": urlset(["https://shop.test/shoes/runner"]),
+        });
+
+        try {
+            expect(await discoverFromSitemap("https://shop.test")).toEqual([
+                "https://shop.test/shoes/runner",
+                "https://shop.test/shoes",
+                "https://shop.test/about",
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("prefers sub-sitemaps that contain the locale code", async () => {
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch({
+            "https://shop.test/sitemap.xml": sitemapIndex([
+                "https://shop.test/sitemap-products-en.xml",
+                "https://shop.test/sitemap-categories-de-de.xml",
+            ]),
+            "https://shop.test/sitemap-products-en.xml": urlset(["https://shop.test/de/de/p-1"]),
+            "https://shop.test/sitemap-categories-de-de.xml": urlset([
+                "https://shop.test/de/de/c-1",
+            ]),
+        });
+
+        try {
+            expect(await discoverFromSitemap("https://shop.test/de/de/")).toEqual([
+                "https://shop.test/de/de/c-1",
+                "https://shop.test/de/de/p-1",
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("stops after five sub-sitemaps that added URLs", async () => {
+        const subs = Array.from({ length: 7 }, (_, i) => `https://shop.test/sitemap-${i}.xml`);
+        const routes: Record<string, string> = {
+            "https://shop.test/sitemap.xml": sitemapIndex(subs),
+        };
+        subs.forEach((sub, i) => {
+            routes[sub] = urlset([`https://shop.test/page-${i}`]);
+        });
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch(routes);
+
+        try {
+            const urls = await discoverFromSitemap("https://shop.test");
+            expect(urls).toHaveLength(5);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("follows nested sitemap indexes and skips empty or invalid sub-sitemaps", async () => {
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch({
+            "https://shop.test/sitemap.xml": sitemapIndex([
+                "https://shop.test/missing.xml",
+                "https://shop.test/html.xml",
+                "https://shop.test/nested.xml",
+                "not a url",
+            ]),
+            "https://shop.test/html.xml": "<html><body>Not a sitemap</body></html>",
+            "https://shop.test/nested.xml": sitemapIndex(["https://shop.test/leaf.xml"]),
+            "https://shop.test/leaf.xml": urlset([
+                "https://shop.test/leaf-page",
+                "https://other.test/foreign-page",
+            ]),
+        });
+
+        try {
+            expect(await discoverFromSitemap("https://shop.test")).toEqual([
+                "https://shop.test/leaf-page",
+            ]);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("caps the result at 300 URLs", async () => {
+        const locs = Array.from({ length: 350 }, (_, i) => `https://shop.test/p-${i}`);
+        const origFetch = globalThis.fetch;
+        setupRoutedFetch({ "https://shop.test/sitemap.xml": urlset(locs) });
+
+        try {
+            const urls = await discoverFromSitemap("https://shop.test");
+            expect(urls).toHaveLength(300);
+            expect(urls[299]).toBe("https://shop.test/p-299");
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("fetches each robots.txt sitemap once even when listed twice", async () => {
+        const origFetch = globalThis.fetch;
+        const calls: string[] = [];
+        const routes: Record<string, string> = {
+            "https://shop.test/robots.txt":
+                "Sitemap: https://shop.test/a.xml\nSitemap: https://shop.test/a.xml\nSitemap: https://shop.test/sitemap.xml",
+            "https://shop.test/a.xml": "<urlset></urlset>",
+            "https://shop.test/sitemap.xml": "<urlset></urlset>",
+        };
+        mockFetch(async (input) => {
+            const url = input.toString();
+            calls.push(url);
+            const body = routes[url] ?? null;
+            return {
+                ok: body !== null,
+                text: async () => body ?? "",
+                headers: { get: () => null },
+            };
+        });
+
+        try {
+            expect(await discoverFromSitemap("https://shop.test")).toEqual([]);
+            expect(calls.filter((c) => c === "https://shop.test/a.xml")).toHaveLength(1);
+            expect(calls.filter((c) => c === "https://shop.test/sitemap.xml")).toHaveLength(1);
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+});
+
+describe("sampleUrls — branching", () => {
+    test("round-robins one URL per first path segment in insertion order", () => {
+        const urls = [
+            "https://shop.test/a/1",
+            "https://shop.test/a/2",
+            "https://shop.test/b/1",
+            "https://shop.test/",
+            "https://shop.test/b/2",
+        ];
+        expect(sampleUrls(urls, 4)).toEqual([
+            "https://shop.test/a/1",
+            "https://shop.test/b/1",
+            "https://shop.test/",
+            "https://shop.test/a/2",
+        ]);
+    });
+
+    test("groups by two segments when one first segment holds over 80% of URLs", () => {
+        const urls = [
+            "https://shop.test/catalogue/category/a",
+            "https://shop.test/catalogue/category/b",
+            "https://shop.test/catalogue/category/c",
+            "https://shop.test/catalogue/book-1",
+            "https://shop.test/catalogue/book-2",
+        ];
+        expect(sampleUrls(urls, 3)).toEqual([
+            "https://shop.test/catalogue/category/a",
+            "https://shop.test/catalogue/book-1",
+            "https://shop.test/catalogue/book-2",
+        ]);
+    });
+
+    test("ignores invalid URLs and returns fewer than n when branches run out", () => {
+        const urls = ["not a url", "also bad", "https://shop.test/a/1", "https://shop.test/b/1"];
+        expect(sampleUrls(urls, 3)).toEqual(["https://shop.test/a/1", "https://shop.test/b/1"]);
+    });
+});

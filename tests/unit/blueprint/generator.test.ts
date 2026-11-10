@@ -336,8 +336,14 @@ describe("BlueprintGenerator", () => {
         });
 
         test("generates purchase constraints for some products", () => {
-            const generator = new BlueprintGenerator({ totalProducts: 300 });
+            // productsPerBranch caps the total (default 30 × 3 branches = 90). At 90
+            // products, ~1 % of runs had no minPurchase product at all.
+            const generator = new BlueprintGenerator({
+                totalProducts: 300,
+                productsPerBranch: 100,
+            });
             const blueprint = generator.generateBlueprint("test", "test");
+            expect(blueprint.products).toHaveLength(300);
 
             const withMinPurchase = blueprint.products.filter(
                 (p) => p.metadata.minPurchase !== undefined
@@ -395,11 +401,15 @@ describe("BlueprintGenerator - variant settings", () => {
 });
 
 describe("BlueprintGenerator - packaging and custom fields", () => {
-    const blueprint = new BlueprintGenerator({ totalProducts: 300 }).generateBlueprint(
-        "test",
-        "Test store"
-    );
+    const blueprint = new BlueprintGenerator({
+        totalProducts: 300,
+        productsPerBranch: 100,
+    }).generateBlueprint("test", "Test store");
     const metadata = blueprint.products.map((p) => p.metadata);
+
+    test("generates the requested product count", () => {
+        expect(metadata).toHaveLength(300);
+    });
 
     test("gives a share of products a complete packaging option", () => {
         const packaged = metadata.filter((m) => m.packaging);

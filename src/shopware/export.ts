@@ -41,6 +41,90 @@ function normalizeDisplayType(displayType: string): "color" | "text" | "image" {
     return "text";
 }
 
+/** Category node from a Shopware category; counts images and missing descriptions */
+function toCategoryNode(cat: Schemas["Category"], validation: ExportValidation): CategoryNode {
+    const name = cat.name ?? "";
+    const description = cat.description ?? "";
+    const hasDescription = description.trim() !== "";
+    if (!hasDescription) validation.categoriesWithoutDescription++;
+
+    const hasImage = cat.mediaId !== null && cat.mediaId !== undefined;
+    if (hasImage) validation.categoriesWithImages++;
+
+    return {
+        id: cat.id,
+        name: normalizeString(name),
+        description: normalizeDescription(
+            hasDescription ? description : generateCategoryPlaceholder(name)
+        ),
+        children: [],
+        productCount: 0,
+        hasImage,
+    };
+}
+
+/**
+ * Link the nodes into a tree in response order. Direct children of the root are returned,
+ * nodes without a known parent are dropped.
+ */
+function buildCategoryTree(
+    flatCategories: Schemas["Category"][],
+    categoryMap: Map<string, CategoryNode>,
+    rootCategoryId: string
+): CategoryNode[] {
+    const rootChildren: CategoryNode[] = [];
+    for (const cat of flatCategories) {
+        const node = categoryMap.get(cat.id);
+        if (!node || !cat.parentId) continue;
+        if (cat.parentId === rootCategoryId) {
+            rootChildren.push(node);
+            continue;
+        }
+        categoryMap.get(cat.parentId)?.children.push(node);
+    }
+    return rootChildren;
+}
+
+/** Product input from a Shopware product; counts placeholder descriptions and default prices */
+function toProductInput(
+    p: Schemas["Product"],
+    categoryName: string,
+    validation: ExportValidation
+): ProductInput {
+    const name = p.name ?? "";
+    const description = p.description ?? "";
+    const hasDescription = description.trim() !== "";
+    if (!hasDescription) validation.productsWithoutDescription++;
+
+    const options = exportedOptions(p);
+    return {
+        id: p.id,
+        name: normalizeString(name),
+        description: normalizeDescription(
+            hasDescription ? description : generateProductPlaceholder(name, categoryName)
+        ),
+        stock: Math.max(0, p.stock || 0),
+        price: exportedPrice(p, validation),
+        options: options.length > 0 ? options : undefined,
+    };
+}
+
+/** Gross price rounded to cents; missing or non-positive prices get the default price */
+function exportedPrice(p: Schemas["Product"], validation: ExportValidation): number {
+    const gross = p.price?.[0]?.gross ?? 0;
+    if (gross > 0) return Math.round(gross * 100) / 100;
+    validation.productsWithDefaultPrice++;
+    return DEFAULT_PRODUCT_PRICE;
+}
+
+function exportedOptions(p: Schemas["Product"]): NonNullable<ProductInput["options"]> {
+    return (p.options ?? []).map((o) => ({
+        id: o.id,
+        name: normalizeString(o.name),
+        colorHexCode: o.colorHexCode,
+    }));
+}
+
 /**
  * Shopware data exporter - fetches and validates existing data
  */
@@ -115,50 +199,10 @@ export class ShopwareExporter extends ShopwareClient {
         const result = searchData as SearchResult<Schemas["Category"]>;
 
         const flatCategories = result.data ?? [];
-
-        // Build tree structure with validation
-        const categoryMap = new Map<string, CategoryNode>();
-        const rootChildren: CategoryNode[] = [];
-
-        // First pass: create all nodes with validation
-        for (const cat of flatCategories) {
-            let description = cat.description || "";
-            if (!description.trim()) {
-                description = generateCategoryPlaceholder(cat.name ?? "");
-                validation.categoriesWithoutDescription++;
-            }
-
-            const hasImage = cat.mediaId !== null && cat.mediaId !== undefined;
-            if (hasImage) {
-                validation.categoriesWithImages++;
-            }
-
-            categoryMap.set(cat.id, {
-                id: cat.id,
-                name: normalizeString(cat.name ?? ""),
-                description: normalizeDescription(description),
-                children: [],
-                productCount: 0,
-                hasImage,
-            });
-        }
-
-        // Second pass: build tree
-        for (const cat of flatCategories) {
-            const node = categoryMap.get(cat.id);
-            if (!node) continue;
-
-            if (cat.parentId === rootCategoryId) {
-                rootChildren.push(node);
-            } else if (cat.parentId) {
-                const parent = categoryMap.get(cat.parentId);
-                if (parent) {
-                    parent.children.push(node);
-                }
-            }
-        }
-
-        return rootChildren;
+        const categoryMap = new Map(
+            flatCategories.map((cat) => [cat.id, toCategoryNode(cat, validation)])
+        );
+        return buildCategoryTree(flatCategories, categoryMap, rootCategoryId);
     }
 
     /**
@@ -187,36 +231,7 @@ export class ShopwareExporter extends ShopwareClient {
         );
         const productResult = productSearchData as SearchResult<Schemas["Product"]>;
 
-        return (productResult.data ?? []).map((p) => {
-            let description = p.description || "";
-            if (!description.trim()) {
-                description = generateProductPlaceholder(p.name ?? "", categoryName);
-                validation.productsWithoutDescription++;
-            }
-
-            let price = p.price?.[0]?.gross ?? 0;
-            if (price <= 0) {
-                price = DEFAULT_PRODUCT_PRICE;
-                validation.productsWithDefaultPrice++;
-            }
-
-            const stock = Math.max(0, p.stock || 0);
-
-            const options = (p.options ?? []).map((o) => ({
-                id: o.id,
-                name: normalizeString(o.name),
-                colorHexCode: o.colorHexCode,
-            }));
-
-            return {
-                id: p.id,
-                name: normalizeString(p.name ?? ""),
-                description: normalizeDescription(description),
-                stock,
-                price: Math.round(price * 100) / 100,
-                options: options.length > 0 ? options : undefined,
-            };
-        });
+        return (productResult.data ?? []).map((p) => toProductInput(p, categoryName, validation));
     }
 
     /**

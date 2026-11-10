@@ -11,6 +11,7 @@ import {
     formatTranslationEstimate,
     priceTokenUsage,
 } from "../../../src/blueprint/cost-estimator.js";
+import { PRICING_AS_OF } from "../../../src/fixtures/model-pricing.js";
 import { createTestCategory, createTestProduct } from "../../helpers/blueprint-factory.js";
 
 const OPENAI_SELECTION: ModelSelection = {
@@ -214,6 +215,111 @@ describe("estimateHydrationCost", () => {
 
         expect(estimate.images.count).toBe(0);
         expect(estimate.images.usd).toBe(0);
+    });
+});
+
+describe("estimateHydrationCost - image unit price", () => {
+    const unitPrice = (selection: Partial<ModelSelection>): number | null =>
+        estimateHydrationCost(createInput({ selection: { ...OPENAI_SELECTION, ...selection } }))
+            .images.unitUsd;
+
+    test("uses the quality tier, defaulting to low", () => {
+        expect(unitPrice({ imageQuality: "high" })).toBe(0.052);
+        expect(unitPrice({ imageQuality: undefined })).toBe(0.006);
+    });
+
+    test("forecasts auto quality as medium", () => {
+        expect(unitPrice({ imageQuality: "auto" })).toBe(0.015);
+    });
+
+    test("ignores the snapshot date of the model", () => {
+        expect(unitPrice({ imageModel: "gpt-image-1-mini-2025-10-06" })).toBe(0.006);
+    });
+
+    test("is free without images and on the Pollinations free tier", () => {
+        expect(unitPrice({ imageProvider: "none" })).toBe(0);
+        expect(unitPrice({ imageProvider: "pollinations", imageFreeTier: true })).toBe(0);
+    });
+
+    test("is unknown for Pollinations with a key and without an image model", () => {
+        expect(unitPrice({ imageProvider: "pollinations", imageFreeTier: false })).toBeNull();
+        expect(unitPrice({ imageModel: undefined })).toBeNull();
+    });
+});
+
+describe("estimateHydrationCost - notes", () => {
+    const PRICE_NOTE = `List prices as of ${PRICING_AS_OF}. Actual cost may differ.`;
+    const notesFor = (overrides: Partial<CostEstimateInput>): string[] =>
+        estimateHydrationCost(createInput(overrides)).notes;
+    const pollinations: ModelSelection = {
+        ...OPENAI_SELECTION,
+        textProvider: "pollinations",
+        imageProvider: "pollinations",
+    };
+
+    test("lists the full scope notes for OpenAI with known prices", () => {
+        expect(notesFor({})).toEqual([
+            "Product and category images are counted in full; renamed products regenerate.",
+            "Property options calls only happen for properties missing from the cache.",
+            PRICE_NOTE,
+        ]);
+    });
+
+    test("only adds the price date for the categories scope", () => {
+        expect(notesFor({ scope: "categories" })).toEqual([PRICE_NOTE]);
+    });
+
+    test("adds the property options note in the properties scope", () => {
+        expect(notesFor({ scope: "properties" })).toContain(
+            "Property options calls only happen for properties missing from the cache."
+        );
+    });
+
+    test("skips the product image note when no product images are pending", () => {
+        const pendingImages = { cms: 0, product: 0, category: 0, theme: 0, variantColor: 0 };
+        expect(notesFor({ pendingImages }).join(" ")).not.toContain("counted in full");
+    });
+
+    test("notes pollen billing for Pollinations text and keyed images", () => {
+        const notes = notesFor({ selection: { ...pollinations, imageFreeTier: false } });
+        expect(notes).toContain(
+            "Pollinations text is billed in pollen; check enter.pollinations.ai."
+        );
+        expect(notes).toContain("Pollinations images with a key are billed in pollen.");
+    });
+
+    test("does not note pollen for free tier Pollinations images", () => {
+        const notes = notesFor({ selection: { ...pollinations, imageFreeTier: true } });
+        expect(notes).not.toContain("Pollinations images with a key are billed in pollen.");
+    });
+
+    test("notes an OpenAI image model without price data", () => {
+        expect(
+            notesFor({ selection: { ...OPENAI_SELECTION, imageModel: "gpt-image-9" } })
+        ).toContain('No price data for image model "gpt-image-9".');
+    });
+});
+
+describe("estimateHydrationCost - text items per scope", () => {
+    const labelsFor = (overrides: Partial<CostEstimateInput>): string[] =>
+        estimateHydrationCost(createInput(overrides)).text.items.map((i) => i.label);
+
+    test("full scope runs every text step except variant colours", () => {
+        expect(labelsFor({})).toEqual([
+            "Categories",
+            "Brand colors",
+            "Products",
+            "Property options",
+            "CMS pages",
+        ]);
+    });
+
+    test("variant-images scope has no text calls", () => {
+        expect(labelsFor({ scope: "variant-images" })).toEqual([]);
+    });
+
+    test("variants scope without variant settings has no text calls", () => {
+        expect(labelsFor({ scope: "variants", variants: undefined })).toEqual([]);
     });
 });
 

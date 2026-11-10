@@ -175,6 +175,99 @@ describe("cleanup-service", () => {
         ]);
     });
 
+    const coreSection = (lines: string[]): string[] => {
+        const start = lines.indexOf("=== Core Cleanup ===");
+        const end = lines.indexOf("", start);
+        return lines.slice(start, end + 1);
+    };
+
+    test("core cleanup reports the options and counts", async () => {
+        const plain = await cleanupSalesChannelData(BASE, deps);
+        expect(coreSection(plain)).toEqual([
+            "=== Core Cleanup ===",
+            "Delete SalesChannel: No",
+            "Delete property groups: No",
+            "=== Core Cleanup Complete ===",
+            "Products deleted: 5",
+            "Categories deleted: 3",
+            "",
+        ]);
+
+        const all = await cleanupSalesChannelData(
+            { ...BASE, deleteProps: true, deleteSalesChannel: true },
+            deps
+        );
+        expect(coreSection(all)).toEqual([
+            "=== Core Cleanup ===",
+            "Delete SalesChannel: Yes",
+            "Delete property groups: Yes",
+            "=== Core Cleanup Complete ===",
+            "Products deleted: 5",
+            "Categories deleted: 3",
+            "Property groups deleted: 1",
+            "SalesChannel deleted: Yes",
+            "Root category deleted: Yes",
+            "",
+        ]);
+    });
+
+    test("core cleanup reports what was not deleted and its errors", async () => {
+        shopware = fakeShopware({
+            cleanupCore: async () => ({
+                products: 0,
+                categories: 0,
+                propertyGroups: 0,
+                salesChannelDeleted: false,
+                rootCategoryDeleted: false,
+                errors: ["a", "b"],
+            }),
+        });
+
+        const lines = await cleanupSalesChannelData({ ...BASE, deleteSalesChannel: true }, deps);
+
+        expect(lines).toContain("SalesChannel deleted: No");
+        expect(lines).toContain("Root category deleted: No");
+        expect(errors(lines)).toEqual(["Error: Core cleanup errors: a; b"]);
+    });
+
+    test("core dry run lists only the selected deletions", async () => {
+        const plain = await cleanupSalesChannelData({ ...BASE, dryRun: true }, deps);
+        expect(coreSection(plain)).toEqual([
+            "=== Core Cleanup ===",
+            "Delete SalesChannel: No",
+            "Delete property groups: No",
+            "[DRY RUN] Would delete:",
+            '  - Products in SalesChannel "garden"',
+            "  - Categories under its root category",
+            "",
+        ]);
+
+        const all = await cleanupSalesChannelData(
+            { ...BASE, dryRun: true, deleteProps: true, deleteSalesChannel: true },
+            deps
+        );
+        expect(all).toContain("  - All property groups");
+        expect(all).toContain("  - The SalesChannel and its root category");
+    });
+
+    test("a failed core cleanup still shows the header", async () => {
+        shopware = fakeShopware({
+            cleanupCore: async () => {
+                throw new Error("down");
+            },
+        });
+
+        const lines = await cleanupSalesChannelData(BASE, deps);
+        const start = lines.indexOf("=== Core Cleanup ===");
+
+        expect(lines.slice(start, start + 4)).toEqual([
+            "=== Core Cleanup ===",
+            "Delete SalesChannel: No",
+            "Delete property groups: No",
+            "Error: Core cleanup failed: down",
+        ]);
+    });
+
     test("a failed connection is an error", async () => {
         const lines = await cleanupSalesChannelData(BASE, {
             cache,

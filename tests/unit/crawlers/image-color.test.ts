@@ -250,3 +250,73 @@ describe("extractColorsFromBrandImage", () => {
         expect(result?.primary).toMatch(/^#0[0-9a-f]8[0-9a-f]0[0-9a-f]$/i);
     });
 });
+
+/** Create a 10x10 PNG from a list of [r, g, b, pixelCount] stripes (counts must sum to 100). */
+async function makeStripedPng(stripes: Array<[number, number, number, number]>): Promise<Buffer> {
+    const raw = Buffer.alloc(10 * 10 * 3);
+    let offset = 0;
+    for (const [r, g, b, count] of stripes) {
+        for (let i = 0; i < count; i++) {
+            raw[offset++] = r;
+            raw[offset++] = g;
+            raw[offset++] = b;
+        }
+    }
+    return sharp(raw, { raw: { width: 10, height: 10, channels: 3 } })
+        .png()
+        .toBuffer();
+}
+
+describe("extractColorsFromBrandImage — pixel analysis", () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeEach(() => {
+        originalFetch = globalThis.fetch;
+    });
+
+    afterEach(() => {
+        globalThis.fetch = originalFetch;
+    });
+
+    async function analyze(png: Buffer): Promise<{ primary: string; secondary?: string } | null> {
+        const $ = cheerio.load(`<link rel="apple-touch-icon" href="https://example.com/i.png">`);
+        setupFetch({ "https://example.com/i.png": { body: png, contentType: "image/png" } });
+        return extractColorsFromBrandImage($, "https://example.com");
+    }
+
+    test("picks a distinct secondary color and ignores white pixels", async () => {
+        const png = await makeStripedPng([
+            [255, 255, 255, 40],
+            [224, 0, 0, 40],
+            [0, 0, 224, 20],
+        ]);
+        expect(await analyze(png)).toEqual({ primary: "#e00000", secondary: "#0000e0" });
+    });
+
+    test("leaves secondary undefined when all other colors are too close", async () => {
+        const png = await makeStripedPng([
+            [224, 0, 0, 60],
+            [192, 0, 0, 40],
+        ]);
+        expect(await analyze(png)).toEqual({ primary: "#e00000", secondary: undefined });
+    });
+
+    test("ignores grey and near-black in the first pass when colored pixels exist", async () => {
+        const png = await makeStripedPng([
+            [128, 128, 128, 50],
+            [10, 10, 10, 30],
+            [0, 160, 0, 20],
+        ]);
+        expect((await analyze(png))?.primary).toBe("#00a000");
+    });
+
+    test("falls back to grey pixels in the second pass", async () => {
+        const png = await makeStripedPng([[128, 128, 128, 100]]);
+        expect(await analyze(png)).toEqual({ primary: "#808080", secondary: undefined });
+    });
+
+    test("returns null for an all-white image", async () => {
+        const png = await makeStripedPng([[255, 255, 255, 100]]);
+        expect(await analyze(png)).toBeNull();
+    });
+});

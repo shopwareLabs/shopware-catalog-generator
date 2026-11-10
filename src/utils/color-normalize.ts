@@ -103,21 +103,27 @@ interface Hsl {
 }
 
 function hexToHsl(hex: string): Hsl {
-    const value = Number.parseInt(hex.slice(1), 16);
-    const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((c) => c / 255);
-    const max = Math.max(r ?? 0, g ?? 0, b ?? 0);
-    const min = Math.min(r ?? 0, g ?? 0, b ?? 0);
+    const [r, g, b] = hexToRgb(hex);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
     const l = (max + min) / 2;
     const d = max - min;
     if (d === 0) return { h: 0, s: 0, l };
     const s = d / (1 - Math.abs(2 * l - 1));
-    const h =
-        max === r
-            ? ((g ?? 0) - (b ?? 0)) / d + 6
-            : max === g
-              ? ((b ?? 0) - (r ?? 0)) / d + 2
-              : ((r ?? 0) - (g ?? 0)) / d + 4;
-    return { h: (h * 60) % 360, s, l };
+    return { h: (hueSector(r, g, b, max, d) * 60) % 360, s, l };
+}
+
+/** Red, green and blue channels of a "#RRGGBB" code, each 0-1 */
+function hexToRgb(hex: string): [number, number, number] {
+    const value = Number.parseInt(hex.slice(1), 16);
+    return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
+}
+
+/** Hue in sixths of the colour wheel (0-7, wrapped by the caller) */
+function hueSector(r: number, g: number, b: number, max: number, d: number): number {
+    if (max === r) return (g - b) / d + 6;
+    if (max === g) return (b - r) / d + 2;
+    return (r - g) / d + 4;
 }
 
 /** Family of a colourless (low saturation) colour by lightness */
@@ -131,10 +137,22 @@ function neutralFamily(l: number): ColorFamily {
 function warmFamily({ h, s, l }: Hsl): ColorFamily | null {
     if (h < 12 || h >= 345) return l > 0.72 ? "pink" : "red";
     if (h >= 65) return null;
+    const pale = paleWarmFamily(s, l);
+    if (pale) return pale;
+    if (isBrownShade(s, l)) return "brown";
+    return h < 42 ? "orange" : "yellow";
+}
+
+/** Very light warm colours read as white or beige */
+function paleWarmFamily(s: number, l: number): ColorFamily | null {
     if (l > 0.88 && s < 0.6) return "white";
     if (l > 0.6 && s < 0.75) return "beige";
-    if (l < 0.42 || (s < 0.45 && l < 0.6)) return "brown";
-    return h < 42 ? "orange" : "yellow";
+    return null;
+}
+
+/** Dark or muted warm colours read as brown */
+function isBrownShade(s: number, l: number): boolean {
+    return l < 0.42 || (s < 0.45 && l < 0.6);
 }
 
 /** Family of the remaining hues */

@@ -182,70 +182,76 @@ export const registry = new ProcessorRegistry();
 // Dependency Resolution and Execution
 // =============================================================================
 
+interface DependencyGraph {
+    /** Processor name → names of selected processors that depend on it */
+    dependents: Map<string, Set<string>>;
+    /** Processor name → number of unresolved selected dependencies */
+    inDegree: Map<string, number>;
+}
+
+/** Dependencies of a processor that are part of the selection */
+function selectedDependencies(processor: PostProcessor, selected: string[]): string[] {
+    return processor.dependsOn.filter((dep) => selected.includes(dep));
+}
+
+/** Build the dependency graph for the selected processors */
+function buildDependencyGraph(processors: PostProcessor[], selected: string[]): DependencyGraph {
+    const dependents = new Map<string, Set<string>>(selected.map((name) => [name, new Set()]));
+    const inDegree = new Map<string, number>(selected.map((name) => [name, 0]));
+
+    const selectedProcessors = processors.filter((p) => selected.includes(p.name));
+    for (const processor of selectedProcessors) {
+        const deps = selectedDependencies(processor, selected);
+        deps.forEach((dep) => dependents.get(dep)?.add(processor.name));
+        inDegree.set(processor.name, deps.length);
+    }
+
+    return { dependents, inDegree };
+}
+
+/** Decrement the in-degree of every dependent and return the ones that became ready */
+function releaseDependents(graph: DependencyGraph, name: string): string[] {
+    const dependents = [...(graph.dependents.get(name) ?? [])];
+    return dependents.filter((dep) => {
+        const newDegree = (graph.inDegree.get(dep) ?? 1) - 1;
+        graph.inDegree.set(dep, newDegree);
+        return newDegree === 0;
+    });
+}
+
 /**
- * Topological sort for dependency ordering
+ * Topological sort for dependency ordering (Kahn's algorithm)
  * Returns processors in execution order (dependencies first)
  */
 function topologicalSort(processors: PostProcessor[], selected: string[]): PostProcessor[] {
-    // Build dependency graph for selected processors
-    const graph = new Map<string, Set<string>>();
-    const inDegree = new Map<string, number>();
-
-    // Initialize
-    for (const name of selected) {
-        graph.set(name, new Set());
-        inDegree.set(name, 0);
-    }
-
-    // Add dependencies (only for selected processors)
-    for (const name of selected) {
-        const processor = processors.find((p) => p.name === name);
-        if (!processor) continue;
-
-        for (const dep of processor.dependsOn) {
-            if (selected.includes(dep)) {
-                graph.get(dep)?.add(name);
-                inDegree.set(name, (inDegree.get(name) || 0) + 1);
-            }
-        }
-    }
-
-    // Kahn's algorithm
-    const queue: string[] = [];
-    for (const [name, degree] of inDegree) {
-        if (degree === 0) {
-            queue.push(name);
-        }
-    }
-
+    const graph = buildDependencyGraph(processors, selected);
+    const queue = [...graph.inDegree].filter(([, degree]) => degree === 0).map(([name]) => name);
     const sorted: PostProcessor[] = [];
-    while (queue.length > 0) {
-        const name = queue.shift();
-        if (!name) continue;
 
+    for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
         const processor = processors.find((p) => p.name === name);
-        if (processor) {
-            sorted.push(processor);
-        }
-
-        const dependents = graph.get(name);
-        if (dependents) {
-            for (const dep of dependents) {
-                const newDegree = (inDegree.get(dep) || 1) - 1;
-                inDegree.set(dep, newDegree);
-                if (newDegree === 0) {
-                    queue.push(dep);
-                }
-            }
-        }
+        if (processor) sorted.push(processor);
+        queue.push(...releaseDependents(graph, name));
     }
 
-    // Check for cycles
     if (sorted.length !== selected.length) {
         throw new Error("Circular dependency detected in processors");
     }
 
     return sorted;
+}
+
+/**
+ * Whether a processor can join the current batch: none of its dependencies is in it.
+ * The input is topologically sorted, so nothing in the batch can depend on the processor.
+ */
+function canJoinBatch(
+    processor: PostProcessor,
+    batch: PostProcessor[],
+    selected: string[]
+): boolean {
+    const batchNames = new Set(batch.map((p) => p.name));
+    return !selectedDependencies(processor, selected).some((dep) => batchNames.has(dep));
 }
 
 /**
@@ -256,39 +262,13 @@ function groupParallelizable(processors: PostProcessor[], selected: string[]): P
     const sorted = topologicalSort(processors, selected);
     const batches: PostProcessor[][] = [];
 
-    // Track completed processors
-    const completed = new Set<string>();
-
     for (const processor of sorted) {
-        // Check if all dependencies are complete
-        const depsComplete = processor.dependsOn.every(
-            (dep) => !selected.includes(dep) || completed.has(dep)
-        );
-
-        if (depsComplete) {
-            const currentBatch = batches[batches.length - 1];
-            if (!currentBatch) {
-                batches.push([processor]);
-            } else {
-                const currentBatchNames = new Set(currentBatch.map((p) => p.name));
-                const hasDepsInCurrentBatch = processor.dependsOn.some(
-                    (dep) => selected.includes(dep) && currentBatchNames.has(dep)
-                );
-                const nothingDependsOnThis = currentBatch.every(
-                    (p) => !p.dependsOn.includes(processor.name)
-                );
-
-                if (!hasDepsInCurrentBatch && nothingDependsOnThis) {
-                    currentBatch.push(processor);
-                } else {
-                    batches.push([processor]);
-                }
-            }
-        } else {
-            batches.push([processor]);
+        const currentBatch = batches[batches.length - 1];
+        if (currentBatch && canJoinBatch(processor, currentBatch, selected)) {
+            currentBatch.push(processor);
+            continue;
         }
-
-        completed.add(processor.name);
+        batches.push([processor]);
     }
 
     return batches;
@@ -298,21 +278,75 @@ function groupParallelizable(processors: PostProcessor[], selected: string[]): P
 // Processor Runner
 // =============================================================================
 
+/** Throw when a selected processor is not registered */
+function assertProcessorsExist(selected: string[]): void {
+    const unknown = selected.find((name) => !registry.has(name));
+    if (unknown === undefined) return;
+    throw new Error(
+        `Unknown processor: "${unknown}". Available: ${registry.getNames().join(", ")}`
+    );
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function logResultErrors(errors: string[]): void {
+    errors.forEach((error) => logger.error(`      Error: ${error}`, { cli: true }));
+}
+
+function statusIcon(errors: string[]): string {
+    return errors.length === 0 ? "✓" : "✗";
+}
+
+/** Run one processor, turning a thrown error into an error result */
+async function runSingleProcessor(
+    processor: PostProcessor,
+    context: PostProcessorContext
+): Promise<PostProcessorResult> {
+    const startTime = Date.now();
+    try {
+        const result = await processor.process(context);
+        return { ...result, durationMs: Date.now() - startTime };
+    } catch (error) {
+        return {
+            name: processor.name,
+            processed: 0,
+            skipped: 0,
+            errors: [errorMessage(error)],
+            durationMs: Date.now() - startTime,
+        };
+    }
+}
+
+function logProcessorResult(result: PostProcessorResult): void {
+    logger.info(
+        `    ${statusIcon(result.errors)} ${result.name}: ${result.processed} processed, ${result.skipped} skipped (${result.durationMs}ms)`,
+        { cli: true }
+    );
+    logResultErrors(result.errors);
+}
+
+/** Run one batch of independent processors in parallel */
+async function runBatch(
+    batch: PostProcessor[],
+    label: string,
+    context: PostProcessorContext
+): Promise<PostProcessorResult[]> {
+    const batchNames = batch.map((p) => p.name).join(", ");
+    logger.info(`  Batch ${label}: ${batchNames}`, { cli: true });
+
+    const results = await Promise.all(batch.map((p) => runSingleProcessor(p, context)));
+    results.forEach(logProcessorResult);
+    return results;
+}
+
 /** Run selected post-processors with dependency ordering */
 export async function runProcessors(
     context: PostProcessorContext,
     selected: string[]
 ): Promise<PostProcessorResult[]> {
-    const allProcessors = registry.getAll();
-
-    // Validate selected processors exist
-    for (const name of selected) {
-        if (!registry.has(name)) {
-            throw new Error(
-                `Unknown processor: "${name}". Available: ${registry.getNames().join(", ")}`
-            );
-        }
-    }
+    assertProcessorsExist(selected);
 
     // Populate activeProcessors so processors can conditionally render optional sections
     const contextWithActive: PostProcessorContext = {
@@ -320,64 +354,60 @@ export async function runProcessors(
         options: { ...context.options, activeProcessors: selected },
     };
 
-    // Group into parallel batches
-    const batches = groupParallelizable(allProcessors, selected);
+    const batches = groupParallelizable(registry.getAll(), selected);
 
     logger.info(`Running ${selected.length} post-processors in ${batches.length} batch(es)...`, {
         cli: true,
     });
 
-    // Use contextWithActive from here on so each processor can read activeProcessors
-
     const allResults: PostProcessorResult[] = [];
-
-    for (let i = 0; i < batches.length; i++) {
-        const batch = batches[i];
-        if (!batch) continue;
-
-        const batchNames = batch.map((p) => p.name).join(", ");
-        logger.info(`  Batch ${i + 1}/${batches.length}: ${batchNames}`, { cli: true });
-
-        // Run batch in parallel
-        const batchResults = await Promise.all(
-            batch.map(async (processor) => {
-                const startTime = Date.now();
-                try {
-                    const result = await processor.process(contextWithActive);
-                    return {
-                        ...result,
-                        durationMs: Date.now() - startTime,
-                    };
-                } catch (error) {
-                    return {
-                        name: processor.name,
-                        processed: 0,
-                        skipped: 0,
-                        errors: [error instanceof Error ? error.message : String(error)],
-                        durationMs: Date.now() - startTime,
-                    };
-                }
-            })
-        );
-
-        allResults.push(...batchResults);
-
-        // Log batch results
-        for (const result of batchResults) {
-            const status = result.errors.length === 0 ? "✓" : "✗";
-            logger.info(
-                `    ${status} ${result.name}: ${result.processed} processed, ${result.skipped} skipped (${result.durationMs}ms)`,
-                { cli: true }
-            );
-            if (result.errors.length > 0) {
-                for (const error of result.errors) {
-                    logger.error(`      Error: ${error}`, { cli: true });
-                }
-            }
-        }
+    for (const [index, batch] of batches.entries()) {
+        const label = `${index + 1}/${batches.length}`;
+        allResults.push(...(await runBatch(batch, label, contextWithActive)));
     }
 
     return allResults;
+}
+
+type CleanupFn = NonNullable<PostProcessor["cleanup"]>;
+
+/** Run cleanup of one processor, turning a thrown error into an error result */
+async function cleanupSingleProcessor(
+    processor: PostProcessor,
+    cleanup: CleanupFn,
+    context: PostProcessorContext
+): Promise<PostProcessorCleanupResult> {
+    const name = processor.name;
+    const startTime = Date.now();
+    logger.info(`  Cleaning up: ${name}`, { cli: true });
+
+    try {
+        const result = await cleanup.call(processor, context);
+        const durationMs = Date.now() - startTime;
+        logger.info(
+            `    ${statusIcon(result.errors)} ${name}: ${result.deleted} deleted (${durationMs}ms)`,
+            { cli: true }
+        );
+        logResultErrors(result.errors);
+        return { ...result, durationMs };
+    } catch (error) {
+        const message = errorMessage(error);
+        logger.error(`    ✗ ${name}: Error - ${message}`, { cli: true });
+        return { name, deleted: 0, errors: [message], durationMs: Date.now() - startTime };
+    }
+}
+
+interface CleanableProcessor {
+    processor: PostProcessor;
+    cleanup: CleanupFn;
+}
+
+/** Selected processors that implement cleanup(), in selection order */
+function cleanableProcessors(selected: string[]): CleanableProcessor[] {
+    return selected.flatMap((name): CleanableProcessor[] => {
+        const processor = registry.get(name);
+        return processor?.cleanup ? [{ processor, cleanup: processor.cleanup }] : [];
+    });
 }
 
 /** Run cleanup for selected post-processors */
@@ -385,65 +415,19 @@ export async function cleanupProcessors(
     context: PostProcessorContext,
     selected: string[]
 ): Promise<PostProcessorCleanupResult[]> {
-    // Validate selected processors exist
-    for (const name of selected) {
-        if (!registry.has(name)) {
-            throw new Error(
-                `Unknown processor: "${name}". Available: ${registry.getNames().join(", ")}`
-            );
-        }
-    }
+    assertProcessorsExist(selected);
 
-    // Filter to processors that have cleanup implemented
-    const cleanableProcessors = selected.filter((name) => {
-        const processor = registry.get(name);
-        return processor && typeof processor.cleanup === "function";
-    });
-
-    if (cleanableProcessors.length === 0) {
+    const cleanable = cleanableProcessors(selected);
+    if (cleanable.length === 0) {
         logger.info("No processors with cleanup support selected.", { cli: true });
         return [];
     }
 
-    logger.info(`Running cleanup for ${cleanableProcessors.length} processor(s)...`, { cli: true });
+    logger.info(`Running cleanup for ${cleanable.length} processor(s)...`, { cli: true });
 
     const results: PostProcessorCleanupResult[] = [];
-
-    for (const name of cleanableProcessors) {
-        const processor = registry.get(name);
-        if (!processor || !processor.cleanup) continue;
-
-        const startTime = Date.now();
-        logger.info(`  Cleaning up: ${name}`, { cli: true });
-
-        try {
-            const result = await processor.cleanup(context);
-            results.push({
-                ...result,
-                durationMs: Date.now() - startTime,
-            });
-
-            const status = result.errors.length === 0 ? "✓" : "✗";
-            logger.info(
-                `    ${status} ${name}: ${result.deleted} deleted (${Date.now() - startTime}ms)`,
-                { cli: true }
-            );
-
-            if (result.errors.length > 0) {
-                for (const error of result.errors) {
-                    logger.error(`      Error: ${error}`, { cli: true });
-                }
-            }
-        } catch (error) {
-            const errorResult: PostProcessorCleanupResult = {
-                name,
-                deleted: 0,
-                errors: [error instanceof Error ? error.message : String(error)],
-                durationMs: Date.now() - startTime,
-            };
-            results.push(errorResult);
-            logger.error(`    ✗ ${name}: Error - ${errorResult.errors[0]}`, { cli: true });
-        }
+    for (const { processor, cleanup } of cleanable) {
+        results.push(await cleanupSingleProcessor(processor, cleanup, context));
     }
 
     return results;

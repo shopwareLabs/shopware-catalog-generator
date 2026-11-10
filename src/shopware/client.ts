@@ -8,6 +8,45 @@ import {
 } from "../utils/index.js";
 import { createShopwareAdminClient } from "./admin-client.js";
 
+/** Sales channel settings that a new SalesChannel copies (missing fields are empty strings) */
+export interface SalesChannelCloneSource {
+    id: string;
+    name: string;
+    typeId: string;
+    languageId: string;
+    currencyId: string;
+    paymentMethodId: string;
+    shippingMethodId: string;
+    countryId: string;
+    customerGroupId: string;
+    navigationCategoryId: string;
+    snippetSetId?: string;
+}
+
+function orEmpty(value: string | undefined): string {
+    return value ?? "";
+}
+
+/**
+ * Map a sales channel entity to its clone source. The snippet set comes from the first
+ * domain, so it is only set when the domains association was loaded.
+ */
+export function toCloneSource(channel: Schemas["SalesChannel"]): SalesChannelCloneSource {
+    return {
+        id: channel.id,
+        name: orEmpty(channel.name),
+        typeId: orEmpty(channel.typeId),
+        languageId: orEmpty(channel.languageId),
+        currencyId: orEmpty(channel.currencyId),
+        paymentMethodId: orEmpty(channel.paymentMethodId),
+        shippingMethodId: orEmpty(channel.shippingMethodId),
+        countryId: orEmpty(channel.countryId),
+        customerGroupId: orEmpty(channel.customerGroupId),
+        navigationCategoryId: orEmpty(channel.navigationCategoryId),
+        snippetSetId: channel.domains?.[0]?.snippetSetId,
+    };
+}
+
 /**
  * Base Shopware API client using the official @shopware/api-client.
  *
@@ -236,84 +275,11 @@ export class ShopwareClient {
     }
 
     /** Get full sales channel details for cloning, with fallback to any Storefront-type channel */
-    async getFullSalesChannel(salesChannelName: string = "Storefront"): Promise<{
-        id: string;
-        name: string;
-        typeId: string;
-        languageId: string;
-        currencyId: string;
-        paymentMethodId: string;
-        shippingMethodId: string;
-        countryId: string;
-        customerGroupId: string;
-        navigationCategoryId: string;
-        snippetSetId?: string;
-    }> {
-        const { data } = await this.getClient().invoke(
-            "searchSalesChannel post /search/sales-channel",
-            {
-                body: {
-                    limit: 1,
-                    filter: [{ type: "equals", field: "name", value: salesChannelName }],
-                    associations: { domains: {} },
-                },
-            }
-        );
-        const response = data as SearchResult<Schemas["SalesChannel"]>;
-
-        let channel = response.data?.[0];
-
-        if (!channel) {
-            // Fallback: find any Storefront-type sales channel
-            logger.warn(
-                `Sales channel "${salesChannelName}" not found by name, falling back to Storefront type lookup`
-            );
-
-            const { data: fallbackData } = await this.getClient().invoke(
-                "searchSalesChannel post /search/sales-channel",
-                {
-                    body: {
-                        limit: 1,
-                        filter: [
-                            {
-                                type: "equals",
-                                field: "typeId",
-                                value: ShopwareClient.STOREFRONT_TYPE_ID,
-                            },
-                        ],
-                        associations: { domains: {} },
-                    },
-                }
-            );
-            const fallbackResponse = fallbackData as SearchResult<Schemas["SalesChannel"]>;
-
-            channel = fallbackResponse.data?.[0];
-            if (!channel) {
-                throw new Error(
-                    `No sales channel found: tried name "${salesChannelName}" and Storefront type ID "${ShopwareClient.STOREFRONT_TYPE_ID}". ` +
-                        `Ensure at least one Storefront-type sales channel exists in Shopware.`
-                );
-            }
-
-            logger.warn(
-                `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`,
-                { cli: true }
-            );
-        }
-
-        return {
-            id: channel.id,
-            name: channel.name ?? "",
-            typeId: channel.typeId ?? "",
-            languageId: channel.languageId ?? "",
-            currencyId: channel.currencyId ?? "",
-            paymentMethodId: channel.paymentMethodId ?? "",
-            shippingMethodId: channel.shippingMethodId ?? "",
-            countryId: channel.countryId ?? "",
-            customerGroupId: channel.customerGroupId ?? "",
-            navigationCategoryId: channel.navigationCategoryId ?? "",
-            snippetSetId: channel.domains?.[0]?.snippetSetId,
-        };
+    async getFullSalesChannel(
+        salesChannelName: string = "Storefront"
+    ): Promise<SalesChannelCloneSource> {
+        const channel = await this.findSalesChannelEntity(salesChannelName, { domains: {} });
+        return toCloneSource(channel);
     }
 
     /**
@@ -324,51 +290,35 @@ export class ShopwareClient {
         navigationCategoryId: string;
         currencyId?: string;
     }> {
-        // Step 1: Try exact name match
-        const { data } = await this.getClient().invoke(
-            "searchSalesChannel post /search/sales-channel",
-            {
-                body: {
-                    limit: 1,
-                    filter: [{ type: "equals", field: "name", value: salesChannelName }],
-                },
-            }
-        );
-        const response = data as SearchResult<Schemas["SalesChannel"]>;
+        const channel = await this.findSalesChannelEntity(salesChannelName);
+        return {
+            id: channel.id,
+            navigationCategoryId: channel.navigationCategoryId ?? "",
+            currencyId: channel.currencyId,
+        };
+    }
 
-        const salesChannel = response.data?.[0];
-        if (salesChannel) {
-            return {
-                id: salesChannel.id,
-                navigationCategoryId: salesChannel.navigationCategoryId ?? "",
-                currencyId: salesChannel.currencyId,
-            };
-        }
+    /**
+     * Sales channel by exact name, otherwise the first Storefront-type channel (with warnings).
+     * Throws when neither exists.
+     */
+    private async findSalesChannelEntity(
+        salesChannelName: string,
+        associations?: Record<string, object>
+    ): Promise<Schemas["SalesChannel"]> {
+        const byName = await this.searchFirstSalesChannel("name", salesChannelName, associations);
+        if (byName) return byName;
 
-        // Step 2: Fallback - find any Storefront-type sales channel
         logger.warn(
             `Sales channel "${salesChannelName}" not found by name, falling back to Storefront type lookup`
         );
 
-        const { data: fallbackData } = await this.getClient().invoke(
-            "searchSalesChannel post /search/sales-channel",
-            {
-                body: {
-                    limit: 1,
-                    filter: [
-                        {
-                            type: "equals",
-                            field: "typeId",
-                            value: ShopwareClient.STOREFRONT_TYPE_ID,
-                        },
-                    ],
-                },
-            }
+        const byType = await this.searchFirstSalesChannel(
+            "typeId",
+            ShopwareClient.STOREFRONT_TYPE_ID,
+            associations
         );
-        const fallbackResponse = fallbackData as SearchResult<Schemas["SalesChannel"]>;
-
-        const fallbackChannel = fallbackResponse.data?.[0];
-        if (!fallbackChannel) {
+        if (!byType) {
             throw new Error(
                 `No sales channel found: tried name "${salesChannelName}" and Storefront type ID "${ShopwareClient.STOREFRONT_TYPE_ID}". ` +
                     `Ensure at least one Storefront-type sales channel exists in Shopware.`
@@ -379,11 +329,27 @@ export class ShopwareClient {
             `⚠ Using sales channel fallback (found Storefront-type channel instead of "${salesChannelName}")`,
             { cli: true }
         );
-        return {
-            id: fallbackChannel.id,
-            navigationCategoryId: fallbackChannel.navigationCategoryId ?? "",
-            currencyId: fallbackChannel.currencyId,
-        };
+        return byType;
+    }
+
+    /** First sales channel whose `field` equals `value` */
+    private async searchFirstSalesChannel(
+        field: string,
+        value: string,
+        associations?: Record<string, object>
+    ): Promise<Schemas["SalesChannel"] | undefined> {
+        const { data } = await this.getClient().invoke(
+            "searchSalesChannel post /search/sales-channel",
+            {
+                body: {
+                    limit: 1,
+                    filter: [{ type: "equals", field, value }],
+                    ...(associations && { associations }),
+                },
+            }
+        );
+        const response = data as SearchResult<Schemas["SalesChannel"]>;
+        return response.data?.[0];
     }
 
     /** Generate a random access key for a SalesChannel */

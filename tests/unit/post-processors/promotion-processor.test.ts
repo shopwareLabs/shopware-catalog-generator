@@ -213,6 +213,47 @@ describe("PromotionProcessor", () => {
             expect(result.errors[0]).toContain("API error");
         });
 
+        test("dry run makes no API calls", async () => {
+            const { context, mockApi } = createTestContext({ dryRun: true });
+            const result = await PromotionProcessor.process(context);
+
+            expect(result.skipped).toBe(0);
+            expect(mockApi.getCalls()).toHaveLength(0);
+        });
+
+        test("reports a link failure for existing promotions with its message", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse(
+                "promotion",
+                PROMOTIONS.map((p, i) => ({ id: `existing-${i}`, code: p.code }))
+            );
+            mockApi.mockSyncFailure(new Error("link broke"));
+
+            const result = await PromotionProcessor.process(context);
+
+            expect(result.processed).toBe(0);
+            expect(result.skipped).toBe(0);
+            expect(result.errors).toHaveLength(PROMOTIONS.length);
+            expect(result.errors[0]).toBe(
+                `Failed to link promotion "${PROMOTIONS[0]?.name}" to SalesChannel: link broke`
+            );
+        });
+
+        test("reports a create failure with the promotion name", async () => {
+            const { context, mockApi } = createTestContext();
+            mockApi.mockSearchResponse("promotion", []);
+            mockApi.mockSyncFailure(new Error("create broke"));
+
+            const result = await PromotionProcessor.process(context);
+
+            expect(result.processed).toBe(0);
+            expect(result.skipped).toBe(0);
+            expect(result.errors).toHaveLength(PROMOTIONS.length);
+            expect(result.errors[0]).toBe(
+                `Failed to create promotion "${PROMOTIONS[0]?.name}": create broke`
+            );
+        });
+
         test("sets validUntil one year from now", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSearchResponse("promotion", []);

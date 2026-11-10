@@ -1,10 +1,17 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 
+import type {
+    CmsBlockConfig,
+    CmsPageFixture,
+    CmsSlotConfig,
+} from "../../../../src/fixtures/index.js";
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
 import { TextImagesProcessor } from "../../../../src/post-processors/cms/text-images-processor.js";
+import { logger } from "../../../../src/utils/index.js";
 import { createTestBlueprint } from "../../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../../helpers/post-processor-context.js";
+import { createMockApiHelpers } from "../../../mocks/index.js";
 
 const TEXT_IMAGES_KEYS = [
     "ti-left",
@@ -121,5 +128,221 @@ describe("TextImagesProcessor", () => {
                 ?.config.media?.value
         ).toBe("m7");
         expect(blocks.find((b) => b.type === "text-on-image")?.backgroundMediaId).toBe("m8");
+    });
+});
+
+// =============================================================================
+// Characterization tests (media assignment and page flow)
+// =============================================================================
+
+type PopulateTextImages = (
+    fixture: CmsPageFixture,
+    imageMap: Record<string, string | null>
+) => CmsPageFixture;
+
+const populateTextImageMediaIds: PopulateTextImages = (fixture, imageMap) =>
+    (
+        TextImagesProcessor as unknown as { populateMediaIds: PopulateTextImages }
+    ).populateMediaIds.call(TextImagesProcessor, fixture, imageMap);
+
+function imageSlot(name: string, withMedia = true): CmsSlotConfig {
+    return {
+        type: "image",
+        slot: name,
+        config: withMedia ? { media: { source: "static", value: null } } : {},
+    };
+}
+
+function block(type: string, position: number, slots: CmsSlotConfig[]): CmsBlockConfig {
+    return { type, position, sectionPosition: "main", slots };
+}
+
+const ASSIGN_FIXTURE: CmsPageFixture = {
+    name: "Text & Images",
+    type: "landingpage",
+    sections: [
+        {
+            type: "default",
+            sizingMode: "boxed",
+            mobileBehavior: "wrap",
+            blocks: [
+                block("image-text", 0, [imageSlot("left")]),
+                block("image-text", 1, [
+                    imageSlot("left"),
+                    imageSlot("right"),
+                    { type: "text", slot: "left", config: {} },
+                ]),
+                block("image-text", 2, [imageSlot("right"), imageSlot("left")]),
+            ],
+        },
+        {
+            type: "default",
+            sizingMode: "boxed",
+            mobileBehavior: "wrap",
+            blocks: [
+                block("center-text", 3, [imageSlot("left"), imageSlot("right", false)]),
+                block("image-text-bubble", 4, [
+                    imageSlot("left-image"),
+                    imageSlot("center-image"),
+                    imageSlot("right-image"),
+                ]),
+                block("text-on-image", 5, [imageSlot("left")]),
+            ],
+        },
+    ],
+};
+
+const FULL_MAP: Record<string, string | null> = {
+    "ti-left": "m1",
+    "ti-right": "m2",
+    "ct-left": "m3",
+    "ct-right": "m4",
+    "bubble-left": "m5",
+    "bubble-center": "m6",
+    "bubble-right": "m7",
+    "toi-bg": "m8",
+};
+
+function mediaValues(fixture: CmsPageFixture): unknown[][] {
+    return fixture.sections.flatMap((s) =>
+        s.blocks.map((b) => b.slots.map((x) => (x.config.media ? x.config.media.value : "-")))
+    );
+}
+
+function backgrounds(fixture: CmsPageFixture): Array<string | undefined> {
+    return fixture.sections.flatMap((s) => s.blocks.map((b) => b.backgroundMediaId));
+}
+
+function withMedia(media: (key: string) => string | null): typeof TextImagesProcessor {
+    const processor = Object.create(TextImagesProcessor) as typeof TextImagesProcessor;
+    Object.assign(processor, {
+        getOrCreateCmsMedia: async (_context: PostProcessorContext, key: string) => media(key),
+    });
+    return processor;
+}
+
+describe("TextImagesProcessor (characterization)", () => {
+    describe("populateMediaIds", () => {
+        test("assigns images by block position and slot name", () => {
+            const result = populateTextImageMediaIds(ASSIGN_FIXTURE, FULL_MAP);
+
+            expect(mediaValues(result)).toEqual([
+                [null],
+                ["m1", null, "-"],
+                ["m2", null],
+                ["m3", "-"],
+                ["m5", "m6", "m7"],
+                [null],
+            ]);
+            expect(backgrounds(result)).toEqual([
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "m8",
+            ]);
+        });
+
+        test("keeps slots and background when images are missing", () => {
+            const result = populateTextImageMediaIds(ASSIGN_FIXTURE, {
+                "ti-left": null,
+                "bubble-center": "m6",
+            });
+
+            expect(mediaValues(result)).toEqual([
+                [null],
+                [null, null, "-"],
+                [null, null],
+                [null, "-"],
+                [null, "m6", null],
+                [null],
+            ]);
+            expect(backgrounds(result).every((id) => id === undefined)).toBe(true);
+        });
+
+        test("returns a copy and leaves the input fixture unchanged", () => {
+            const result = populateTextImageMediaIds(ASSIGN_FIXTURE, FULL_MAP);
+
+            expect(result).not.toBe(ASSIGN_FIXTURE);
+            expect(mediaValues(ASSIGN_FIXTURE)[1]).toEqual([null, null, "-"]);
+            expect(backgrounds(ASSIGN_FIXTURE)[5]).toBeUndefined();
+        });
+    });
+
+    describe("process", () => {
+        test("requests every image key once, in order", async () => {
+            const keys: string[] = [];
+            const { context } = createTestContext();
+
+            const result = await withMedia((key) => {
+                keys.push(key);
+                return key;
+            }).process(context);
+
+            expect(result).toEqual({
+                name: "cms-text-images",
+                processed: 1,
+                skipped: 0,
+                errors: [],
+                durationMs: 0,
+            });
+            expect(keys).toEqual(TEXT_IMAGES_KEYS);
+        });
+
+        test("logs the number of found images for a new layout", async () => {
+            const info = spyOn(logger, "info");
+            const { context } = createTestContext();
+
+            await withMedia((key) => (key.startsWith("bubble") ? null : key)).process(context);
+
+            const messages = info.mock.calls.map((call) => call[0]);
+            info.mockRestore();
+            expect(messages).toContain('    ✓ Created CMS layout "Text & Images" with 5 images');
+        });
+
+        test("logs a reused layout as already existing", async () => {
+            const info = spyOn(logger, "info");
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/cms-page", { data: [{ id: "cms-existing" }] });
+            const { context } = createTestContext({ mockApi });
+
+            await withMedia((key) => key).process(context);
+
+            const messages = info.mock.calls.map((call) => call[0]);
+            info.mockRestore();
+            expect(messages).toContain('    ⊘ CMS layout "Text & Images" already exists');
+        });
+
+        test("fails the page when an image lookup throws", async () => {
+            const { context } = createTestContext();
+
+            const result = await withMedia(() => {
+                throw "no cache";
+            }).process(context);
+
+            expect(result.processed).toBe(0);
+            expect(result.errors).toEqual(["CMS processing failed: no cache"]);
+        });
+
+        test("dry run logs the fixture name and makes no lookups", async () => {
+            const info = spyOn(logger, "info");
+            const keys: string[] = [];
+            const { context } = createTestContext({ dryRun: true });
+
+            const result = await withMedia((key) => {
+                keys.push(key);
+                return key;
+            }).process(context);
+
+            const messages = info.mock.calls.map((call) => call[0]);
+            info.mockRestore();
+            expect(result.processed).toBe(1);
+            expect(keys).toEqual([]);
+            expect(messages).toEqual([
+                '    [DRY RUN] Would create CMS layout "Text & Images"',
+                '    [DRY RUN] Would create Landing Page "Text & Images"',
+            ]);
+        });
     });
 });

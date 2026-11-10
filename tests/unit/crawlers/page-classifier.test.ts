@@ -105,6 +105,23 @@ describe("og:type", () => {
         const html = page(`<meta property="og:type" content="product.group">`);
         expect(classify(html)).toBe("category");
     });
+
+    test("og:type=article wins over a page full of prices", () => {
+        const prices = Array(12).fill("49,99 €").join(" ");
+        expect(classify(page(`<meta property="og:type" content="article">`, prices))).toBe("cms");
+    });
+
+    test("og:type=product wins over 10+ variant prices", () => {
+        const prices = Array(12).fill("49,99 €").join(" ");
+        expect(classify(page(`<meta property="og:type" content="product">`, prices))).toBe(
+            "product"
+        );
+    });
+
+    test("og:type=product.group loses to a price signal", () => {
+        const html = page(`<meta property="og:type" content="product.group">`, "39,99 €");
+        expect(classify(html)).toBe("product");
+    });
 });
 
 // ── Tier 2: Microdata ────────────────────────────────────────────────────────
@@ -196,5 +213,111 @@ describe("Tier 3 price/cart signals", () => {
         );
         // One real price, one real cart signal — product
         expect(classify(html)).toBe("product");
+    });
+    test("exactly 10 prices with 1 cart signal → category", () => {
+        const prices = Array(10).fill("49,99 €").join(" ");
+        expect(classify(page("", `${prices} In den Warenkorb`))).toBe("category");
+    });
+
+    test("exactly 6 prices with 0 cart signals → category", () => {
+        const prices = Array(6).fill("49,99 €").join(" ");
+        expect(classify(page("", prices))).toBe("category");
+    });
+
+    test("5 prices with 0 cart signals → product", () => {
+        const prices = Array(5).fill("49,99 €").join(" ");
+        expect(classify(page("", prices))).toBe("product");
+    });
+
+    test("3 cart signals with 1 price → category", () => {
+        const html = page("", "39,99 € Add to cart Add to cart Add to cart");
+        expect(classify(html)).toBe("category");
+    });
+
+    test("1 cart signal without prices → unknown", () => {
+        expect(classify(page("", "<button>Add to cart</button>"))).toBe("unknown");
+    });
+
+    test("cart text only inside a script is ignored", () => {
+        const html = page(`<script>var label = "Add to cart";</script>`, "<p>About us.</p>");
+        expect(classify(html)).toBe("cms");
+    });
+});
+
+describe("JSON-LD and microdata edge cases", () => {
+    const ld = (data: unknown): string =>
+        `<script type="application/ld+json">${JSON.stringify(data)}</script>`;
+
+    test.each([
+        "offers",
+        "sku",
+        "gtin",
+        "mpn",
+        "description",
+        "brand",
+        "color",
+        "material",
+        "additionalProperty",
+        "aggregateRating",
+        "review",
+    ])("Product with only %s is substantial → product", (field) => {
+        expect(classify(page(ld({ "@type": "Product", name: "X", [field]: "v" })))).toBe("product");
+    });
+
+    test("product field with an empty value is not substantial", () => {
+        expect(classify(page(ld({ "@type": "Product", name: "X", sku: "" })))).toBe("cms");
+    });
+
+    test("schema.org URL types and type arrays are normalized", () => {
+        expect(
+            classify(page(ld({ "@type": ["Thing", "https://schema.org/Product"], sku: "1" })))
+        ).toBe("product");
+    });
+
+    test("first strong signal wins: ItemList before Product → category", () => {
+        expect(
+            classify(page(ld([{ "@type": "ItemList" }, { "@type": "Product", sku: "1" }])))
+        ).toBe("category");
+    });
+
+    test("blocks without @type and malformed JSON are ignored", () => {
+        const head = `<script type="application/ld+json">{ broken</script>${ld([
+            { name: "untyped" },
+            null,
+            "text",
+        ])}`;
+        expect(classify(page(head))).toBe("cms");
+    });
+
+    test("a type list that includes BreadcrumbList is not a category", () => {
+        expect(classify(page(ld({ "@type": ["ItemList", "BreadcrumbList"] })))).toBe("cms");
+    });
+
+    test("two microdata Product scopes without a list → category", () => {
+        const body = `<div itemscope itemtype="https://schema.org/Product"></div>
+            <div itemscope itemtype="https://schema.org/Product"></div>`;
+        expect(classify(page("", body))).toBe("category");
+    });
+
+    test("one Product scope inside an ItemList → category", () => {
+        const body = `<div itemscope itemtype="https://schema.org/ItemList">
+            <div itemscope itemtype="https://schema.org/Product"></div></div>`;
+        expect(classify(page("", body))).toBe("category");
+    });
+
+    test("a microdata BreadcrumbList is not counted as a list", () => {
+        const body = `<ol itemscope itemtype="https://schema.org/BreadcrumbList"></ol>`;
+        expect(classify(page("", body))).toBe("cms");
+    });
+
+    test("two microdata prices give no microdata signal", () => {
+        const body = `<span itemprop="price"></span><span itemprop="offers"></span>`;
+        expect(classify(page("", body))).toBe("cms");
+    });
+
+    test("two AggregateRating scopes give no microdata signal", () => {
+        const body = `<div itemscope itemtype="https://schema.org/AggregateRating"></div>
+            <div itemscope itemtype="https://schema.org/AggregateRating"></div>`;
+        expect(classify(page("", body))).toBe("cms");
     });
 });

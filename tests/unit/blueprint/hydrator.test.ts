@@ -625,6 +625,51 @@ describe("BlueprintHydrator", () => {
             expect(result.products[0]?.metadata.properties.length).toBeGreaterThan(0);
         });
 
+        test("applies the AI properties and resolves variants of variant products", async () => {
+            const result = await hydrator.hydratePropertiesOnly(createTestHydratedBlueprint());
+            const [prod1, prod2] = result.products;
+
+            expect(prod1?.metadata.properties).toEqual([
+                { group: "Material", value: "Oak" },
+                { group: "Style", value: "Modern" },
+            ]);
+            expect(prod1?.metadata.variantConfigs).toBeUndefined();
+            expect(prod2?.metadata.properties).toEqual([
+                { group: "Material", value: "Velvet" },
+                { group: "Color", value: "Gray" },
+            ]);
+            expect(prod2?.metadata.variantConfigs?.map((c) => c.group)).toEqual(["Color"]);
+            expect(prod2?.metadata.variantConfigs?.[0]?.selectedOptions[0]).toBe("Gray");
+        });
+
+        test("keeps existing variant configs without new suggestions", async () => {
+            const blueprint = createTestHydratedBlueprint();
+            const sizes = [{ group: "Size", selectedOptions: ["S", "M"], priceModifiers: {} }];
+            const [prod1, prod2] = blueprint.products;
+            if (!prod1 || !prod2) throw new Error("test blueprint has no products");
+            prod1.metadata.variantConfigs = sizes;
+            prod2.metadata.isVariant = false;
+            prod2.metadata.variantConfigs = [];
+
+            const result = await hydrator.hydratePropertiesOnly(blueprint);
+
+            expect(result.products[0]?.metadata.variantConfigs).toEqual(sizes);
+            expect(result.products[1]?.metadata.variantConfigs).toBeUndefined();
+        });
+
+        test("groups products by branch and keeps products the AI left out", async () => {
+            const blueprint = createTestHydratedBlueprint();
+            const [prod1, prod2] = blueprint.products;
+            if (!prod1 || !prod2) throw new Error("test blueprint has no products");
+            const prod3 = { ...prod1, id: "prod3", primaryCategoryId: "cat2" };
+            blueprint.products = [prod1, prod3, prod2];
+
+            const result = await hydrator.hydratePropertiesOnly(blueprint);
+
+            expect(result.products.map((p) => p.id)).toEqual(["prod1", "prod2", "prod3"]);
+            expect(result.products[2]).toEqual(prod3);
+        });
+
         test("preserves categories unchanged", async () => {
             const existingBlueprint = createTestHydratedBlueprint();
             const originalCategories = JSON.parse(JSON.stringify(existingBlueprint.categories));

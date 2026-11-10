@@ -13,7 +13,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { BlueprintPropertyGroup, HydratedBlueprint, VariantConfig } from "./types/index.js";
+import type {
+    BlueprintProduct,
+    BlueprintPropertyGroup,
+    HydratedBlueprint,
+    VariantConfig,
+} from "./types/index.js";
 
 import { randomSamplePercent, weightedRandomPick } from "./utils/index.js";
 
@@ -41,15 +46,28 @@ const DEFAULT_PRICE_MODIFIERS: Record<string, number> = {
     default: 1.0,
 };
 
+type ProductProperties = Array<{ group: string; value: string }>;
+
 interface LegacyProductMetadata {
     isVariant: boolean;
     variantProperty?: string;
     variantPriceModifiers?: Record<string, number>;
-    properties?: Array<{ group: string; value: string }>;
+    properties?: ProductProperties;
 }
 
-function parseArgs(): { dryRun: boolean; help: boolean } {
-    const args = process.argv.slice(2);
+interface MigrationResult {
+    migrated: number;
+    skipped: number;
+    errors: string[];
+}
+
+/** What happened to one product: not a variant, left as is, or given new configs. */
+type ProductOutcome = "ignored" | "skipped" | "migrated";
+
+export function parseArgs(args: string[] = process.argv.slice(2)): {
+    dryRun: boolean;
+    help: boolean;
+} {
     return {
         dryRun: args.includes("--dry-run") || args.includes("-n"),
         help: args.includes("--help") || args.includes("-h"),
@@ -80,155 +98,185 @@ function getPriceModifier(optionName: string): number {
     return DEFAULT_PRICE_MODIFIERS[optionName] ?? DEFAULT_PRICE_MODIFIERS.default ?? 1.0;
 }
 
+/** Groups the product already uses come first, the rest keep their blueprint order. */
+function orderGroupsByProductUsage(
+    groups: BlueprintPropertyGroup[],
+    productProperties: ProductProperties | undefined
+): BlueprintPropertyGroup[] {
+    const productGroupNames = new Set(productProperties?.map((p) => p.group) ?? []);
+    const usedGroups = groups.filter((g) => productGroupNames.has(g.name));
+    const otherGroups = groups.filter((g) => !productGroupNames.has(g.name));
+    return [...usedGroups, ...otherGroups];
+}
+
+/** 40-60% of the group's options, at least 2 for meaningful variants. */
+function pickVariantOptions(group: BlueprintPropertyGroup): string[] {
+    const allOptionNames = group.options.map((o) => o.name);
+    const selectedOptions = randomSamplePercent(allOptionNames, 0.4, 0.6);
+    return selectedOptions.length >= 2 ? selectedOptions : allOptionNames.slice(0, 2);
+}
+
+function buildVariantConfig(group: BlueprintPropertyGroup): VariantConfig {
+    const selectedOptions = pickVariantOptions(group);
+    return {
+        group: group.name,
+        selectedOptions,
+        priceModifiers: Object.fromEntries(
+            selectedOptions.map((option) => [option, getPriceModifier(option)])
+        ),
+    };
+}
+
 /**
  * Generate new variant configs using actual property groups from blueprint
  */
-function generateVariantConfigs(
+export function generateVariantConfigs(
     blueprintPropertyGroups: BlueprintPropertyGroup[],
-    productProperties: Array<{ group: string; value: string }> | undefined
+    productProperties: ProductProperties | undefined
 ): VariantConfig[] {
-    const configs: VariantConfig[] = [];
-
-    // Filter to only property groups that have at least 2 options (needed for variants)
+    // Only groups with at least 2 options can form variants
     const eligibleGroups = blueprintPropertyGroups.filter((g) => g.options.length >= 2);
-
     if (eligibleGroups.length === 0) {
-        return configs;
+        return [];
     }
 
-    // Prioritize groups that the product actually uses
-    const productGroupNames = new Set(productProperties?.map((p) => p.group) ?? []);
-    const prioritizedGroups = eligibleGroups.filter((g) => productGroupNames.has(g.name));
-    const otherGroups = eligibleGroups.filter((g) => !productGroupNames.has(g.name));
-
-    // Combine with prioritized groups first
-    const sortedGroups = [...prioritizedGroups, ...otherGroups];
+    const sortedGroups = orderGroupsByProductUsage(eligibleGroups, productProperties);
 
     // Decide how many property groups to use (weighted: 1=50%, 2=35%, 3=15%)
     const targetCount = weightedRandomPick([1, 2, 3], [0.5, 0.35, 0.15]);
-    const groupsToUse = sortedGroups.slice(0, Math.min(targetCount, sortedGroups.length));
+    return sortedGroups.slice(0, targetCount).map(buildVariantConfig);
+}
 
-    for (const group of groupsToUse) {
-        const allOptionNames = group.options.map((o) => o.name);
+/** Configs from an earlier migration with more than 2 options are kept as they are. */
+function hasMigratedVariantConfigs(metadata: { variantConfigs?: VariantConfig[] }): boolean {
+    const configs = metadata.variantConfigs ?? [];
+    return configs.some((c) => (c.selectedOptions?.length ?? 0) > 2);
+}
 
-        // Select 40-60% of options (at least 2 for meaningful variants)
-        const selectedOptions = randomSamplePercent(allOptionNames, 0.4, 0.6);
-        const finalOptions =
-            selectedOptions.length >= 2 ? selectedOptions : allOptionNames.slice(0, 2);
+function logDryRunProduct(productName: string, variantConfigs: VariantConfig[]): void {
+    const configSummary = variantConfigs
+        .map((c) => `${c.group}(${c.selectedOptions.length})`)
+        .join(" + ");
+    console.log(`    ${productName}: ${configSummary}`);
+}
 
-        // Build price modifiers
-        const priceModifiers: Record<string, number> = {};
-        for (const opt of finalOptions) {
-            priceModifiers[opt] = getPriceModifier(opt);
-        }
-
-        configs.push({
-            group: group.name,
-            selectedOptions: finalOptions,
-            priceModifiers,
-        });
+/** Replace the legacy variant fields of one product with new variant configs (in place). */
+function migrateProduct(
+    product: BlueprintProduct,
+    propertyGroups: BlueprintPropertyGroup[],
+    dryRun: boolean
+): ProductOutcome {
+    const metadata = product.metadata as LegacyProductMetadata;
+    if (!metadata.isVariant) {
+        return "ignored";
+    }
+    if (hasMigratedVariantConfigs(product.metadata)) {
+        return "skipped";
     }
 
-    return configs;
+    const variantConfigs = generateVariantConfigs(propertyGroups, metadata.properties);
+    if (variantConfigs.length === 0) {
+        return "skipped";
+    }
+
+    Object.assign(product.metadata, { variantConfigs });
+    delete metadata.variantProperty;
+    delete metadata.variantPriceModifiers;
+
+    if (dryRun) {
+        logDryRunProduct(product.name, variantConfigs);
+    }
+    return "migrated";
+}
+
+/** Counts are written into `result` while products are processed, so a late error keeps them. */
+function migrateBlueprintInto(result: MigrationResult, filePath: string, dryRun: boolean): void {
+    const blueprint = JSON.parse(fs.readFileSync(filePath, "utf-8")) as HydratedBlueprint;
+    const propertyGroups = blueprint.propertyGroups || [];
+
+    for (const product of blueprint.products) {
+        const outcome = migrateProduct(product, propertyGroups, dryRun);
+        if (outcome !== "ignored") {
+            result[outcome]++;
+        }
+    }
+
+    if (result.migrated > 0 && !dryRun) {
+        fs.writeFileSync(filePath, JSON.stringify(blueprint, null, 2));
+    }
 }
 
 /**
  * Migrate a single blueprint file
  */
-function migrateBlueprint(
-    filePath: string,
-    dryRun: boolean
-): { migrated: number; skipped: number; errors: string[] } {
-    const result = { migrated: 0, skipped: 0, errors: [] as string[] };
-
+export function migrateBlueprint(filePath: string, dryRun: boolean): MigrationResult {
+    const result: MigrationResult = { migrated: 0, skipped: 0, errors: [] };
     try {
-        const content = fs.readFileSync(filePath, "utf-8");
-        const blueprint = JSON.parse(content) as HydratedBlueprint;
-
-        let modified = false;
-
-        // Get property groups from the blueprint
-        const propertyGroups = blueprint.propertyGroups || [];
-
-        for (const product of blueprint.products) {
-            const metadata = product.metadata as LegacyProductMetadata;
-
-            // Skip if not a variant product
-            if (!metadata.isVariant) {
-                continue;
-            }
-
-            // Skip if already migrated (has variantConfigs with actual options)
-            if ("variantConfigs" in product.metadata && product.metadata.variantConfigs) {
-                const existingConfigs = product.metadata.variantConfigs;
-                // Check if configs have meaningful options (more than hardcoded 4)
-                const hasRealOptions = existingConfigs.some(
-                    (c: { selectedOptions?: string[] }) => (c.selectedOptions?.length ?? 0) > 2
-                );
-                if (hasRealOptions) {
-                    result.skipped++;
-                    continue;
-                }
-                // Re-migrate with actual options from blueprint
-            }
-
-            // Generate new variant configs using actual blueprint property groups
-            const variantConfigs = generateVariantConfigs(propertyGroups, metadata.properties);
-
-            if (variantConfigs.length === 0) {
-                result.skipped++;
-                continue;
-            }
-
-            // Update the product metadata
-            Object.assign(product.metadata, { variantConfigs });
-            delete metadata.variantProperty;
-            delete metadata.variantPriceModifiers;
-
-            modified = true;
-            result.migrated++;
-
-            if (dryRun) {
-                const configSummary = variantConfigs
-                    .map((c) => `${c.group}(${c.selectedOptions.length})`)
-                    .join(" + ");
-                console.log(`    ${product.name}: ${configSummary}`);
-            }
-        }
-
-        if (modified && !dryRun) {
-            fs.writeFileSync(filePath, JSON.stringify(blueprint, null, 2));
-        }
+        migrateBlueprintInto(result, filePath, dryRun);
     } catch (error) {
-        result.errors.push(
-            `${filePath}: ${error instanceof Error ? error.message : String(error)}`
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        result.errors.push(`${filePath}: ${message}`);
     }
-
     return result;
 }
 
 /**
  * Find all hydrated blueprint files
  */
-function findBlueprintFiles(): string[] {
-    const cacheDir = path.join(process.cwd(), "generated", "sales-channels");
-
+export function findBlueprintFiles(
+    cacheDir: string = path.join(process.cwd(), "generated", "sales-channels")
+): string[] {
     if (!fs.existsSync(cacheDir)) {
         return [];
     }
 
-    const files: string[] = [];
-    const salesChannels = fs.readdirSync(cacheDir);
+    return fs
+        .readdirSync(cacheDir)
+        .map((sc) => path.join(cacheDir, sc, "hydrated-blueprint.json"))
+        .filter((blueprintPath) => fs.existsSync(blueprintPath));
+}
 
-    for (const sc of salesChannels) {
-        const blueprintPath = path.join(cacheDir, sc, "hydrated-blueprint.json");
-        if (fs.existsSync(blueprintPath)) {
-            files.push(blueprintPath);
-        }
+function fileSummaryLine(result: MigrationResult, dryRun: boolean): string {
+    if (dryRun) {
+        return `    [DRY RUN] Would migrate ${result.migrated} products, skip ${result.skipped}`;
+    }
+    return `    ✓ Migrated ${result.migrated} products, skipped ${result.skipped}`;
+}
+
+function migrateAndReportFile(file: string, dryRun: boolean): MigrationResult {
+    console.log(`  Processing: ${path.basename(path.dirname(file))}`);
+    const result = migrateBlueprint(file, dryRun);
+    console.log(fileSummaryLine(result, dryRun));
+    return result;
+}
+
+/** Migrate every file, log one line per file and return the totals. */
+export function migrateBlueprintFiles(files: string[], dryRun: boolean): MigrationResult {
+    return files
+        .map((file) => migrateAndReportFile(file, dryRun))
+        .reduce<MigrationResult>(
+            (totals, result) => ({
+                migrated: totals.migrated + result.migrated,
+                skipped: totals.skipped + result.skipped,
+                errors: [...totals.errors, ...result.errors],
+            }),
+            { migrated: 0, skipped: 0, errors: [] }
+        );
+}
+
+function printTotals(totals: MigrationResult, dryRun: boolean): void {
+    console.log("\n=== Migration Complete ===\n");
+    console.log(`Total migrated: ${totals.migrated}`);
+    console.log(`Total skipped: ${totals.skipped}`);
+
+    if (totals.errors.length > 0) {
+        console.log(`\nErrors (${totals.errors.length}):`);
+        totals.errors.forEach((error) => console.log(`  - ${error}`));
     }
 
-    return files;
+    if (dryRun) {
+        console.log("\n[DRY RUN] Run without --dry-run to apply changes.");
+    }
 }
 
 async function main(): Promise<void> {
@@ -254,47 +302,12 @@ async function main(): Promise<void> {
     }
 
     console.log(`Found ${files.length} blueprint file(s) to process:\n`);
-
-    let totalMigrated = 0;
-    let totalSkipped = 0;
-    const allErrors: string[] = [];
-
-    for (const file of files) {
-        const scName = path.basename(path.dirname(file));
-        console.log(`  Processing: ${scName}`);
-
-        const result = migrateBlueprint(file, dryRun);
-
-        totalMigrated += result.migrated;
-        totalSkipped += result.skipped;
-        allErrors.push(...result.errors);
-
-        if (!dryRun) {
-            console.log(`    ✓ Migrated ${result.migrated} products, skipped ${result.skipped}`);
-        } else {
-            console.log(
-                `    [DRY RUN] Would migrate ${result.migrated} products, skip ${result.skipped}`
-            );
-        }
-    }
-
-    console.log("\n=== Migration Complete ===\n");
-    console.log(`Total migrated: ${totalMigrated}`);
-    console.log(`Total skipped: ${totalSkipped}`);
-
-    if (allErrors.length > 0) {
-        console.log(`\nErrors (${allErrors.length}):`);
-        for (const error of allErrors) {
-            console.log(`  - ${error}`);
-        }
-    }
-
-    if (dryRun) {
-        console.log("\n[DRY RUN] Run without --dry-run to apply changes.");
-    }
+    printTotals(migrateBlueprintFiles(files, dryRun), dryRun);
 }
 
-main().catch((error) => {
-    console.error("Migration failed:", error);
-    process.exit(1);
-});
+if (import.meta.main) {
+    main().catch((error) => {
+        console.error("Migration failed:", error);
+        process.exit(1);
+    });
+}
