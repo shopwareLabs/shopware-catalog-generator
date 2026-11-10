@@ -157,22 +157,33 @@ describe("DigitalProductProcessor", () => {
             expect(JSON.stringify(mediaCall?.body)).toContain('"mediaFolderId":"download-folder"');
         });
 
-        test("uploads the voucher under a file name unique to the media", async () => {
+        test("deletes voucher media without a download before uploading a new one", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockPostResponse("search/product", { data: [] });
             mockApi.mockPostResponse("search/tax", { data: [{ id: "tax-1" }] });
             mockApi.mockPostResponse("search/product-download", { data: [] });
+            mockApi.mockSearchResponse("media", [
+                { id: "orphan-1", productDownloads: [] },
+                { id: "in-use", productDownloads: [{ id: "download-1" }] },
+                { id: "orphan-2" },
+            ]);
 
             await DigitalProductProcessor.process(context);
 
-            const upload = mockApi
-                .getCalls()
-                .find((call) => call.endpoint.includes("extension=txt"));
-            const mediaId = upload?.endpoint.match(/_action\/media\/([0-9a-f]+)\/upload/)?.[1];
-            expect(mediaId).toBeDefined();
-            expect(upload?.endpoint).toContain(
-                `fileName=gift-card-voucher-${mediaId?.slice(0, 8)}`
+            const calls = mockApi.getCalls();
+            const deleteIndex = calls.findIndex((call) =>
+                JSON.stringify(call.body ?? "").includes('"delete-media"')
             );
+            const uploadIndex = calls.findIndex((call) => call.endpoint.includes("extension=txt"));
+            expect(calls[deleteIndex]?.body).toEqual({
+                "delete-media": {
+                    entity: "media",
+                    action: "delete",
+                    payload: [{ id: "orphan-1" }, { id: "orphan-2" }],
+                },
+            });
+            expect(uploadIndex).toBeGreaterThan(deleteIndex);
+            expect(calls[uploadIndex]?.endpoint).toContain("fileName=gift-card-voucher");
         });
 
         test("deletes the empty media when the voucher upload fails", async () => {
