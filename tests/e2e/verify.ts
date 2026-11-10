@@ -18,15 +18,19 @@ import { writeFileSync } from "node:fs";
 import type { AdminApiClient, Schemas } from "../../src/shopware/admin-client.js";
 import type { SearchResult } from "../../src/shopware/api-types.js";
 import type { StorefrontDomainCheck } from "../../src/shopware/index.js";
+import type { FeatureCheckContext, FeatureCheckResult } from "./checks/index.js";
 
 import { createCacheFromEnv } from "../../src/cache.js";
 import {
     collectDomainUrls,
+    createApiHelpers,
     DataHydrator,
+    detectShopwareCapabilities,
     describeStorefrontFailure,
     verifyStorefrontDomains,
 } from "../../src/shopware/index.js";
 import { countCategories, isPlaceholder } from "../../src/utils/index.js";
+import { FEATURE_CHECKS, formatFeatureCheck, runFeatureChecks } from "./checks/index.js";
 
 /**
  * Typed search helper for E2E tests.
@@ -76,6 +80,10 @@ interface VerificationResult {
         hasCustomColors: boolean;
     };
     shopwareVersion?: string;
+    /** Version + active feature flags, as used for gating ("6.7.10.0 (flags: ...)") */
+    shopwareCapabilities?: string;
+    /** Feature checks; skipped ones need a newer Shopware than the connected shop */
+    features: FeatureCheckResult[];
     storefront: { domains: StorefrontDomainCheck[] };
     translations: TranslationCheck[];
     passed: boolean;
@@ -87,9 +95,13 @@ interface ExpectedCounts {
     products: number;
 }
 
+/** Hydrated blueprint and cache the feature checks compare against */
+type FeatureInputs = Pick<FeatureCheckContext, "blueprint" | "cache">;
+
 async function verifyGeneration(
     salesChannelName: string,
-    expected: ExpectedCounts
+    expected: ExpectedCounts,
+    featureInputs: FeatureInputs | null
 ): Promise<VerificationResult> {
     const result: VerificationResult = {
         salesChannel: { found: false },
@@ -119,6 +131,7 @@ async function verifyGeneration(
             childThemeExists: false,
             hasCustomColors: false,
         },
+        features: [],
         storefront: { domains: [] },
         translations: [],
         passed: false,
@@ -736,10 +749,55 @@ async function verifyGeneration(
     console.log(`Verifying translations...`);
     await verifyTranslations(client, salesChannelName, salesChannel.id, result);
 
+    console.log(`Verifying features...`);
+    await verifyFeatures(
+        hydrator,
+        swEnvUrl,
+        salesChannel.id,
+        salesChannelName,
+        featureInputs,
+        result
+    );
+
     // Overall pass/fail
     result.passed = result.errors.length === 0;
 
     return result;
+}
+
+/**
+ * Feature checks (variants, colour images, fixtures, version-gated fields). Checks whose
+ * feature the connected shop does not support are skipped, using the same feature list
+ * as the upload (src/fixtures/shopware-features.ts).
+ */
+async function verifyFeatures(
+    hydrator: DataHydrator,
+    swEnvUrl: string,
+    salesChannelId: string,
+    salesChannelName: string,
+    inputs: FeatureInputs | null,
+    result: VerificationResult
+): Promise<void> {
+    if (!inputs) {
+        console.log("  ⊘ No hydrated blueprint, feature checks skipped");
+        return;
+    }
+    const api = createApiHelpers(hydrator.getAdminClient(), swEnvUrl, () =>
+        hydrator.getAccessToken()
+    );
+    const shopware = await detectShopwareCapabilities(api);
+    result.shopwareCapabilities = shopware.describe();
+    result.features = await runFeatureChecks(FEATURE_CHECKS, {
+        api,
+        shopware,
+        salesChannelId,
+        salesChannelName,
+        ...inputs,
+    });
+    for (const feature of result.features) {
+        console.log(formatFeatureCheck(feature));
+        if (feature.status === "fail") result.errors.push(`${feature.name}: ${feature.detail}`);
+    }
 }
 
 interface TranslationCheck {
@@ -905,6 +963,13 @@ function formatStorefrontCheck(check: StorefrontDomainCheck): string {
     return reason ? `  ✗ ${check.url} → ${reason}` : `  ✓ ${check.url} → 200`;
 }
 
+function summarizeFeatures(features: FeatureCheckResult[]): string {
+    const skipped = features.filter((f) => f.status === "skip");
+    const passed = features.length - skipped.length;
+    const skippedNames = skipped.map((f) => f.name).join(", ");
+    return `${passed} passed${skipped.length > 0 ? `, ${skipped.length} skipped (${skippedNames})` : ""}`;
+}
+
 // CLI entry point
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
@@ -948,7 +1013,8 @@ async function main(): Promise<void> {
     console.log("=== E2E Verification ===");
     console.log("");
 
-    const result = await verifyGeneration(salesChannelName, expected);
+    const featureInputs: FeatureInputs | null = blueprint ? { blueprint, cache } : null;
+    const result = await verifyGeneration(salesChannelName, expected, featureInputs);
 
     // Machine-readable result for the lane matrix summary
     if (jsonFile) {
@@ -992,6 +1058,7 @@ async function main(): Promise<void> {
         console.log(
             `  Translations: ${result.translations.map((t) => `${t.locale} (${t.productsTranslated}/${t.productsChecked} products, ${t.reviews} reviews)`).join(", ") || "none"}`
         );
+        console.log(`  Features: ${summarizeFeatures(result.features)}`);
         process.exit(0);
     } else {
         console.log("=== Verification FAILED ===");
