@@ -103,12 +103,14 @@ describe("ManufacturerProcessor", () => {
                     }),
                 ],
             });
-            const { context } = createTestContext({ blueprint, dryRun: true });
+            const { context, mockApi, mockCache } = createTestContext({ blueprint, dryRun: true });
 
             const result = await ManufacturerProcessor.process(context);
 
             expect(result.processed).toBe(1);
             expect(result.errors).toHaveLength(0);
+            expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(0);
+            expect(mockCache.saveManufacturersMock).not.toHaveBeenCalled();
         });
 
         test("skips creating manufacturers that already exist in Shopware", async () => {
@@ -382,5 +384,53 @@ describe("ManufacturerProcessor sync errors", () => {
             { id: "p1", manufacturerId: "shop-existing" },
             { id: "p2", manufacturerId: "shop-new" },
         ]);
+    });
+
+    test("a created manufacturer is assigned and cached with the same ID", async () => {
+        const { context, mockApi, mockCache } = setup(
+            [{ id: "shop-existing", name: "Existing Corp" }],
+            false
+        );
+        const result = await ManufacturerProcessor.process(context);
+
+        const syncs = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body);
+        const created = syncs.find(
+            (b): b is { createManufacturers: { payload: Array<{ id: string; name: string }> } } =>
+                typeof b === "object" && b !== null && "createManufacturers" in b
+        );
+        const createdId = created?.createManufacturers.payload[0]?.id;
+        expect(createdId).toBeString();
+        expect(result.processed).toBe(1);
+        expect(result.errors).toEqual([]);
+
+        const update = syncs.find(
+            (b): b is { updateProductManufacturers: { payload: unknown[] } } =>
+                typeof b === "object" && b !== null && "updateProductManufacturers" in b
+        );
+        expect(update?.updateProductManufacturers.payload).toContainEqual({
+            id: "p2",
+            manufacturerId: createdId,
+        });
+        const saved = mockCache.saveManufacturersMock.mock.calls.at(-1)?.[1] ?? [];
+        expect(saved.find((m) => m.name === "New Corp")?.id).toBe(createdId);
+    });
+
+    test("sends no product update when every product already has its manufacturer", async () => {
+        const { context, mockApi } = setup(
+            [
+                { id: "shop-existing", name: "Existing Corp" },
+                { id: "shop-new", name: "New Corp" },
+            ],
+            false
+        );
+        mockApi.mockPostResponse("search/product", {
+            data: [
+                { id: "p1", manufacturerId: "shop-existing" },
+                { id: "p2", manufacturerId: "shop-new" },
+            ],
+        });
+        await ManufacturerProcessor.process(context);
+
+        expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(0);
     });
 });
