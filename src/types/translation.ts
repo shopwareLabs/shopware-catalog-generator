@@ -31,7 +31,9 @@ export type CategoryTranslation = z.infer<typeof CategoryTranslationSchema>;
 export const ProductTranslationSchema = z.object({
     name: z.string(),
     description: z.string(),
+    /** Written by older runs only. Upload derives meta texts from name and description */
     metaTitle: z.string().optional(),
+    /** Written by older runs only. Upload derives meta texts from name and description */
     metaDescription: z.string().optional(),
     ...SourceHashed,
 });

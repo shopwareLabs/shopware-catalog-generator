@@ -116,8 +116,8 @@ describe("buildProductTranslations", () => {
                     "lang-de": {
                         name: "Leinensofa",
                         description: "Ein Sofa",
-                        metaTitle: "Leinensofa | Store",
-                        metaDescription: "Kauf das Leinensofa",
+                        metaTitle: "Leinensofa",
+                        metaDescription: "Ein Sofa",
                     },
                 },
             },
@@ -127,7 +127,40 @@ describe("buildProductTranslations", () => {
     test("adds Open Graph fields when supported", () => {
         const [p1] = buildProductTranslations(createInput({ openGraph: true }));
         expect(p1?.translations).toMatchObject({
-            "lang-de": { ogTitle: "Leinensofa | Store", ogDescription: "Kauf das Leinensofa" },
+            "lang-de": { ogTitle: "Leinensofa", ogDescription: "Ein Sofa" },
+        });
+    });
+
+    test("derives meta texts from the translation, ignores stored meta texts of older files", () => {
+        const longDescription = `<p>${"Ein sehr langer Satz über das Sofa. ".repeat(20)}</p>`;
+        const file = createTranslationFile({
+            products: {
+                p1: {
+                    name: "Leinensofa",
+                    description: longDescription,
+                    metaDescription: "x".repeat(463),
+                    sourceHash: "h",
+                },
+            },
+        });
+        const [p1] = buildProductTranslations(
+            createInput({ languages: [translation(DE, file)], openGraph: true })
+        );
+        const metaDescription = `${"Ein sehr langer Satz über das Sofa. ".repeat(5).slice(0, 157)}...`;
+
+        expect(metaDescription).toHaveLength(160);
+        expect(p1?.translations).toMatchObject({
+            "lang-de": { metaDescription, ogDescription: metaDescription },
+        });
+    });
+
+    test("keeps the English meta texts of the source language", () => {
+        const [p1] = buildProductTranslations(createInput({ languages: [source(EN)] }));
+        expect(p1?.translations).toMatchObject({
+            [EN.id]: {
+                metaTitle: "Linen Sofa | Store",
+                metaDescription: "Buy the linen sofa",
+            },
         });
     });
 
