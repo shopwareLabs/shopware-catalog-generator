@@ -66,6 +66,13 @@ const lines = await fixBlueprint("music");
 - No AI calls, no Shopware connection required
 - Returns output lines for CLI/MCP display
 
+`hydrateBlueprint` and `estimateBlueprintCost` share `planHydration()`, so both reject the same
+invalid runs with the same message (missing blueprint, `--only=variants` without a hydrated
+blueprint, a changed variant share). Tests pass `HydrateDeps` (`cache`, `providers`,
+`loadExistingProperties`) as the third argument instead of reading `.env` or calling Shopware.
+Image passes are skipped when `imagesEnabled(imageProvider)` (from `src/providers/`) is false,
+which is the case for `IMAGE_PROVIDER=none`.
+
 `hydrateBlueprint` automatically loads `inspiration.json` if it exists and passes it to the hydrator:
 
 - Category AI prompt gets real category names as style examples
