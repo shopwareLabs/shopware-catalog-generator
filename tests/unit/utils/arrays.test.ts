@@ -6,6 +6,7 @@ import {
     randomPick,
     randomSample,
     randomSamplePercent,
+    uniqueById,
     weightedRandomPick,
 } from "../../../src/utils/arrays.js";
 
@@ -178,5 +179,19 @@ describe("chunkArray", () => {
 
     test("throws for invalid chunk size", () => {
         expect(() => chunkArray([1, 2], 0)).toThrow();
+    });
+});
+
+describe("uniqueById", () => {
+    test("keeps the first item per id, in order", () => {
+        const items = [
+            { id: "a", name: "first" },
+            { id: "b", name: "b" },
+            { id: "a", name: "second" },
+        ];
+        expect(uniqueById(items)).toEqual([
+            { id: "a", name: "first" },
+            { id: "b", name: "b" },
+        ]);
     });
 });
