@@ -1,0 +1,42 @@
+{
+    "$schema": "./node_modules/fallow/schema.json",
+    // Fallow is used for complexity, duplication and mutation testing only.
+    // Dead code stays with knip, linting with oxlint, formatting with oxfmt.
+    "health": {
+        "maxCyclomatic": 20,
+        "maxCognitive": 15,
+        "maxCrap": 30,
+        "maxUnitSize": 60,
+    },
+    "duplicates": {
+        "mode": "mild",
+        // Ratchet: today 6.1 %. Lower it when duplication goes down, never raise it.
+        "threshold": 7,
+    },
+    "mutation": {
+        "runner": "bun-test",
+    },
+    "rules": {
+        // Complexity is reported, not enforced yet (122 functions above the limits on
+        // 2026-11-10). Switch to "error" once the worst functions are split.
+        "complexity-cyclomatic": "warn",
+        "complexity-cognitive": "warn",
+        "complexity-crap": "warn",
+        "complexity-file-lines": "warn",
+        // Owned by knip (see knip.json)
+        "unused-files": "off",
+        "unused-exports": "off",
+        "unused-types": "off",
+        "unused-dependencies": "off",
+        "unused-dev-dependencies": "off",
+        "unused-optional-dependencies": "off",
+        "unused-enum-members": "off",
+        "unused-class-members": "off",
+        "unlisted-dependencies": "off",
+        "unresolved-imports": "off",
+        "duplicate-exports": "off",
+        // Not configured for this project
+        "boundary-violation": "off",
+        "policy-violation": "off",
+    },
+}
