@@ -13,130 +13,172 @@
  * The color palette is comprehensive to cover most color names AI might generate.
  */
 
-import type { CachedPropertyGroup } from "../types/index.js";
+import type { CachedPropertyGroup, ColorShade } from "../types/index.js";
 
 /**
- * Comprehensive color options with hex codes
- * These are curated to look good in storefront and cover common color names
+ * Curated shades with hex code and colour family.
+ *
+ * Every shade belongs to exactly one family (see `color-families.ts`). Names are unique
+ * (case-insensitive); other spellings go into `COLOR_ALIASES`. Store-specific shades
+ * that are not listed here are classified by the AI during hydration.
  */
-const COLOR_OPTIONS: Array<{ name: string; hex: string }> = [
+export const COLOR_OPTIONS: ColorShade[] = [
     // Neutrals
-    { name: "Black", hex: "#1a1a1a" },
-    { name: "White", hex: "#ffffff" },
-    { name: "Gray", hex: "#6b7280" },
-    { name: "Charcoal", hex: "#374151" },
-    { name: "Ivory", hex: "#fffff0" },
-    { name: "Cream", hex: "#fffdd0" },
-    { name: "Beige", hex: "#f5f5dc" },
-    { name: "Taupe", hex: "#483c32" },
+    { name: "Black", hex: "#1a1a1a", family: "black" },
+    { name: "Jet Black", hex: "#0a0a0a", family: "black" },
+    { name: "Onyx", hex: "#353935", family: "black" },
+    { name: "White", hex: "#ffffff", family: "white" },
+    { name: "Snow White", hex: "#fffafa", family: "white" },
+    { name: "Off White", hex: "#f8f4ec", family: "white" },
+    { name: "Ivory", hex: "#fffff0", family: "white" },
+    { name: "Eggshell", hex: "#f0ead6", family: "white" },
+    { name: "Pearl", hex: "#eae0c8", family: "white" },
+    { name: "Gray", hex: "#6b7280", family: "gray" },
+    { name: "Light Gray", hex: "#c8ccd2", family: "gray" },
+    { name: "Dark Gray", hex: "#4b5058", family: "gray" },
+    { name: "Charcoal", hex: "#36454f", family: "gray" },
+    { name: "Graphite", hex: "#383838", family: "gray" },
+    { name: "Slate", hex: "#708090", family: "gray" },
+    { name: "Pewter", hex: "#8f8f8f", family: "gray" },
+    { name: "Cream", hex: "#fffdd0", family: "beige" },
+    { name: "Beige", hex: "#e8dcc4", family: "beige" },
+    { name: "Sand", hex: "#c2b280", family: "beige" },
+    { name: "Linen", hex: "#efe6d8", family: "beige" },
+    { name: "Champagne", hex: "#f7e7ce", family: "beige" },
+    { name: "Khaki", hex: "#c3b091", family: "beige" },
+    { name: "Tan", hex: "#d2b48c", family: "beige" },
+    { name: "Taupe", hex: "#8b7d6b", family: "brown" },
 
     // Wood tones
-    { name: "Natural Oak", hex: "#c9a66b" },
-    { name: "Oak", hex: "#c9a66b" },
-    { name: "Walnut", hex: "#5d432c" },
-    { name: "Cherry", hex: "#6b2d2d" },
-    { name: "Mahogany", hex: "#4a0000" },
-    { name: "Pine", hex: "#d4a76a" },
-    { name: "Espresso", hex: "#3c2415" },
-    { name: "Teak", hex: "#b08d57" },
-    { name: "Ash", hex: "#b2beb5" },
-    { name: "Birch", hex: "#f5deb3" },
-    { name: "Maple", hex: "#c5833b" },
-    { name: "Ebony", hex: "#555d50" },
-    { name: "Rosewood", hex: "#65000b" },
-    { name: "Cedar", hex: "#a0522d" },
+    { name: "Natural Oak", hex: "#c9a66b", family: "beige" },
+    { name: "Oak", hex: "#b8915a", family: "beige" },
+    { name: "Ash", hex: "#d8c8a8", family: "beige" },
+    { name: "Birch", hex: "#f5deb3", family: "beige" },
+    { name: "Pine", hex: "#d4a76a", family: "beige" },
+    { name: "Maple", hex: "#c5833b", family: "brown" },
+    { name: "Teak", hex: "#b08d57", family: "brown" },
+    { name: "Cedar", hex: "#a0522d", family: "brown" },
+    { name: "Cherry", hex: "#6b2d2d", family: "brown" },
+    { name: "Walnut", hex: "#5d432c", family: "brown" },
+    { name: "Mahogany", hex: "#4a1c14", family: "brown" },
+    { name: "Rosewood", hex: "#65000b", family: "brown" },
+    { name: "Espresso", hex: "#3c2415", family: "brown" },
+    { name: "Ebony", hex: "#2b2523", family: "black" },
 
-    // Standard colors
-    { name: "Red", hex: "#dc2626" },
-    { name: "Blue", hex: "#2563eb" },
-    { name: "Green", hex: "#16a34a" },
-    { name: "Yellow", hex: "#eab308" },
-    { name: "Orange", hex: "#ea580c" },
-    { name: "Purple", hex: "#9333ea" },
-    { name: "Pink", hex: "#ec4899" },
-    { name: "Brown", hex: "#78350f" },
+    // Browns
+    { name: "Brown", hex: "#78350f", family: "brown" },
+    { name: "Camel", hex: "#c19a6b", family: "brown" },
+    { name: "Chocolate", hex: "#7b3f00", family: "brown" },
+    { name: "Mocha", hex: "#967969", family: "brown" },
+    { name: "Coffee", hex: "#6f4e37", family: "brown" },
 
-    // Rich colors
-    { name: "Navy", hex: "#1e3a5f" },
-    { name: "Forest Green", hex: "#228b22" },
-    { name: "Burgundy", hex: "#722f37" },
-    { name: "Terracotta", hex: "#e2725b" },
-    { name: "Slate Blue", hex: "#6a5acd" },
-    { name: "Olive", hex: "#808000" },
-    { name: "Teal", hex: "#008080" },
-    { name: "Coral", hex: "#ff7f50" },
-    { name: "Indigo", hex: "#4b0082" },
-    { name: "Maroon", hex: "#800000" },
-    { name: "Turquoise", hex: "#40e0d0" },
-    { name: "Lavender", hex: "#e6e6fa" },
-    { name: "Salmon", hex: "#fa8072" },
-    { name: "Mint", hex: "#98fb98" },
-    { name: "Mustard", hex: "#ffdb58" },
-    { name: "Plum", hex: "#dda0dd" },
-    { name: "Rust", hex: "#b7410e" },
-    { name: "Sand", hex: "#c2b280" },
-    { name: "Sage", hex: "#bcb88a" },
-    { name: "Slate", hex: "#708090" },
+    // Reds
+    { name: "Red", hex: "#dc2626", family: "red" },
+    { name: "Scarlet", hex: "#ff2400", family: "red" },
+    { name: "Crimson", hex: "#dc143c", family: "red" },
+    { name: "Ruby", hex: "#9b111e", family: "red" },
+    { name: "Burgundy", hex: "#722f37", family: "red" },
+    { name: "Wine", hex: "#5e1a2b", family: "red" },
+    { name: "Maroon", hex: "#800000", family: "red" },
+
+    // Oranges
+    { name: "Orange", hex: "#ea580c", family: "orange" },
+    { name: "Terracotta", hex: "#e2725b", family: "orange" },
+    { name: "Rust", hex: "#b7410e", family: "orange" },
+    { name: "Coral", hex: "#ff7f50", family: "orange" },
+    { name: "Peach", hex: "#ffcba4", family: "orange" },
+    { name: "Apricot", hex: "#fbceb1", family: "orange" },
+    { name: "Amber", hex: "#ffbf00", family: "orange" },
+    { name: "Copper", hex: "#b87333", family: "orange" },
+
+    // Yellows
+    { name: "Yellow", hex: "#eab308", family: "yellow" },
+    { name: "Mustard", hex: "#d4a72c", family: "yellow" },
+    { name: "Honey", hex: "#eb9605", family: "yellow" },
+
+    // Greens
+    { name: "Green", hex: "#16a34a", family: "green" },
+    { name: "Forest Green", hex: "#228b22", family: "green" },
+    { name: "Hunter Green", hex: "#355e3b", family: "green" },
+    { name: "Kelly Green", hex: "#4cbb17", family: "green" },
+    { name: "Sea Green", hex: "#2e8b57", family: "green" },
+    { name: "Emerald", hex: "#50c878", family: "green" },
+    { name: "Jade", hex: "#00a86b", family: "green" },
+    { name: "Olive", hex: "#808000", family: "green" },
+    { name: "Sage", hex: "#9caf88", family: "green" },
+    { name: "Mint", hex: "#98d7b5", family: "green" },
+    { name: "Lime", hex: "#32cd32", family: "green" },
+
+    // Blues
+    { name: "Blue", hex: "#2563eb", family: "blue" },
+    { name: "Navy", hex: "#1e3a5f", family: "blue" },
+    { name: "Midnight", hex: "#191970", family: "blue" },
+    { name: "Indigo", hex: "#2e3a87", family: "blue" },
+    { name: "Cobalt", hex: "#0047ab", family: "blue" },
+    { name: "Royal Blue", hex: "#4169e1", family: "blue" },
+    { name: "Azure", hex: "#007fff", family: "blue" },
+    { name: "Sky Blue", hex: "#87ceeb", family: "blue" },
+    { name: "Baby Blue", hex: "#89cff0", family: "blue" },
+    { name: "Slate Blue", hex: "#4b6584", family: "blue" },
+    { name: "Denim", hex: "#1560bd", family: "blue" },
+    { name: "Teal", hex: "#008080", family: "blue" },
+    { name: "Turquoise", hex: "#40e0d0", family: "blue" },
+    { name: "Aqua", hex: "#00c8d7", family: "blue" },
+    { name: "Cyan", hex: "#00ffff", family: "blue" },
+
+    // Purples
+    { name: "Purple", hex: "#9333ea", family: "purple" },
+    { name: "Violet", hex: "#8b00ff", family: "purple" },
+    { name: "Lavender", hex: "#b57edc", family: "purple" },
+    { name: "Plum", hex: "#8e4585", family: "purple" },
+    { name: "Mauve", hex: "#b784a7", family: "purple" },
+
+    // Pinks
+    { name: "Pink", hex: "#ec4899", family: "pink" },
+    { name: "Rose", hex: "#e8789a", family: "pink" },
+    { name: "Magenta", hex: "#ff00ff", family: "pink" },
+    { name: "Salmon", hex: "#fa8072", family: "pink" },
 
     // Metals
-    { name: "Brass", hex: "#b5a642" },
-    { name: "Bronze", hex: "#cd7f32" },
-    { name: "Silver", hex: "#c0c0c0" },
-    { name: "Copper", hex: "#b87333" },
-    { name: "Gold", hex: "#ffd700" },
-    { name: "Chrome", hex: "#dbe4eb" },
-    { name: "Nickel", hex: "#727472" },
-    { name: "Brushed Steel", hex: "#8b8d8e" },
+    { name: "Gold", hex: "#d4af37", family: "gold" },
+    { name: "Brass", hex: "#b5a642", family: "gold" },
+    { name: "Bronze", hex: "#cd7f32", family: "gold" },
+    { name: "Silver", hex: "#c0c0c0", family: "silver" },
+    { name: "Chrome", hex: "#dbe4eb", family: "silver" },
+    { name: "Nickel", hex: "#a8a9ad", family: "silver" },
+    { name: "Platinum", hex: "#e5e4e2", family: "silver" },
+    { name: "Brushed Steel", hex: "#8b8d8e", family: "silver" },
 
-    // Fabric/Textile colors
-    { name: "Denim", hex: "#1560bd" },
-    { name: "Khaki", hex: "#c3b091" },
-    { name: "Tan", hex: "#d2b48c" },
-    { name: "Camel", hex: "#c19a6b" },
-    { name: "Linen", hex: "#faf0e6" },
-    { name: "Charcoal Gray", hex: "#36454f" },
-
-    // Additional colors for comprehensive coverage
-    { name: "Rose", hex: "#ff007f" },
-    { name: "Magenta", hex: "#ff00ff" },
-    { name: "Cyan", hex: "#00ffff" },
-    { name: "Aqua", hex: "#00ffff" },
-    { name: "Lime", hex: "#32cd32" },
-    { name: "Violet", hex: "#8b00ff" },
-    { name: "Mauve", hex: "#e0b0ff" },
-    { name: "Peach", hex: "#ffcba4" },
-    { name: "Apricot", hex: "#fbceb1" },
-    { name: "Champagne", hex: "#f7e7ce" },
-    { name: "Pearl", hex: "#eae0c8" },
-    { name: "Midnight", hex: "#191970" },
-    { name: "Cobalt", hex: "#0047ab" },
-    { name: "Azure", hex: "#007fff" },
-    { name: "Sky Blue", hex: "#87ceeb" },
-    { name: "Baby Blue", hex: "#89cff0" },
-    { name: "Royal Blue", hex: "#4169e1" },
-    { name: "Emerald", hex: "#50c878" },
-    { name: "Jade", hex: "#00a86b" },
-    { name: "Hunter Green", hex: "#355e3b" },
-    { name: "Kelly Green", hex: "#4cbb17" },
-    { name: "Sea Green", hex: "#2e8b57" },
-    { name: "Scarlet", hex: "#ff2400" },
-    { name: "Crimson", hex: "#dc143c" },
-    { name: "Ruby", hex: "#e0115f" },
-    { name: "Wine", hex: "#722f37" },
-    { name: "Amber", hex: "#ffbf00" },
-    { name: "Honey", hex: "#eb9605" },
-    { name: "Chocolate", hex: "#7b3f00" },
-    { name: "Mocha", hex: "#967969" },
-    { name: "Coffee", hex: "#6f4e37" },
-    { name: "Graphite", hex: "#383838" },
-    { name: "Pewter", hex: "#8f8f8f" },
-    { name: "Platinum", hex: "#e5e4e2" },
-    { name: "Onyx", hex: "#353935" },
-    { name: "Jet Black", hex: "#0a0a0a" },
-    { name: "Snow White", hex: "#fffafa" },
-    { name: "Off White", hex: "#faf0e6" },
-    { name: "Eggshell", hex: "#f0ead6" },
+    // Other
+    { name: "Transparent", hex: "#f5f5f5", family: "transparent" },
 ];
+
+/**
+ * Other spellings of curated shades (lower-case key → canonical name).
+ * Word-level spellings ("grey" → "gray", "colour" → "color") are handled by the
+ * normaliser, so they are not repeated here.
+ */
+export const COLOR_ALIASES: Record<string, string> = {
+    "charcoal gray": "Charcoal",
+    "navy blue": "Navy",
+    "off-white": "Off White",
+    "olive green": "Olive",
+    "midnight blue": "Midnight",
+    "sage green": "Sage",
+    "mint green": "Mint",
+    clear: "Transparent",
+    "multi-color": "Multicolor",
+    "multi color": "Multicolor",
+    "multi-colored": "Multicolor",
+    multicolored: "Multicolor",
+};
+
+const COLOR_OPTION_BY_NAME = new Map(COLOR_OPTIONS.map((c) => [c.name.toLowerCase(), c]));
+
+/** Curated shade by name (case-insensitive, no alias resolution) */
+export function getCuratedShade(name: string): ColorShade | undefined {
+    return COLOR_OPTION_BY_NAME.get(name.toLowerCase());
+}
 
 /**
  * Color options that use images instead of hex codes.

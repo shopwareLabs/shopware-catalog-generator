@@ -159,6 +159,7 @@ export async function syncPropertyGroups(
         name: string;
         description: string;
         displayType: string;
+        filterable?: boolean;
         options: Array<{ id: string; name: string; colorHexCode?: string }>;
     }> = [];
 
@@ -173,6 +174,7 @@ export async function syncPropertyGroups(
                 name: blueprintGroup.name,
                 description: `Properties for ${blueprintGroup.name}`,
                 displayType: blueprintGroup.displayType,
+                filterable: blueprintGroup.filterable,
                 options: blueprintGroup.options.map((o) => ({
                     id: o.id,
                     name: o.name,
@@ -207,6 +209,9 @@ export async function syncPropertyGroups(
         // Check what the blueprint wants (not what Shopware currently has)
         const blueprintWantsColor = blueprintGroup.displayType === "color";
         const needsDisplayTypeUpdate = blueprintWantsColor && existing.displayType !== "color";
+        const needsFilterableUpdate =
+            blueprintGroup.filterable !== undefined &&
+            existing.filterable !== blueprintGroup.filterable;
 
         // For color groups, check if existing options need hex code updates
         let optionsNeedingHexUpdate: typeof blueprintGroup.options = [];
@@ -225,7 +230,8 @@ export async function syncPropertyGroups(
         if (
             missingOptions.length === 0 &&
             optionsNeedingHexUpdate.length === 0 &&
-            !needsDisplayTypeUpdate
+            !needsDisplayTypeUpdate &&
+            !needsFilterableUpdate
         ) {
             skipped++;
             continue;
@@ -261,9 +267,15 @@ export async function syncPropertyGroups(
             name: existing.name,
             description: `Properties for ${existing.name}`,
             displayType: blueprintWantsColor ? "color" : existing.displayType,
+            filterable: blueprintGroup.filterable,
             options: allOptionsToSync,
         });
         updated++;
+
+        if (needsFilterableUpdate) {
+            const state = blueprintGroup.filterable ? "shown in" : "hidden from";
+            logger.info(`  ⊕ "${existing.name}" is now ${state} the listing filter`, { cli: true });
+        }
 
         if (needsDisplayTypeUpdate) {
             logger.info(`  ⊕ Updating "${existing.name}" displayType to "color" with hex codes`, {

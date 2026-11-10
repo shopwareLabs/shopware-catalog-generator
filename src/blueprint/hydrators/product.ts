@@ -99,6 +99,12 @@ function fitsInTokenLimit(payload: unknown, tokenLimit: number, providerName?: s
 // Types
 // =============================================================================
 
+/** Prompt rules for the "Color" group (the colour system derives families from it) */
+const COLOR_PROPERTY_RULES = `- "Color" is the only predefined property group - use it when color is relevant for the product
+- Color values: one specific shade name a shopper of THIS store would recognise (e.g. "Navy", "Dusty Rose", "Natural Oak"), not vague values like "3 colors" or "Various"
+- Reuse the existing Color values listed above when one fits; for a pattern or several colours use "Multicolor"
+- Never create a "Color family" group: families are added automatically`;
+
 export interface StoreContext {
     name: string;
     description: string;
@@ -722,7 +728,7 @@ CATEGORY ASSIGNMENT (CRITICAL):
 - Only use categories from the AVAILABLE SUBCATEGORIES list above
 
 PROPERTY GUIDELINES:
-- "Color" is the only predefined property group - use it when color is relevant for the product
+${COLOR_PROPERTY_RULES}
 - STRONGLY PREFER reusing the ALREADY KNOWN property groups listed above - use their EXACT names
 - Only create NEW property groups if none of the existing ones fit
 - Keep property groups BROAD and REUSABLE across multiple products:
@@ -811,7 +817,7 @@ ${existingPropsText}
 ${cachedGroupsText}
 
 PROPERTY GUIDELINES:
-- "Color" is the only predefined property group - use it when color is relevant
+${COLOR_PROPERTY_RULES}
 - STRONGLY PREFER reusing the ALREADY KNOWN property groups listed above
 - Keep property groups BROAD and REUSABLE: "Size", "Material", "Type", "Style"
 - Maximum 5-6 unique property groups per category

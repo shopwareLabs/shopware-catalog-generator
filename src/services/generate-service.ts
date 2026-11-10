@@ -8,6 +8,7 @@
 import type { PostProcessorResult } from "../post-processors/index.js";
 import type { LanguageSelection, ProductSyncResult } from "../types/index.js";
 
+import { applyColorSystem } from "../blueprint/index.js";
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
 import {
@@ -162,9 +163,13 @@ export async function generate(
         ];
     }
     if (validationResult.fixesApplied > 0) {
-        cache.saveHydratedBlueprint(salesChannelName, blueprint);
         results.push(`  Auto-fixed ${validationResult.fixesApplied} blueprint issue(s)`);
     }
+
+    // Blueprints from older runs and templates get the colour system before translation
+    // and upload (no AI: unknown shades are estimated)
+    applyColorSystem(blueprint, cache.loadColorShades(salesChannelName));
+    cache.saveHydratedBlueprint(salesChannelName, blueprint);
 
     const originalBlueprint = cache.loadBlueprint(salesChannelName);
     if (originalBlueprint) {

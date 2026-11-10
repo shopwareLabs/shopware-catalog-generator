@@ -28,6 +28,7 @@ src/
 │   ├── cache.ts              # Cache configuration types
 │   ├── export.ts             # Export types (ExportValidation, ExportResult)
 │   ├── property-cache.ts     # Property cache types
+│   ├── color.ts              # ColorFamily, ColorShade, LearnedColorShades
 │   ├── template.ts           # Template metadata (generation.json, template.json) + Zod schemas
 │   └── shopware-version.ts   # ShopwareVersion, ShopwareFeatureRequirement
 │
@@ -77,6 +78,7 @@ src/
 │   ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 │   ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
 │   ├── cost-estimator.ts     # Hydration cost forecast (tokens, images, USD)
+│   ├── color-system.ts       # Colour system: shades in "Color", families in "Color family" (no AI)
 │   └── hydrators/            # Specialized hydration modules
 │       ├── index.ts          # Re-exports all hydrators
 │       ├── category.ts       # Category names/descriptions via AI
@@ -84,6 +86,7 @@ src/
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
 │       ├── image.ts          # Product/category/CMS/theme image pre-generation
 │       ├── translation.ts    # AI translation pass (native-sounding, per locale, reuses unchanged)
+│       ├── color-shades.ts   # AI hex + family for unknown shade names (store context)
 │       └── theme.ts          # AI brand color generation
 │
 ├── post-processors/          # Post-processors (parallel execution)
@@ -142,7 +145,8 @@ src/
 │   ├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 │   ├── packaging-units.ts    # Units + packaging options (reference prices)
 │   ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
-│   ├── property-groups.ts    # Universal property groups (Color with hex codes)
+│   ├── color-families.ts     # 16 colour families for the listing filter (fixed translations)
+│   ├── property-groups.ts    # Curated shades (name, hex, family) + aliases
 │   ├── review-data.ts        # Reviewer names, review templates, buildProductReviews (seeded)
 │   ├── shopware-features.ts  # Feature → first Shopware version (version gating)
 │   └── translatable-texts.ts # Fixture texts that are translated with the catalog
@@ -163,6 +167,7 @@ src/
 │   ├── property-collector.ts # Collect, deduplicate, merge properties
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
+│   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
@@ -223,10 +228,12 @@ scripts/
 tests/
 ├── unit/                     # Unit tests (mirrors src/ structure)
 │   ├── blueprint/            # Blueprint tests
+│   │   ├── color-system.test.ts
 │   │   ├── generator.test.ts
 │   │   ├── hydrator.test.ts
 │   │   └── hydrators/
 │   │       ├── cms.test.ts
+│   │       ├── color-shades.test.ts
 │   │       ├── image.test.ts
 │   │       └── theme.test.ts
 │   ├── post-processors/      # Post-processor tests
@@ -258,12 +265,15 @@ tests/
 │   │   ├── storefront-check.test.ts
 │   │   ├── sync.test.ts
 │   │   └── version.test.ts
+│   ├── fixtures/             # Fixture tests
+│   │   └── color-families.test.ts
 │   ├── templates/            # Template tests
 │   │   └── fetcher.test.ts
 │   ├── utils/                # Utility tests
 │   │   ├── arrays.test.ts
 │   │   ├── blueprint-validation.test.ts
 │   │   ├── category-tree.test.ts
+│   │   ├── color-normalize.test.ts
 │   │   ├── color-palette.test.ts
 │   │   ├── concurrency.test.ts
 │   │   ├── logger.test.ts
@@ -697,6 +707,7 @@ generated/
         ├── generation.json         # Generator version + models per hydrate/translate step
         ├── template.json           # Template metadata (bun run template metadata)
         ├── categories.json         # Category tree
+        ├── color-shades.json       # Learned shades (AI hex + family per shade name)
         ├── property-groups.json    # Property groups synced from Shopware
         ├── properties/             # Store-specific AI-generated properties
         │   ├── volume.json         # e.g., for beauty store
@@ -725,6 +736,9 @@ logs/
 **Property system:**
 
 - **Universal properties** (only `Color`): Stored in `generated/properties/` with hex codes
+- **Colour system:** shades live in `Color` (hidden from the listing filter), their 16 families in
+  `Color family` (shown in the filter). Unknown shade names get hex + family from one AI call with
+  the store context, stored in `color-shades.json`. See [src/blueprint/AGENTS.md](src/blueprint/AGENTS.md#colour-system)
 - **Store-specific properties**: AI-generated based on store context, stored in each SalesChannel's `properties/` folder
 
 ## Code Conventions

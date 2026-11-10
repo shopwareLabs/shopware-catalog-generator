@@ -51,6 +51,16 @@ export {
     getViewSuffix,
     VIEW_SUFFIXES,
 } from "./color-palette.js";
+// Colour normalisation (shade names, families)
+export {
+    estimateShade,
+    familyFromHex,
+    isHexColor,
+    MULTICOLOR_NAME,
+    normalizeColorName,
+    resolveOrEstimateShade,
+    resolveShade,
+} from "./color-normalize.js";
 // Concurrency utilities
 export { ConcurrencyLimiter } from "./concurrency.js";
 // Image prompt utilities

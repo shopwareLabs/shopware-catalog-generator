@@ -18,6 +18,7 @@ blueprint/
 ├── fix-placeholders.ts   # Fix incomplete hydration (placeholder names)
 ├── variant-resolver.ts   # Variant configuration resolution via cache + AI
 ├── cost-estimator.ts     # Hydration + translation cost forecast (no AI): tokens, images, USD
+├── color-system.ts       # Colour system (no AI): normalise shades, "Color" + "Color family" groups
 ├── index.ts              # Re-exports
 └── hydrators/            # Specialized hydration modules
     ├── category.ts       # Category names/descriptions via AI
@@ -25,6 +26,7 @@ blueprint/
     ├── cms.ts            # CMS blueprint generation and AI text hydration
     ├── image.ts          # Product/category/CMS/theme image pre-generation + trimAndResize
     ├── theme.ts          # AI brand color generation (primary + secondary)
+    ├── color-shades.ts   # hydrateColorShades: AI hex + family for unknown shade names (store context)
     ├── translation.ts    # translateCatalog: native-sounding translation per locale, reuses unchanged entries by source hash
     └── index.ts          # Re-exports
 ```
@@ -63,6 +65,29 @@ Orchestrates AI hydration of the blueprint:
 3. **Variants:** Property group resolution via `VariantResolver`
 4. **CMS:** Text content via `hydrateCmsBlueprint()`
 5. **Images:** Product, category, CMS, and theme images via `hydrateProductImages()` / `hydrateCmsImages()` / `hydrateThemeMedia()`
+
+### Colour System
+
+Colours live on two levels:
+
+| Group          | Options                                | `filterable` | Used for                       |
+| -------------- | -------------------------------------- | ------------ | ------------------------------ |
+| `Color`        | Shades ("Navy", "Dusty Rose", ...)     | `false`      | Product page, variant options  |
+| `Color family` | 16 families (Blue, Red, Multicolor...) | `true`       | Listing filter (stable, short) |
+
+After product hydration, `buildPropertyGroups()` (`services/blueprint-service.ts`) runs:
+
+1. `normalizeProductColors()` — "Colour" → "Color", "navy blue" → "Navy", "3 colours" → "Multicolor"
+2. `hydrateColorShades()` — one AI call per 50 unknown shade names, with the store context, returns
+   hex + family. Results are saved per store in `color-shades.json` and reused, so re-runs make no
+   AI call. On AI failure the no-AI estimate is used.
+3. `PropertyCollector` builds the property groups
+4. `applyColorSystem()` — hex + family on every shade, hides `Color` from the filter, adds the
+   `Color family` group and gives every product the families of its shades (and colour variants)
+
+`applyColorSystem()` is idempotent and needs no AI, so `generate` and the server also apply it to
+older hydrated blueprints and templates (unknown shades are estimated). Family names have fixed
+translations in `fixtures/color-families.ts`; shade names are translated by the AI translation pass.
 
 **Brand color resilience:** `hydrateBrandColors()` catches all parse/schema errors and returns safe fallback colors (`#0070f3` / `#7928ca`) instead of throwing. One bad AI response cannot abort full hydration.
 

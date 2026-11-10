@@ -39,6 +39,8 @@ export interface ExistingProperty {
     id: string;
     name: string;
     displayType: string;
+    /** Shown in the listing filter */
+    filterable?: boolean;
     options: ExistingPropertyOption[];
 }
 

@@ -32,7 +32,8 @@ fixtures/
 ├── locale-currencies.ts  # Locale → currency for extra domains, DEFAULT_DOMAIN_LOCALES (de-DE)
 ├── packaging-units.ts    # Units (pc, kg, m) and packaging options (Pair, Pack, Box, ...) for reference prices
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
-├── property-groups.ts    # Universal property groups (Color with hex codes)
+├── color-families.ts     # 16 colour families ("Color family" filter group), fixed translations, deterministic IDs
+├── property-groups.ts    # Curated shades (name, hex, family), COLOR_ALIASES, getCuratedShade, image colours
 ├── review-data.ts        # Reviewer names, review templates, buildProductReviews (seeded, stable across runs)
 ├── shopware-features.ts  # Feature → first Shopware version, MIN_SUPPORTED_SHOPWARE_VERSION
 ├── translatable-texts.ts # Fixture texts translated with the catalog (see below)

@@ -131,6 +131,8 @@ export interface PropertyGroup {
     name: string;
     description: string;
     displayType: string; // More permissive than schema (allows "image" from Shopware)
+    /** Shown in the listing filter; omitted keeps Shopware's value */
+    filterable?: boolean;
     options: PropertyOption[];
 }
 

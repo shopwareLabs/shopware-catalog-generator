@@ -5,86 +5,15 @@
  * AI can generate any color name, and we find the closest match for HEX.
  */
 
+import { COLOR_OPTIONS } from "../fixtures/property-groups.js";
+
 /**
- * Curated color palette with HEX values that look good in storefront
+ * Curated color palette with HEX values that look good in storefront.
+ * Derived from the shade fixture, so there is one source of truth for hex codes.
  */
-export const COLOR_PALETTE: Record<string, string> = {
-    // Neutrals
-    Black: "#1a1a1a",
-    White: "#ffffff",
-    Gray: "#6b7280",
-    Charcoal: "#374151",
-    Ivory: "#fffff0",
-    Cream: "#fffdd0",
-    Beige: "#f5f5dc",
-    Taupe: "#483c32",
-
-    // Wood tones
-    "Natural Oak": "#c9a66b",
-    Oak: "#c9a66b",
-    Walnut: "#5d432c",
-    Cherry: "#6b2d2d",
-    Mahogany: "#4a0000",
-    Pine: "#d4a76a",
-    Espresso: "#3c2415",
-    Teak: "#b08d57",
-    Ash: "#b2beb5",
-    Birch: "#f5deb3",
-    Maple: "#c5833b",
-    Ebony: "#555d50",
-    Rosewood: "#65000b",
-    Cedar: "#a0522d",
-
-    // Standard colors
-    Red: "#dc2626",
-    Blue: "#2563eb",
-    Green: "#16a34a",
-    Yellow: "#eab308",
-    Orange: "#ea580c",
-    Purple: "#9333ea",
-    Pink: "#ec4899",
-    Brown: "#78350f",
-
-    // Rich colors
-    Navy: "#1e3a5f",
-    "Forest Green": "#228b22",
-    Burgundy: "#722f37",
-    Terracotta: "#e2725b",
-    "Slate Blue": "#6a5acd",
-    Olive: "#808000",
-    Teal: "#008080",
-    Coral: "#ff7f50",
-    Indigo: "#4b0082",
-    Maroon: "#800000",
-    Turquoise: "#40e0d0",
-    Lavender: "#e6e6fa",
-    Salmon: "#fa8072",
-    Mint: "#98fb98",
-    Mustard: "#ffdb58",
-    Plum: "#dda0dd",
-    Rust: "#b7410e",
-    Sand: "#c2b280",
-    Sage: "#bcb88a",
-    Slate: "#708090",
-
-    // Metals
-    Brass: "#b5a642",
-    Bronze: "#cd7f32",
-    Silver: "#c0c0c0",
-    Copper: "#b87333",
-    Gold: "#ffd700",
-    Chrome: "#dbe4eb",
-    Nickel: "#727472",
-    "Brushed Steel": "#8b8d8e",
-
-    // Fabric/Textile colors
-    Denim: "#1560bd",
-    Khaki: "#c3b091",
-    Tan: "#d2b48c",
-    Camel: "#c19a6b",
-    Linen: "#faf0e6",
-    "Charcoal Gray": "#36454f",
-};
+export const COLOR_PALETTE: Record<string, string> = Object.fromEntries(
+    COLOR_OPTIONS.map((c) => [c.name, c.hex])
+);
 
 /**
  * View suffixes for consistent image generation
@@ -146,46 +75,40 @@ export interface ColorMatch {
 /**
  * Find the closest matching color from the palette
  *
- * Uses three-tier matching:
+ * Uses three-tier matching (hyphens and underscores count as spaces):
  * 1. Exact match (case-insensitive)
- * 2. Partial match (color name contains palette entry or vice versa)
+ * 2. Partial match: the longest palette entry contained in the name, else the
+ *    first palette entry that contains the name
  * 3. Word-based match (any word matches)
  *
  * @param colorName - The color name to match (e.g., "Midnight Blue", "Warm Oak")
  * @returns The matching color with name and hex, or null if no match
  */
 export function findClosestColor(colorName: string): ColorMatch | null {
-    const normalized = colorName.toLowerCase().trim();
+    const normalized = colorName.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+    if (!normalized) return null;
 
-    if (!normalized) {
-        return null;
-    }
+    const entries = Object.entries(COLOR_PALETTE).map(([name, hex]) => ({
+        name,
+        hex,
+        lower: name.toLowerCase(),
+    }));
+    const toMatch = (e: { name: string; hex: string } | undefined): ColorMatch | null =>
+        e ? { name: e.name, hex: e.hex } : null;
 
-    // 1. Exact match
-    for (const [name, hex] of Object.entries(COLOR_PALETTE)) {
-        if (name.toLowerCase() === normalized) {
-            return { name, hex };
-        }
-    }
+    const exact = entries.find((e) => e.lower === normalized);
+    if (exact) return toMatch(exact);
 
-    // 2. Partial match (color name contains palette entry or vice versa)
-    for (const [name, hex] of Object.entries(COLOR_PALETTE)) {
-        const paletteLower = name.toLowerCase();
-        if (normalized.includes(paletteLower) || paletteLower.includes(normalized)) {
-            return { name, hex };
-        }
-    }
+    const contained = entries
+        .filter((e) => normalized.includes(e.lower))
+        .sort((a, b) => b.lower.length - a.lower.length)[0];
+    if (contained) return toMatch(contained);
 
-    // 3. Word-based match (any word matches a palette color)
-    const words = normalized.split(/[\s-_]+/);
-    for (const [name, hex] of Object.entries(COLOR_PALETTE)) {
-        const paletteWords = name.toLowerCase().split(/[\s-_]+/);
-        if (words.some((w) => paletteWords.includes(w) && w.length > 2)) {
-            return { name, hex };
-        }
-    }
+    const containing = entries.find((e) => e.lower.includes(normalized));
+    if (containing) return toMatch(containing);
 
-    return null;
+    const words = normalized.split(" ").filter((w) => w.length > 2);
+    return toMatch(entries.find((e) => e.lower.split(" ").some((w) => words.includes(w))));
 }
 
 /**

@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import type { CmsPageStructure, TranslationPayloadInput } from "../../../src/shopware/index.js";
+import type { BlueprintPropertyGroup } from "../../../src/types/index.js";
 
 import { buildTranslationSource } from "../../../src/blueprint/hydrators/translation.js";
+import { COLOR_FAMILY_GROUP_ID, COLOR_FAMILY_GROUP_NAME } from "../../../src/fixtures/index.js";
 import {
     buildCategoryTranslations,
     buildCmsSlotTranslations,
@@ -169,6 +171,57 @@ describe("buildPropertyGroupTranslations", () => {
         expect(options).toEqual([
             { id: "opt-red", translations: { "lang-de": { name: "Rot" } } },
             { id: "opt-blue", translations: { "lang-de": { name: "Blue" } } },
+        ]);
+    });
+
+    test("uses fixed translations for the colour family group, AI text for other languages", () => {
+        const familyGroup: BlueprintPropertyGroup = {
+            id: COLOR_FAMILY_GROUP_ID,
+            name: COLOR_FAMILY_GROUP_NAME,
+            displayType: "color",
+            filterable: true,
+            options: [
+                { id: "fam-white", name: "White", family: "white" },
+                { id: "fam-red", name: "Red", family: "red" },
+            ],
+        };
+        const blueprint = createTestBlueprint({ propertyGroups: [familyGroup] });
+        const japanese = { id: "lang-ja", locale: "ja-JP", isSystem: false };
+        const aiFile = createTranslationFile({
+            locale: "ja-JP",
+            propertyGroups: {
+                [COLOR_FAMILY_GROUP_NAME]: { name: "カラー系統", options: { White: "白" } },
+            },
+        });
+
+        const { groups, options } = buildPropertyGroupTranslations(
+            createInput({
+                blueprint,
+                languages: [
+                    translation(DE, createTranslationFile()),
+                    translation(japanese, aiFile),
+                ],
+            })
+        );
+
+        expect(groups).toEqual([
+            {
+                id: COLOR_FAMILY_GROUP_ID,
+                translations: {
+                    "lang-de": { name: "Farbfamilie" },
+                    "lang-ja": { name: "カラー系統" },
+                },
+            },
+        ]);
+        expect(options).toEqual([
+            {
+                id: "fam-white",
+                translations: { "lang-de": { name: "Weiß" }, "lang-ja": { name: "白" } },
+            },
+            {
+                id: "fam-red",
+                translations: { "lang-de": { name: "Rot" }, "lang-ja": { name: "Red" } },
+            },
         ]);
     });
 });

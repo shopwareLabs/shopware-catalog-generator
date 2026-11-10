@@ -17,7 +17,7 @@ import type {
 import type { ExistingProperty } from "../utils/index.js";
 
 import { PropertyCache } from "../property-cache.js";
-import { findClosestColor, logger, toKebabCase } from "../utils/index.js";
+import { logger, normalizeColorName, toKebabCase } from "../utils/index.js";
 import {
     findPlaceholderCategories,
     findPlaceholderProducts,
@@ -333,8 +333,7 @@ export class BlueprintHydrator {
         }
 
         if (color) {
-            const colorMatch = findClosestColor(color);
-            const colorName = colorMatch?.name ?? color;
+            const colorName = normalizeColorName(color) || color;
             if (!productName.toLowerCase().includes(color.toLowerCase())) {
                 basePrompt += `, ${colorName} finish`;
             }

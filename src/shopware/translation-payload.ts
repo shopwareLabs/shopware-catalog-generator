@@ -9,6 +9,8 @@
 
 import type {
     BlueprintProduct,
+    BlueprintPropertyGroup,
+    ColorFamily,
     HydratedBlueprint,
     Manufacturer,
     TranslationSource,
@@ -17,6 +19,8 @@ import type { SyncOperation } from "./api-types.js";
 import type { LanguageContent } from "./languages.js";
 
 import {
+    COLOR_FAMILY_GROUP_NAME,
+    colorFamilyTranslation,
     fillFixtureText,
     footerTextKey,
     localizedFixtureText,
@@ -194,10 +198,23 @@ export function buildPropertyGroupTranslations(input: TranslationPayloadInput): 
             ? { name: groupName, options: null }
             : content.file.propertyGroups[groupName];
 
+    // The colour family group and its options have fixed translations (no AI needed)
+    const fixedFamilyName = (
+        group: BlueprintPropertyGroup,
+        locale: string,
+        content: LanguageContent["content"],
+        family?: ColorFamily
+    ): string | undefined =>
+        content.kind !== "source" && group.name === COLOR_FAMILY_GROUP_NAME
+            ? colorFamilyTranslation(locale, family)
+            : undefined;
+
     const groups = input.blueprint.propertyGroups.map((group) =>
         withTranslations(
             group.id,
             input.languages.map(({ language, content }) => {
+                const fixed = fixedFamilyName(group, language.locale, content);
+                if (fixed) return [language.id, { name: fixed }];
                 const translated = groupTranslation(group.name, content);
                 return [language.id, translated ? { name: translated.name } : null];
             })
@@ -209,6 +226,10 @@ export function buildPropertyGroupTranslations(input: TranslationPayloadInput): 
             withTranslations(
                 option.id,
                 input.languages.map(({ language, content }) => {
+                    const fixed = option.family
+                        ? fixedFamilyName(group, language.locale, content, option.family)
+                        : undefined;
+                    if (fixed) return [language.id, { name: fixed }];
                     const translated = groupTranslation(group.name, content);
                     if (!translated) return [language.id, null];
                     const name = translated.options?.[option.name] ?? option.name;

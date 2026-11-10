@@ -246,6 +246,7 @@ export class ShopwareExporter extends ShopwareClient {
                     id: g.id,
                     name: normalizeString(g.name ?? ""),
                     displayType,
+                    filterable: g.filterable,
                     options: (g.options ?? []).map((o) => ({
                         id: o.id,
                         name: normalizeString(o.name),

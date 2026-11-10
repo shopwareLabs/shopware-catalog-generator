@@ -97,13 +97,14 @@ describe("Color Palette", () => {
         });
 
         test("handles hyphenated color names", () => {
-            // "Slate-Blue" matches "Blue" via word-based matching
-            // (splits into ["slate", "blue"], Blue matches first in palette)
+            // Hyphens count as spaces, so "Slate-Blue" is an exact match
             const result = findClosestColor("Slate-Blue");
-            expect(result).not.toBeNull();
-            // Could match either "Blue" or "Slate Blue" depending on palette order
-            expect(result?.name).toBeDefined();
-            expect(["Blue", "Slate Blue"]).toContain(result?.name ?? "");
+            expect(result?.name).toBe("Slate Blue");
+        });
+
+        test("prefers the longest palette entry contained in the name", () => {
+            expect(findClosestColor("Deep Forest Green")?.name).toBe("Forest Green");
+            expect(findClosestColor("Warm Natural Oak")?.name).toBe("Natural Oak");
         });
     });
 
