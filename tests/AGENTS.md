@@ -46,6 +46,12 @@ tests/
 │   └── blueprint.test.ts
 ├── e2e/                      # End-to-end tests
 │   ├── verify.ts             # API verification script
+│   ├── checks/               # Feature checks (one per feature, gated by Shopware version)
+│   │   ├── index.ts          # FEATURE_CHECKS, runFeatureChecks
+│   │   ├── runner.ts         # Version gating (requires → skip), error isolation
+│   │   ├── catalog-checks.ts # variants, color-families, variant-images
+│   │   ├── fixture-checks.ts # digital-product, media-showcase, customers, cross-selling, reviews, footer-pages
+│   │   └── version-checks.ts # product-type, open-graph, imperial-domain, searchable-custom-field
 │   └── browser-checks.md     # Browser verification guide
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
@@ -98,8 +104,21 @@ The script runs 5 phases:
 1. **Blueprint creation** (`blueprint create --products=10`)
 2. **AI hydration** (`blueprint hydrate`, includes CMS text)
 3. **Shopware upload** (`generate`)
-4. **Post-processors** (CMS pages, digital product, testing hierarchy)
-5. **API verification** (`test:verify`)
+4. **Post-processors** (every processor again, in groups: idempotency check)
+5. **API verification** (`test:verify`, including the feature checks)
+
+### Feature checks and Shopware versions
+
+`verify.ts` runs `FEATURE_CHECKS` from `tests/e2e/checks/` after the basic counts. Each check
+reads the expected values from the hydrated blueprint and the cache, the same way the
+processor does, and returns `pass`, `fail` or `skip`. A check that depends on a newer Shopware
+sets `requires: "<feature>"` (a key of `SHOPWARE_FEATURES`). On a shop without that feature it
+is skipped with "needs Shopware X+", so one e2e run works on every lane and the gating cannot
+drift from the upload. Results land in `verify.json` (`features`, `shopwareCapabilities`) and in
+the Features column of the lane summary.
+
+**New feature → new check.** When you add a processor or an upload field, add a check to the
+matching file in `tests/e2e/checks/` and a unit test in `tests/unit/e2e/feature-checks.test.ts`.
 
 Cleanup mode removes entities in reverse dependency order: CMS testing → CMS element pages → CMS home → digital product → SalesChannel → unused property groups.
 

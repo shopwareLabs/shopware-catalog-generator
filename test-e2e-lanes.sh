@@ -173,6 +173,20 @@ storefront_status() {
     jq -r '[.storefront.domains[] | "\(if (.url | sub("^https?://"; "") | split(".")[0] | endswith("-de")) then "DE" else "EN" end) \(.status // "error")"] | sort | if length == 0 then "-" else join(", ") end' "$json"
 }
 
+# "12 pass, 2 skip (open-graph, product-type)": skipped checks need a newer Shopware
+feature_status() {
+    local json="$1/verify.json"
+    [ -f "$json" ] || { echo "-"; return; }
+    jq -r '(.features // []) | if length == 0 then "-" else
+        ([.[] | select(.status == "pass")] | length) as $pass
+        | ([.[] | select(.status == "fail") | .name]) as $fail
+        | ([.[] | select(.status == "skip") | .name]) as $skip
+        | "\($pass) pass"
+          + (if ($fail | length) > 0 then ", \($fail | length) fail (\($fail | join(", ")))" else "" end)
+          + (if ($skip | length) > 0 then ", \($skip | length) skip (\($skip | join(", ")))" else "" end)
+        end' "$json"
+}
+
 verify_errors() {
     local json="$1/verify.json"
     [ -f "$json" ] || { echo ""; return; }
@@ -188,13 +202,13 @@ SUMMARY="$RUN_DIR/summary.md"
 {
     echo "# Lane matrix: $NAME"
     echo ""
-    echo "| Lane | Shopware | Result | Connect | Upload | Post-processors | Verify | Storefront | Notes |"
-    echo "| ---- | -------- | ------ | ------- | ------ | --------------- | ------ | ---------- | ----- |"
+    echo "| Lane | Shopware | Result | Connect | Upload | Post-processors | Verify | Storefront | Features | Notes |"
+    echo "| ---- | -------- | ------ | ------- | ------ | --------------- | ------ | ---------- | -------- | ----- |"
     for lane in "${LANES[@]}"; do
         lane_dir="$RUN_DIR/$lane"
         result="FAIL"
         lane_passed "$lane_dir" && result="PASS"
-        echo "| $lane | $(cat "$lane_dir/version.txt" 2>/dev/null) | $result | $(step_status "$lane_dir" connect) | $(step_status "$lane_dir" upload) | $(processor_status "$lane_dir") | $(step_status "$lane_dir" verify) | $(storefront_status "$lane_dir") | $(verify_errors "$lane_dir" | tr '|' '/') |"
+        echo "| $lane | $(cat "$lane_dir/version.txt" 2>/dev/null) | $result | $(step_status "$lane_dir" connect) | $(step_status "$lane_dir" upload) | $(processor_status "$lane_dir") | $(step_status "$lane_dir" verify) | $(storefront_status "$lane_dir") | $(feature_status "$lane_dir") | $(verify_errors "$lane_dir" | tr '|' '/') |"
     done
 } > "$SUMMARY"
 

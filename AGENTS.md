@@ -310,6 +310,7 @@ tests/
 │   └── blueprint.test.ts     # Blueprint integration
 ├── e2e/                      # E2E tests
 │   ├── verify.ts             # API verification script
+│   ├── checks/               # Feature checks, skipped when the shop lacks the feature
 │   └── browser-checks.md     # Browser verification guide
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
@@ -1479,6 +1480,10 @@ the Admin API on exit, whether the run passed or failed. Local use only.
 - A failing lane or post-processor does not stop the run. `test-e2e.sh` writes `steps.tsv`
   and `verify.json` into `E2E_RESULT_DIR`, and the wrapper turns them into
   `e2e-results/<timestamp>/summary.md` (lane, Shopware version, step results, storefront status).
+- `verify.ts` runs one feature check per generator feature (variants, colour families, colour
+  images, fixtures, version-gated fields; see `tests/e2e/checks/`). A check with `requires`
+  is skipped on lanes whose Shopware lacks that feature (same `SHOPWARE_FEATURES` list as the
+  upload), so the summary shows e.g. `14 pass, 3 skip (open-graph, ...)` on 6.6.
 - `verify.ts` also requests every SalesChannel domain (EN and DE) and expects HTTP 200. The check
   logic lives in `src/shopware/storefront-check.ts` and is unit-tested with an injected fetch.
 - `generate` and `process` exit non-zero when a post-processor returns errors, not only when it

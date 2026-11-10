@@ -31,13 +31,22 @@
 # - Its credentials are only exported to this script's child processes
 # - The integration is deleted via the Admin API when the script exits (pass or fail)
 #
-# Post-processors run (each one runs even if an earlier one failed; the phase fails at the end):
-# - CMS homepage: cms-home (root category layout with welcome text + product listing)
-# - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form
+# `generate` already runs every processor. Phase 4 runs them again in groups to check that
+# each one is idempotent (each group runs even if an earlier one failed; the phase fails at the end):
+# - Catalog: manufacturers, variants, variant-images (colour images per colour variant)
+# - Reviews: reviews (spread across the SalesChannel languages)
+# - CMS homepage: customers, promotions, cross-selling, cms-home (one group: the homepage only
+#   shows the credentials, promotion codes and cross-selling of processors in the same run)
+# - CMS element pages: cms-text, cms-images, cms-video, cms-text-images, cms-commerce, cms-form,
+#   cms-footer-pages
 # - Images: images (upload pre-generated product + category images)
-# - Digital product: digital-product (creates Gift Card €50)
+# - Fixture products: digital-product (Gift Card €50), media-product (3D models + videos)
 # - CMS orchestrator: cms-testing (creates Testing category hierarchy)
 # - Theme: theme (child theme with brand colors + media)
+# - Translations: translations (cached translations per SalesChannel language, runs last)
+#
+# Verify then checks every feature (tests/e2e/checks/). Checks for a feature the connected
+# Shopware version does not support are skipped, using src/fixtures/shopware-features.ts.
 
 set -e  # Exit on error
 
@@ -401,14 +410,18 @@ elif [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.js
 else
     echo "[4/5] Running post-processors..."
 
-    # Order matters: cms-testing links the CMS pages, the digital and the media product
+    # Order matters: cms-testing links the CMS pages, the digital and the media product;
+    # translations go last because they translate what the other processors created
     PROCESSOR_STEPS=(
-        "cms-home"
-        "cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form"
+        "manufacturers,variants,variant-images"
+        "reviews"
+        "customers,promotions,cross-selling,cms-home"
+        "cms-text,cms-images,cms-video,cms-text-images,cms-commerce,cms-form,cms-footer-pages"
         "images"
         "digital-product,media-product"
         "cms-testing"
         "theme"
+        "translations"
     )
     FAILED_PROCESSORS=()
     for processors in "${PROCESSOR_STEPS[@]}"; do
