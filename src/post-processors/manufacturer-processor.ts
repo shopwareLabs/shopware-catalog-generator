@@ -29,6 +29,26 @@ function newManufacturer(name: string): Manufacturer {
     };
 }
 
+/** Unique, trimmed manufacturer names in blueprint order */
+function collectManufacturerNames(
+    products: PostProcessorContext["blueprint"]["products"]
+): string[] {
+    const names = products
+        .map((product) => product.metadata.manufacturerName?.trim())
+        .filter((name): name is string => Boolean(name));
+    return [...new Set(names)];
+}
+
+function logDryRun(manufacturers: Manufacturer[]): void {
+    logger.info(`    [DRY RUN] Would create ${manufacturers.length} manufacturers`, { cli: true });
+    for (const { name } of manufacturers) {
+        logger.info(`      - ${name}`, { cli: true });
+    }
+}
+
+const errorMessage = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+
 /**
  * Manufacturer Processor implementation
  */
@@ -39,179 +59,136 @@ class ManufacturerProcessorImpl implements PostProcessor {
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { blueprint, cache, options } = context;
+        const manufacturerNames = collectManufacturerNames(blueprint.products);
+        const result = (
+            processed: number,
+            skipped: number,
+            errors: string[]
+        ): PostProcessorResult => ({
+            name: this.name,
+            processed,
+            skipped,
+            errors,
+            durationMs: 0,
+        });
 
-        // Collect unique manufacturer names
-        const manufacturerNames = new Set<string>();
-        for (const product of blueprint.products) {
-            const name = product.metadata.manufacturerName?.trim();
-            if (name) {
-                manufacturerNames.add(name);
-            }
-        }
-
-        if (manufacturerNames.size === 0) {
-            return {
-                name: this.name,
-                processed: 0,
-                skipped: 0,
-                errors: ["No manufacturer names found in products"],
-                durationMs: 0,
-            };
+        if (manufacturerNames.length === 0) {
+            return result(0, 0, ["No manufacturer names found in products"]);
         }
 
         // Shopware is the source of truth: cached IDs can be stale (other shop, cleanup)
         const cachedByName = new Map(
             (cache.loadManufacturers(context.salesChannelName) ?? []).map((m) => [m.name, m])
         );
-        const manufacturerIdMap = await this.getExistingManufacturers(context, manufacturerNames);
-        if (manufacturerIdMap.size > 0) {
-            logger.debug("Reusing existing manufacturers", {
-                data: { count: manufacturerIdMap.size },
-            });
+        const manufacturerIdMap = await this.getExistingManufacturers(
+            context,
+            new Set(manufacturerNames)
+        );
+        const skipped = manufacturerIdMap.size;
+        if (skipped > 0) {
+            logger.debug("Reusing existing manufacturers", { data: { count: skipped } });
         }
 
-        const manufacturersToCreate: Manufacturer[] = Array.from(manufacturerNames)
+        const withCachedFields = (name: string, id: string): Manufacturer => ({
+            ...(cachedByName.get(name) ?? newManufacturer(name)),
+            id,
+        });
+        const manufacturersToCreate = manufacturerNames
             .filter((name) => !manufacturerIdMap.has(name))
-            .map((name) => ({
-                ...(cachedByName.get(name) ?? newManufacturer(name)),
-                id: generateUUID(),
-            }));
-
-        let processed = 0;
-        const skipped = manufacturerIdMap.size;
-        const errors: string[] = [];
+            .map((name) => withCachedFields(name, generateUUID()));
 
         if (options.dryRun) {
-            logger.info(
-                `    [DRY RUN] Would create ${manufacturersToCreate.length} manufacturers`,
-                {
-                    cli: true,
-                }
-            );
-            for (const { name } of manufacturersToCreate) {
-                logger.info(`      - ${name}`, { cli: true });
-            }
-            return {
-                name: this.name,
-                processed: manufacturersToCreate.length,
-                skipped,
-                errors: [],
-                durationMs: 0,
-            };
+            logDryRun(manufacturersToCreate);
+            return result(manufacturersToCreate.length, skipped, []);
         }
 
         for (const m of manufacturersToCreate) {
             manufacturerIdMap.set(m.name, m.id);
         }
-        const manufacturers: Manufacturer[] = Array.from(manufacturerNames).map((name) => ({
-            ...(cachedByName.get(name) ?? newManufacturer(name)),
-            id: manufacturerIdMap.get(name) ?? generateUUID(),
-        }));
+        const createError = await this.createManufacturers(context, manufacturersToCreate);
+        const assignError = createError
+            ? null
+            : await this.assignManufacturers(context, manufacturerIdMap);
 
-        // Create in Shopware
-        if (manufacturersToCreate.length > 0) {
-            try {
-                const response = await apiPost(context, "_action/sync", {
-                    createManufacturers: {
-                        entity: "product_manufacturer",
-                        action: "upsert",
-                        payload: manufacturersToCreate,
-                    },
-                });
+        cache.saveManufacturers(
+            context.salesChannelName,
+            manufacturerNames.map((name) =>
+                withCachedFields(name, manufacturerIdMap.get(name) ?? generateUUID())
+            )
+        );
 
-                if (!response.ok) {
-                    logger.apiError("_action/sync (manufacturers)", response.status, {
-                        request: manufacturersToCreate,
-                        response: await response.text(),
-                    });
-                    errors.push(`Failed to create manufacturers: API returned ${response.status}`);
-                } else {
-                    processed = manufacturersToCreate.length;
-                    logger.debug("Manufacturers created successfully", {
-                        data: { count: manufacturersToCreate.length },
-                    });
-                }
-            } catch (error) {
-                errors.push(
-                    `Failed to create manufacturers: ${error instanceof Error ? error.message : String(error)}`
-                );
-            }
+        const errors = [createError, assignError].filter((e): e is string => e !== null);
+        return result(createError ? 0 : manufacturersToCreate.length, skipped, errors);
+    }
+
+    /** Create the missing manufacturers. Returns an error message on failure. */
+    private async createManufacturers(
+        context: PostProcessorContext,
+        manufacturers: Manufacturer[]
+    ): Promise<string | null> {
+        if (manufacturers.length === 0) return null;
+        try {
+            await context.api.post("_action/sync", {
+                createManufacturers: {
+                    entity: "product_manufacturer",
+                    action: "upsert",
+                    payload: manufacturers,
+                },
+            });
+            logger.debug("Manufacturers created successfully", {
+                data: { count: manufacturers.length },
+            });
+            return null;
+        } catch (error) {
+            return `Failed to create manufacturers: ${errorMessage(error)}`;
         }
+    }
 
-        // Now assign manufacturers to products (only those that need updating)
-        if (manufacturerIdMap.size > 0 && errors.length === 0) {
-            // Get products that already have manufacturer assignments
-            const existingAssignments = await this.getExistingProductManufacturers(
-                context,
-                blueprint.products.map((p) => p.id)
-            );
+    /**
+     * Assign each product its manufacturer, skipping products that already have it.
+     * Returns an error message on failure.
+     */
+    private async assignManufacturers(
+        context: PostProcessorContext,
+        manufacturerIdMap: Map<string, string>
+    ): Promise<string | null> {
+        const { products } = context.blueprint;
+        const existingAssignments = await this.getExistingProductManufacturers(
+            context,
+            products.map((p) => p.id)
+        );
+        const wanted = products.flatMap((product) => {
+            const name = product.metadata.manufacturerName?.trim();
+            const manufacturerId = name ? manufacturerIdMap.get(name) : undefined;
+            return manufacturerId ? [{ id: product.id, manufacturerId }] : [];
+        });
+        const productUpdates = wanted.filter(
+            (u) => existingAssignments.get(u.id) !== u.manufacturerId
+        );
 
-            const productUpdates: Array<{ id: string; manufacturerId: string }> = [];
-            let alreadyAssigned = 0;
-
-            for (const product of blueprint.products) {
-                const manufacturerName = product.metadata.manufacturerName?.trim();
-                if (manufacturerName) {
-                    const manufacturerId = manufacturerIdMap.get(manufacturerName);
-                    if (manufacturerId) {
-                        // Skip if product already has this manufacturer assigned
-                        const currentManufacturerId = existingAssignments.get(product.id);
-                        if (currentManufacturerId === manufacturerId) {
-                            alreadyAssigned++;
-                            continue;
-                        }
-                        productUpdates.push({ id: product.id, manufacturerId });
-                    }
-                }
-            }
-
-            if (alreadyAssigned > 0) {
-                logger.debug("Products already have correct manufacturers", {
-                    data: { count: alreadyAssigned },
-                });
-            }
-
-            if (productUpdates.length > 0) {
-                try {
-                    const response = await apiPost(context, "_action/sync", {
-                        updateProductManufacturers: {
-                            entity: "product",
-                            action: "upsert",
-                            payload: productUpdates,
-                        },
-                    });
-
-                    if (!response.ok) {
-                        logger.apiError("_action/sync (product manufacturers)", response.status, {
-                            request: productUpdates.slice(0, 5),
-                            response: await response.text(),
-                        });
-                        errors.push(
-                            `Failed to assign manufacturers to products: API returned ${response.status}`
-                        );
-                    } else {
-                        logger.debug("Product manufacturers assigned", {
-                            data: { count: productUpdates.length },
-                        });
-                    }
-                } catch (error) {
-                    errors.push(
-                        `Failed to assign manufacturers: ${error instanceof Error ? error.message : String(error)}`
-                    );
-                }
-            }
+        const alreadyAssigned = wanted.length - productUpdates.length;
+        if (alreadyAssigned > 0) {
+            logger.debug("Products already have correct manufacturers", {
+                data: { count: alreadyAssigned },
+            });
         }
+        if (productUpdates.length === 0) return null;
 
-        // Save to cache
-        cache.saveManufacturers(context.salesChannelName, manufacturers);
-
-        return {
-            name: this.name,
-            processed,
-            skipped,
-            errors,
-            durationMs: 0,
-        };
+        try {
+            await context.api.post("_action/sync", {
+                updateProductManufacturers: {
+                    entity: "product",
+                    action: "upsert",
+                    payload: productUpdates,
+                },
+            });
+            logger.debug("Product manufacturers assigned", {
+                data: { count: productUpdates.length },
+            });
+            return null;
+        } catch (error) {
+            return `Failed to assign manufacturers: ${errorMessage(error)}`;
+        }
     }
 
     /**
@@ -316,9 +293,7 @@ class ManufacturerProcessorImpl implements PostProcessor {
             // Clear local cache so the next generate re-creates manufacturers in Shopware
             context.cache.saveManufacturers(context.salesChannelName, []);
         } catch (error) {
-            errors.push(
-                `Manufacturer cleanup failed: ${error instanceof Error ? error.message : String(error)}`
-            );
+            errors.push(`Manufacturer cleanup failed: ${errorMessage(error)}`);
         }
 
         return { name: this.name, deleted, errors, durationMs: 0 };
