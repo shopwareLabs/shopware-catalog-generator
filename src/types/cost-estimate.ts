@@ -5,7 +5,13 @@
 import type { AIProviderType, ImageProviderType } from "./providers.js";
 
 /** Hydration scope the estimate covers (mirrors `blueprint hydrate --only`) */
-export type HydrationScope = "full" | "categories" | "properties" | "cms" | "variants";
+export type HydrationScope =
+    | "full"
+    | "categories"
+    | "properties"
+    | "cms"
+    | "variants"
+    | "variant-images";
 
 /** Resolved provider/model selection (what the factory will actually use) */
 export interface ModelSelection {
@@ -40,6 +46,8 @@ export interface ImageModelPrice {
     low: number;
     medium: number;
     high: number;
+    /** Price per edited image (input image + output) when it differs from a generated one */
+    edit?: { low: number; medium: number; high: number };
 }
 
 /** One line item of the text forecast */
@@ -55,6 +63,8 @@ export interface ImageCostItem {
     label: string;
     /** Images that will be generated (cached ones excluded) */
     count: number;
+    /** True for edited images (priced with the edit price) */
+    edit?: boolean;
 }
 
 /** Image counts that the estimator should charge for */
@@ -63,6 +73,8 @@ export interface PendingImageCounts {
     product: number;
     category: number;
     theme: number;
+    /** Recoloured product images for colour variants (0 when the provider cannot edit) */
+    variantColor: number;
 }
 
 /** Complete cost forecast for one hydration run */
@@ -82,6 +94,8 @@ export interface CostEstimate {
         count: number;
         /** Price per image used for the forecast, null when unknown */
         unitUsd: number | null;
+        /** Price per edited image (colour images), null when unknown */
+        editUnitUsd: number | null;
         /** Null when no price data exists for the model/provider */
         usd: number | null;
     };

@@ -26,6 +26,7 @@ blueprint/
     ├── product.ts        # Product content via AI (parallel branches)
     ├── cms.ts            # CMS blueprint generation and AI text hydration
     ├── image.ts          # Product/category/CMS/theme image pre-generation + trimAndResize
+    ├── variant-images.ts # hydrateVariantImages: recolour parent images per colour variant (editImage)
     ├── theme.ts          # AI brand color generation (primary + secondary)
     ├── color-shades.ts   # hydrateColorShades: AI hex + family for unknown shade names (store context)
     ├── translation.ts    # translateCatalog: native-sounding translation per locale, reuses unchanged entries by source hash
@@ -100,6 +101,20 @@ Supports selective re-hydration modes:
 - `properties` — Only update product properties (preserves names for image stability)
 - `cms` — Only hydrate CMS text blueprint
 - `variants` — `hydrateVariantsOnly(blueprint, settings)`: re-pick variant options with new settings
+- `variant-images` — `hydrateVariantImages()`: recolour the parent images per colour variant
+
+### Variant colour images
+
+`hydrators/variant-images.ts` runs after `hydrateProductImages` (full hydration) or alone with
+`--only=variant-images`. The parent images show `variantColors[0]` (the default colour); every other
+colour gets an edited copy of each parent view via `ImageProvider.editImage`:
+
+- Cache: `product_media/{productId}-{view}--{shadeSlug}.webp` + `.json` (`shade`, `hex`, `sourceHash`)
+- `planVariantImages()` splits tasks into pending, fresh and stale. A colour image is stale when the
+  hash of its parent image changed; stale copies are deleted and made again
+- Providers without `editImage` (Pollinations, none) are skipped with one warning, no fallback
+- `VARIANT_IMAGE_VIEWS=cover` limits the pass to the first view
+- `countVariantImages()` feeds the cost forecast before the colours are known (upper bound)
 
 ### VariantResolver
 

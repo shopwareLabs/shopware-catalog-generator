@@ -138,26 +138,56 @@ export class ImageCache implements ImageCacheApi {
         imageModel?: string,
         mediaType: MediaType = DEFAULT_MEDIA_TYPE
     ): void {
+        this.writeImageWithView(salesChannel, entityId, view, base64Data, mediaType, {
+            productId: entityId,
+            productName: view,
+            prompt,
+            generatedAt: new Date().toISOString(),
+            imageModel,
+        });
+    }
+
+    /**
+     * Save a recoloured product image (view like "front--burgundy") with the shade and the
+     * hash of the parent image it was made from, so a changed parent makes it stale.
+     */
+    saveVariantColorImage(
+        salesChannel: string,
+        productId: string,
+        view: string,
+        base64Data: string,
+        details: Pick<ImageCacheMetadata, "prompt" | "imageModel" | "sourceHash" | "shade" | "hex">
+    ): void {
+        this.writeImageWithView(salesChannel, productId, view, base64Data, "product_media", {
+            productId,
+            productName: view,
+            generatedAt: new Date().toISOString(),
+            ...details,
+        });
+    }
+
+    private writeImageWithView(
+        salesChannel: string,
+        entityId: string,
+        view: string,
+        base64Data: string,
+        mediaType: MediaType,
+        metadata: ImageCacheMetadata
+    ): void {
         if (!this.shouldSaveToCache) return;
 
         const imagesDir = this.getMediaTypeDir(salesChannel, mediaType);
         this.ensureDir(imagesDir);
 
-        const imagePath = path.join(imagesDir, `${entityId}-${view}.webp`);
-        const metadataPath = path.join(imagesDir, `${entityId}-${view}.json`);
-
         try {
-            const imageBuffer = Buffer.from(base64Data, "base64");
-            fs.writeFileSync(imagePath, imageBuffer);
-
-            const metadata: ImageCacheMetadata = {
-                productId: entityId,
-                productName: view,
-                prompt,
-                generatedAt: new Date().toISOString(),
-                imageModel,
-            };
-            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+            fs.writeFileSync(
+                path.join(imagesDir, `${entityId}-${view}.webp`),
+                Buffer.from(base64Data, "base64")
+            );
+            fs.writeFileSync(
+                path.join(imagesDir, `${entityId}-${view}.json`),
+                JSON.stringify(metadata, null, 2)
+            );
         } catch {
             // Silently fail
         }

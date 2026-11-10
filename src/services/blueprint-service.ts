@@ -11,6 +11,7 @@ import type {
     CostEstimate,
     HydratedBlueprint,
     HydrationScope,
+    ImageProvider,
     ModelSelection,
     PendingImageCounts,
     TextProvider,
@@ -37,7 +38,12 @@ import {
     hydrateColorShades,
     hydrateProductImages,
     hydrateThemeMedia,
+    hydrateVariantImages,
+    NO_EDIT_SUPPORT_WARNING,
+    countVariantImages,
     normalizeProductColors,
+    planVariantImages,
+    resolveVariantImageViews,
     priceTokenUsage,
     resolveVariantSettings,
     VariantSettingsError,
@@ -107,7 +113,19 @@ export async function createBlueprint(
     ];
 }
 
-export type HydrateOnly = "categories" | "properties" | "cms" | "variants";
+/** Selective hydration modes of `blueprint hydrate --only` (shared with CLI and MCP) */
+export const HYDRATE_ONLY_MODES = [
+    "categories",
+    "properties",
+    "cms",
+    "variants",
+    "variant-images",
+] as const;
+
+export type HydrateOnly = (typeof HYDRATE_ONLY_MODES)[number];
+
+/** Modes that only work on an existing hydrated blueprint (no fallback to a full run) */
+const NEEDS_HYDRATED: readonly HydrateOnly[] = ["variants", "variant-images"];
 
 /** Options shared by hydrate and estimate */
 interface HydrateRunOptions {
@@ -150,9 +168,9 @@ function resolveRunVariantSettings(
     }
 }
 
-function missingHydratedForVariants(salesChannelName: string): string[] {
+function missingHydratedFor(only: HydrateOnly, salesChannelName: string): string[] {
     return [
-        `Error: --only=variants needs a hydrated blueprint for "${salesChannelName}". ` +
+        `Error: --only=${only} needs a hydrated blueprint for "${salesChannelName}". ` +
             `Run: blueprint hydrate --name=${salesChannelName}`,
     ];
 }
@@ -174,8 +192,8 @@ export function estimateBlueprintCost(
         ];
     }
 
-    if (options.only === "variants" && !existingHydratedBlueprint) {
-        return missingHydratedForVariants(salesChannelName);
+    if (options.only && NEEDS_HYDRATED.includes(options.only) && !existingHydratedBlueprint) {
+        return missingHydratedFor(options.only, salesChannelName);
     }
     const variants = resolveRunVariantSettings(
         options,
@@ -214,7 +232,11 @@ function buildCostEstimate(
         blueprint,
         selection,
         cms: countCmsTextWork(generateCmsBlueprint(salesChannelName)),
-        pendingImages: countPendingImages(cache, salesChannelName, blueprint, description),
+        pendingImages: countPendingImages(cache, salesChannelName, blueprint, description, {
+            scope,
+            variants,
+            canEditImages: selection.imageProvider === "openai",
+        }),
         hasInspirationColors: Boolean(cache.loadInspiration(salesChannelName)?.brandColors),
         variants,
     });
@@ -223,12 +245,15 @@ function buildCostEstimate(
 /**
  * CMS and theme images are skipped when cached. Product and category images are
  * counted in full: a full hydration renames products, which makes cached images stale.
+ * Colour images are counted in full for a full run, and without fresh cached ones for
+ * --only=variant-images. They are 0 when the image provider cannot edit images.
  */
 function countPendingImages(
     cache: DataCache,
     salesChannelName: string,
     blueprint: EstimateBlueprint,
-    description: string
+    description: string,
+    run: { scope: HydrationScope; variants: VariantSettings; canEditImages: boolean }
 ): PendingImageCounts {
     const isMissing =
         (mediaType: "cms_media" | "theme_media") =>
@@ -245,7 +270,23 @@ function countPendingImages(
             0
         ),
         category: flattenCategories(blueprint.categories).filter((c) => c.hasImage).length,
+        variantColor: run.canEditImages
+            ? countPendingVariantImages(cache, salesChannelName, blueprint, run)
+            : 0,
     };
+}
+
+function countPendingVariantImages(
+    cache: DataCache,
+    salesChannelName: string,
+    blueprint: EstimateBlueprint,
+    run: { scope: HydrationScope; variants: VariantSettings }
+): number {
+    const views = resolveVariantImageViews(process.env);
+    if (run.scope === "variant-images") {
+        return planVariantImages(cache, salesChannelName, blueprint, views).pending.length;
+    }
+    return countVariantImages(blueprint, run.variants, views);
 }
 
 /** Report actual token usage and cost when the text provider tracks it */
@@ -259,6 +300,46 @@ export function formatActualUsage(textProvider: TextProvider, selection: ModelSe
         ``,
         `Actual text usage: ${usage.calls} calls, ${usage.inputTokens} input + ${usage.outputTokens} output tokens ` +
             `(${usage.reasoningTokens} reasoning) -> ${cost}`,
+    ];
+}
+
+/**
+ * --only=variant-images: recolour the cached parent images for every colour variant.
+ * Text, names and the hydrated blueprint stay untouched.
+ */
+async function hydrateVariantImagesOnly(
+    salesChannelName: string,
+    cache: DataCache,
+    imageProvider: ImageProvider,
+    hydrated: HydratedBlueprint,
+    selection: ModelSelection
+): Promise<string[]> {
+    const header = [`=== Blueprint Hydrate (variant-images only) ===`, `Name: ${salesChannelName}`];
+    if (imageProvider.name === "noop") {
+        return [...header, ``, `Images are disabled (IMAGE_PROVIDER=none), nothing to do.`];
+    }
+
+    const result = await hydrateVariantImages(imageProvider, cache, salesChannelName, hydrated);
+    if (!result.supported) {
+        return [...header, ``, `Skipped: ${NO_EDIT_SUPPORT_WARNING}`];
+    }
+    cache.recordGenerationStep(
+        salesChannelName,
+        "hydrate:variant-images",
+        buildGenerationStep(selection, true)
+    );
+
+    return [
+        ...header,
+        ``,
+        `Colour images:`,
+        `  Generated: ${result.generated}`,
+        `  Cached: ${result.skipped}`,
+        `  Stale (regenerated): ${result.stale}`,
+        `  Failed: ${result.failed}`,
+        ...(result.missingSource > 0
+            ? [`  Skipped (parent image missing): ${result.missingSource}`]
+            : []),
     ];
 }
 
@@ -289,8 +370,8 @@ export async function hydrateBlueprint(
         ];
     }
 
-    if (hydrateOnly === "variants" && !existingHydratedBlueprint) {
-        return missingHydratedForVariants(salesChannelName);
+    if (hydrateOnly && NEEDS_HYDRATED.includes(hydrateOnly) && !existingHydratedBlueprint) {
+        return missingHydratedFor(hydrateOnly, salesChannelName);
     }
     const variantSettings = resolveRunVariantSettings(
         options,
@@ -359,6 +440,16 @@ export async function hydrateBlueprint(
         ];
     }
 
+    if (hydrateOnly === "variant-images" && existingHydratedBlueprint) {
+        return hydrateVariantImagesOnly(
+            salesChannelName,
+            cache,
+            imageProvider,
+            existingHydratedBlueprint,
+            estimate.selection
+        );
+    }
+
     const hydrator = new BlueprintHydrator(textProvider);
     let hydratedBlueprint: HydratedBlueprint;
 
@@ -413,12 +504,13 @@ export async function hydrateBlueprint(
         }
     }
 
-    await buildPropertyGroups(
-        textProvider,
+    await finalizeHydratedBlueprint(
+        { text: textProvider, image: imageProvider },
         cache,
         salesChannelName,
         hydratedBlueprint,
-        existingProperties
+        existingProperties,
+        { variantImages: !hydrateOnly }
     );
     const collector = new PropertyCollector();
 
@@ -456,6 +548,13 @@ export async function hydrateBlueprint(
         `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "hydrated-blueprint.json")}`,
         ...formatActualUsage(textProvider, estimate.selection)
     );
+    if (hydrateOnly === "variants") {
+        results.push(
+            ``,
+            `Colour images follow the new colours with: ` +
+                `blueprint hydrate --name=${salesChannelName} --only=variant-images`
+        );
+    }
     return results;
 }
 
@@ -488,6 +587,30 @@ export async function buildPropertyGroups(
         existingProperties
     );
     applyColorSystem(blueprint, learned);
+}
+
+/**
+ * Last hydration step: property groups with the colour system, then (full hydration
+ * only) the colour variant images. The order matters: the colour system sets
+ * `variantColors`, and the variant image pass plans its edits from them.
+ */
+export async function finalizeHydratedBlueprint(
+    providers: { text: TextProvider; image: ImageProvider },
+    cache: DataCache,
+    salesChannelName: string,
+    blueprint: HydratedBlueprint,
+    existingProperties: ExistingProperty[],
+    options: { variantImages: boolean }
+): Promise<void> {
+    await buildPropertyGroups(
+        providers.text,
+        cache,
+        salesChannelName,
+        blueprint,
+        existingProperties
+    );
+    if (!options.variantImages || providers.image.name === "noop") return;
+    await hydrateVariantImages(providers.image, cache, salesChannelName, blueprint);
 }
 
 export async function fixBlueprint(salesChannelName: string): Promise<string[]> {

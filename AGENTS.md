@@ -87,6 +87,7 @@ src/
 │       ├── product.ts        # Product content via AI (parallel branches)
 │       ├── cms.ts            # CMS blueprint generation and AI text hydration
 │       ├── image.ts          # Product/category/CMS/theme image pre-generation
+│       ├── variant-images.ts # Recolour parent images per colour variant (editImage)
 │       ├── translation.ts    # AI translation pass (native-sounding, per locale, reuses unchanged)
 │       ├── color-shades.ts   # AI hex + family for unknown shade names (store context)
 │       └── theme.ts          # AI brand color generation
@@ -170,6 +171,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
+│   ├── image-format.ts       # detectImageFormat (magic bytes → extension + mime type)
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
 │   ├── uuid.ts               # UUID generation, deterministicUUID(seed)
@@ -237,7 +239,8 @@ tests/
 │   │       ├── cms.test.ts
 │   │       ├── color-shades.test.ts
 │   │       ├── image.test.ts
-│   │       └── theme.test.ts
+│   │       ├── theme.test.ts
+│   │       └── variant-images.test.ts
 │   ├── post-processors/      # Post-processor tests
 │   │   ├── registry.test.ts
 │   │   ├── customer-processor.test.ts
@@ -307,7 +310,7 @@ tests/
     ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
     ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
     ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
-    └── image-provider.mock.ts # MockImageProvider, FailingImageProvider, SlowImageProvider
+    └── image-provider.mock.ts # MockImageProvider, EditingImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Module Documentation
@@ -719,7 +722,8 @@ generated/
         │   └── {productId}.json    # Per-product metadata
         └── images/                 # Reorganized by media type
             ├── product_media/
-            │   └── {productId}.webp
+            │   ├── {productId}-{view}.webp           # Parent images (default colour)
+            │   └── {productId}-{view}--{shade}.webp  # Recoloured copy per colour variant (+ .json with source hash)
             ├── category_media/
             │   └── {categoryId}.webp
             ├── cms_media/
@@ -1193,6 +1197,7 @@ VARIANT_SHARE=0.3     # Share of products with variants (blueprint create)
 VARIANT_COLORS=4      # Colours per colour variant product
 VARIANT_OPTIONS=3     # Options per other variant group (Size, Material, ...)
 MAX_VARIANTS=24       # Max variants per product
+VARIANT_IMAGE_VIEWS=all  # Colour images for every view, or "cover" (first view only, cheaper)
 IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
 IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
 IMAGE_MODEL=gpt-image-1-mini  # Default; or gpt-image-2.5-flare, flux, klein, zimage
@@ -1230,6 +1235,7 @@ bun run blueprint hydrate --name=music
 bun run blueprint hydrate --name=music --only=categories  # Categories only
 bun run blueprint hydrate --name=music --only=properties  # Properties only
 bun run blueprint hydrate --name=music --only=variants --variant-colors=6  # More colour variants
+bun run blueprint hydrate --name=music --only=variant-images  # Recolour images per colour variant
 bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
@@ -1302,7 +1308,7 @@ the largest other group shrinks first (down to 2), then the colours, then other 
 ```bash
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
-  --only=MODE              # Selective: "categories", "properties", "cms" or "variants"
+  --only=MODE              # Selective: "categories", "properties", "cms", "variants" or "variant-images"
   --rehydrate              # Force full re-hydration (changes names, triggers image regen)
 ```
 
@@ -1314,6 +1320,11 @@ Hydration modes:
 - **--only=cms**: Only hydrate CMS blueprint text (`cms-blueprint.json`)
 - **--only=variants**: Re-pick variant options with new `--variant-colors`, `--variant-options`,
   `--max-variants` (existing options stay first; one AI call per 25 products that need more colours)
+- **--only=variant-images**: Recolour the parent product images once per colour variant (all colours
+  except the default one, which the parent images already show). Needs image editing (OpenAI
+  `images.edit`); other providers are skipped with a warning and variants keep the parent images.
+  Cached images are reused; a changed parent image makes its colour copies stale (source hash).
+  `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
@@ -1323,7 +1334,7 @@ Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prev
 ```bash
 bun run blueprint estimate \
   --name=NAME              # Required: SalesChannel name (blueprint must exist)
-  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants")
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images")
   --languages=LIST         # Optional: also forecast translation ("de-DE,fr-FR", "all", "none")
 ```
 

@@ -15,6 +15,7 @@ import type {
 } from "./index.js";
 
 import {
+    detectImageFormat,
     apiPatch,
     apiPost,
     capitalizeString,
@@ -22,7 +23,7 @@ import {
     getContrastTextColor,
     logger,
 } from "../utils/index.js";
-import { detectImageFormat, uploadImageWithRetry } from "./image-utils.js";
+import { uploadImageWithRetry } from "./image-utils.js";
 
 interface ThemeMediaIds {
     logo?: string;

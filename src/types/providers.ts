@@ -61,6 +61,20 @@ export interface ImageProvider {
      */
     generateImage(prompt: string, options?: ImageGenerationOptions): Promise<string | null>;
 
+    /**
+     * Edit an existing image, e.g. recolour a product and keep everything else.
+     * Optional: providers that cannot edit images leave it out, and callers skip the work.
+     * @param prompt - What to change
+     * @param sourceBase64 - Base64-encoded source image (WebP or PNG)
+     * @param options - Optional size parameters (width/height)
+     * @returns Base64-encoded image data, or null if editing failed
+     */
+    editImage?(
+        prompt: string,
+        sourceBase64: string,
+        options?: ImageGenerationOptions
+    ): Promise<string | null>;
+
     /** Whether this provider requires sequential processing due to rate limits */
     readonly isSequential: boolean;
 
