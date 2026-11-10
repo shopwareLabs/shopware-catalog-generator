@@ -6,6 +6,7 @@ export {
     randomPick,
     randomSample,
     randomSamplePercent,
+    uniqueById,
     weightedRandomPick,
 } from "./arrays.js";
 // Blueprint validation

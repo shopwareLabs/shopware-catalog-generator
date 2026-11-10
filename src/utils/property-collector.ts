@@ -42,6 +42,12 @@ export interface ExistingProperty {
     options: ExistingPropertyOption[];
 }
 
+/** Add a value keyed by its lowercase form, keeping the first casing seen */
+function addCaseInsensitive(values: Map<string, string>, value: string): void {
+    const key = value.toLowerCase();
+    if (!values.has(key)) values.set(key, value);
+}
+
 /**
  * Property Collector class
  */
@@ -54,8 +60,10 @@ export class PropertyCollector {
         blueprint: HydratedBlueprint,
         existingProperties: ExistingProperty[] = []
     ): BlueprintPropertyGroup[] {
-        // Collect all properties from products
-        const propertyMap = new Map<string, Set<string>>();
+        // Collect all properties from products. Group names and values are matched
+        // case-insensitively ("Multicolor Floral" = "Multicolor floral"), the first
+        // casing wins. Otherwise both spellings map to the same Shopware option ID.
+        const propertyMap = new Map<string, { name: string; values: Map<string, string> }>();
 
         for (const product of blueprint.products) {
             for (const prop of product.metadata.properties) {
@@ -64,12 +72,12 @@ export class PropertyCollector {
 
                 if (!groupName || !value) continue;
 
-                const existing = propertyMap.get(groupName);
-                if (existing) {
-                    existing.add(value);
-                } else {
-                    propertyMap.set(groupName, new Set([value]));
-                }
+                const group = propertyMap.get(groupName.toLowerCase()) ?? {
+                    name: groupName,
+                    values: new Map<string, string>(),
+                };
+                propertyMap.set(groupName.toLowerCase(), group);
+                addCaseInsensitive(group.values, value);
             }
         }
 
@@ -82,8 +90,7 @@ export class PropertyCollector {
         // Build property groups, reusing existing IDs where available
         const groups: BlueprintPropertyGroup[] = [];
 
-        for (const [groupName, values] of propertyMap) {
-            const normalizedGroupName = groupName.toLowerCase();
+        for (const [normalizedGroupName, { name: groupName, values }] of propertyMap) {
             const existingGroup = existingGroupByName.get(normalizedGroupName);
 
             // Color type: inherited from existing groups OR if the group name is "Color"
@@ -99,12 +106,12 @@ export class PropertyCollector {
                 }
                 // Also add any options from existing that aren't in the new set
                 for (const opt of existingGroup.options) {
-                    values.add(opt.name);
+                    addCaseInsensitive(values, opt.name);
                 }
             }
 
             // Build options, reusing existing IDs
-            const options: BlueprintPropertyOption[] = [...values].map((value: string) => {
+            const options: BlueprintPropertyOption[] = [...values.values()].map((value: string) => {
                 const existingOption = existingOptionByName.get(value.toLowerCase());
                 // Colors with images (Multicolor, Rainbow, etc.) don't get hex codes
                 const hasImage = isColorType && colorHasImage(value);

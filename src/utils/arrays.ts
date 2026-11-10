@@ -18,6 +18,11 @@ export function cartesianProduct<T>(arrays: T[][]): T[][] {
     ] as T[][]);
 }
 
+/** Keep the first item per `id`, in order */
+export function uniqueById<T extends { id: string }>(items: T[]): T[] {
+    return items.filter((item, index) => items.findIndex((o) => o.id === item.id) === index);
+}
+
 /**
  * Randomly sample a percentage of items from an array
  *
