@@ -201,9 +201,11 @@ describe("ShopwareCleanup", () => {
             expect(body?.filter).toEqual([
                 { type: "equalsAny", field: "id", value: ["prod-1", "prod-gone"] },
             ]);
-            const syncBody = (mockClient.getCallsByOperation("sync post")[0]?.params as {
-                body?: unknown[];
-            })?.body;
+            const syncBody = (
+                mockClient.getCallsByOperation("sync post")[0]?.params as {
+                    body?: unknown[];
+                }
+            )?.body;
             expect(syncBody?.[0]).toEqual({
                 entity: "product",
                 action: "delete",
