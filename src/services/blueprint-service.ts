@@ -8,6 +8,7 @@
 import type { EstimateBlueprint, VariantSettingOverrides } from "../blueprint/index.js";
 import type { DataCache } from "../cache.js";
 import type {
+    Blueprint,
     CostEstimate,
     HydratedBlueprint,
     HydrationScope,
@@ -52,6 +53,7 @@ import {
 import { cacheFileForDisplay, createCacheFromEnv } from "../cache.js";
 import {
     createProvidersFromEnv,
+    imagesEnabled,
     providerConfigFromEnv,
     resolveModelSelection,
 } from "../providers/index.js";
@@ -178,15 +180,29 @@ function missingHydratedFor(only: HydrateOnly, salesChannelName: string): string
     ];
 }
 
+/** Everything a hydrate or estimate run needs, after validating mode and variant settings */
+interface HydrationPlan {
+    salesChannelName: string;
+    cache: DataCache;
+    blueprint: Blueprint;
+    /** The hydrated blueprint from a previous run, if any */
+    hydrated: HydratedBlueprint | null;
+    only?: HydrateOnly;
+    variantSettings: VariantSettings;
+    estimate: CostEstimate;
+}
+
 /**
- * Forecast the cost of `blueprint hydrate` without making any AI call.
+ * Load the blueprints, check the mode and variant settings and forecast the cost.
+ * Returns "Error: ..." lines when the run cannot start. Shared by hydrate and estimate,
+ * so both always agree on what a run does.
  */
-export function estimateBlueprintCost(
+function planHydration(
     salesChannelName: string,
-    options: HydrateRunOptions
-): string[] {
-    const cache = createCacheFromEnv();
-    const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
+    options: HydrateRunOptions,
+    cache: DataCache
+): HydrationPlan | string[] {
+    const hydrated = cache.loadHydratedBlueprint(salesChannelName);
     const blueprint = cache.loadBlueprint(salesChannelName);
     if (!blueprint) {
         return [
@@ -194,21 +210,40 @@ export function estimateBlueprintCost(
                 `Run: blueprint create --name=${salesChannelName}`,
         ];
     }
-
-    if (options.only && NEEDS_HYDRATED.includes(options.only) && !existingHydratedBlueprint) {
+    if (options.only && NEEDS_HYDRATED.includes(options.only) && !hydrated) {
         return missingHydratedFor(options.only, salesChannelName);
     }
-    const variants = resolveRunVariantSettings(
+    const variantSettings = resolveRunVariantSettings(
         options,
-        blueprintVariantSettings(existingHydratedBlueprint ?? blueprint)
+        blueprintVariantSettings(hydrated ?? blueprint)
     );
-    if (typeof variants === "string") return [variants];
+    if (typeof variantSettings === "string") return [variantSettings];
 
-    const scope = resolveHydrationScope(options.only, Boolean(existingHydratedBlueprint));
-    const source =
-        scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
-    const estimate = buildCostEstimate(cache, salesChannelName, scope, source, variants);
-    return formatCostEstimate(estimate);
+    const scope = resolveHydrationScope(options.only, Boolean(hydrated));
+    const source = scope === "full" || !hydrated ? blueprint : hydrated;
+    const estimate = buildCostEstimate(cache, salesChannelName, scope, source, variantSettings);
+    return {
+        salesChannelName,
+        cache,
+        blueprint,
+        hydrated,
+        only: options.only,
+        variantSettings,
+        estimate,
+    };
+}
+
+/**
+ * Forecast the cost of `blueprint hydrate` without making any AI call.
+ */
+export function estimateBlueprintCost(
+    salesChannelName: string,
+    options: HydrateRunOptions,
+    cache: DataCache = createCacheFromEnv()
+): string[] {
+    const plan = planHydration(salesChannelName, options, cache);
+    if (Array.isArray(plan)) return plan;
+    return formatCostEstimate(plan.estimate);
 }
 
 /** Mirrors hydrateBlueprint: --only=categories/properties fall back to full without a hydrated blueprint */
@@ -318,7 +353,7 @@ async function hydrateVariantImagesOnly(
     selection: ModelSelection
 ): Promise<string[]> {
     const header = [`=== Blueprint Hydrate (variant-images only) ===`, `Name: ${salesChannelName}`];
-    if (imageProvider.name === "noop") {
+    if (!imagesEnabled(imageProvider)) {
         return [...header, ``, `Images are disabled (IMAGE_PROVIDER=none), nothing to do.`];
     }
 
@@ -346,214 +381,239 @@ async function hydrateVariantImagesOnly(
     ];
 }
 
+interface HydrationProviders {
+    text: TextProvider;
+    image: ImageProvider;
+}
+
+/** Injectable dependencies of hydrateBlueprint (tests); defaults come from the environment */
+export interface HydrateDeps {
+    cache?: DataCache;
+    providers?: HydrationProviders;
+    /** Existing Shopware property groups, reused for property names and options */
+    loadExistingProperties?: () => Promise<ExistingProperty[]>;
+}
+
 export async function hydrateBlueprint(
     salesChannelName: string,
-    options: HydrateRunOptions & { force?: boolean }
+    options: HydrateRunOptions & { force?: boolean },
+    deps: HydrateDeps = {}
 ): Promise<string[]> {
-    const { only: hydrateOnly, force: forceHydration = false } = options;
-
     logger.configure({ minLevel: "debug" });
+    const cache = deps.cache ?? createCacheFromEnv();
 
-    const cache = createCacheFromEnv();
-    const existingHydratedBlueprint = cache.loadHydratedBlueprint(salesChannelName);
-
-    if (existingHydratedBlueprint && !hydrateOnly && !forceHydration) {
+    if (cache.loadHydratedBlueprint(salesChannelName) && !options.only && !options.force) {
         return [
             `Error: Hydrated blueprint already exists for "${salesChannelName}". ` +
                 `Re-hydrating will change product names and trigger image regeneration. ` +
                 `Use --only=categories, --only=properties, --only=variants, or --rehydrate.`,
         ];
     }
+    const plan = planHydration(salesChannelName, options, cache);
+    if (Array.isArray(plan)) return plan;
 
-    const blueprint = cache.loadBlueprint(salesChannelName);
-    if (!blueprint) {
-        return [
-            `Error: No blueprint found for "${salesChannelName}". ` +
-                `Run: blueprint create --name=${salesChannelName}`,
-        ];
-    }
-
-    if (hydrateOnly && NEEDS_HYDRATED.includes(hydrateOnly) && !existingHydratedBlueprint) {
-        return missingHydratedFor(hydrateOnly, salesChannelName);
-    }
-    const variantSettings = resolveRunVariantSettings(
-        options,
-        blueprintVariantSettings(existingHydratedBlueprint ?? blueprint)
-    );
-    if (typeof variantSettings === "string") return [variantSettings];
-
-    const scope = resolveHydrationScope(hydrateOnly, Boolean(existingHydratedBlueprint));
-    const estimateSource =
-        scope === "full" || !existingHydratedBlueprint ? blueprint : existingHydratedBlueprint;
-    const estimate = buildCostEstimate(
-        cache,
-        salesChannelName,
-        scope,
-        estimateSource,
-        variantSettings
-    );
-    for (const line of formatCostEstimate(estimate)) {
+    for (const line of formatCostEstimate(plan.estimate)) {
         logger.info(line, { cli: true });
     }
+    const providers = deps.providers ?? createProvidersFromEnv();
 
-    const { text: textProvider, image: imageProvider } = createProvidersFromEnv();
-
-    let existingProperties: ExistingProperty[] = [];
-    try {
-        const connection = options.connection ?? shopwareConnectionFromEnv();
-        if (connection) {
-            const dataHydrator = await connectShopware(connection);
-            existingProperties = await dataHydrator.getExistingPropertyGroups();
-        }
-    } catch {
-        // Proceed without existing properties
-    }
-
-    // CMS-only hydration
-    if (hydrateOnly === "cms") {
-        const cmsBlueprint = generateCmsBlueprint(salesChannelName);
-        const description = resolveCmsStoreDescription(
-            salesChannelName,
-            blueprint.salesChannel.description,
-            existingHydratedBlueprint?.salesChannel.description
-        );
-        const hydratedCms = await hydrateCmsBlueprint(cmsBlueprint, textProvider, description);
-        cache.saveCmsBlueprint(salesChannelName, hydratedCms);
-
-        await hydrateCmsImages(imageProvider, cache, salesChannelName, description);
-        cache.recordGenerationStep(
-            salesChannelName,
-            "hydrate:cms",
-            buildGenerationStep(estimate.selection, imageProvider.name !== "noop")
-        );
-
-        return [
-            `=== Blueprint Hydrate (cms only) ===`,
-            `Name: ${salesChannelName}`,
-            ``,
-            `CMS blueprint hydrated:`,
-            `  Pages: ${hydratedCms.pages.length}`,
-            `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "cms-blueprint.json")}`,
-            ...formatActualUsage(textProvider, estimate.selection),
-        ];
-    }
-
-    if (hydrateOnly === "variant-images" && existingHydratedBlueprint) {
+    if (plan.only === "cms") return hydrateCmsOnly(plan, providers);
+    if (plan.only === "variant-images" && plan.hydrated) {
         return hydrateVariantImagesOnly(
             salesChannelName,
             cache,
-            imageProvider,
-            existingHydratedBlueprint,
-            estimate.selection
+            providers.image,
+            plan.hydrated,
+            plan.estimate.selection
         );
     }
 
-    const hydrator = new BlueprintHydrator(textProvider);
-    let hydratedBlueprint: HydratedBlueprint;
-
-    if (hydrateOnly === "categories" && existingHydratedBlueprint) {
-        hydratedBlueprint = await hydrator.hydrateCategoriesOnly(existingHydratedBlueprint);
-    } else if (hydrateOnly === "variants" && existingHydratedBlueprint) {
-        hydratedBlueprint = await hydrator.hydrateVariantsOnly(
-            existingHydratedBlueprint,
-            variantSettings
-        );
-        // Keep blueprint.json in step, so a later full re-hydration uses the same settings
-        cache.saveBlueprint(salesChannelName, { ...blueprint, variants: { ...variantSettings } });
-    } else if (hydrateOnly === "properties" && existingHydratedBlueprint) {
-        hydratedBlueprint = await hydrator.hydratePropertiesOnly(
-            existingHydratedBlueprint,
-            existingProperties
-        );
-    } else {
-        const inspiration = cache.loadInspiration(salesChannelName) ?? undefined;
-        if (inspiration) {
-            logger.info(`  Using inspiration from ${inspiration.sourceUrl}`, { cli: true });
-        }
-        hydratedBlueprint = await hydrator.hydrate(blueprint, existingProperties, inspiration);
-    }
-
-    if (!hydrateOnly) {
-        const cmsBlueprint = generateCmsBlueprint(salesChannelName);
-        const description = resolveCmsStoreDescription(
-            salesChannelName,
-            blueprint.salesChannel.description,
-            hydratedBlueprint.salesChannel.description
-        );
-        const hydratedCms = await hydrateCmsBlueprint(cmsBlueprint, textProvider, description);
-        cache.saveCmsBlueprint(salesChannelName, hydratedCms);
-
-        await hydrateCmsImages(imageProvider, cache, salesChannelName, description);
-
-        if (imageProvider.name !== "noop") {
-            await hydrateProductImages(imageProvider, cache, salesChannelName, hydratedBlueprint);
-
-            const storeDescription =
-                hydratedBlueprint.salesChannel.description ||
-                blueprint.salesChannel.description ||
-                `${salesChannelName} webshop`;
-            await hydrateThemeMedia(
-                imageProvider,
-                cache,
-                salesChannelName,
-                storeDescription,
-                hydratedBlueprint.brandColors
-            );
-        }
-    }
+    const loadProperties =
+        deps.loadExistingProperties ?? (() => loadExistingProperties(options.connection));
+    const existingProperties = await loadProperties();
+    const hydrated = await hydrateCatalogText(plan, providers.text, existingProperties);
+    if (!plan.only) await hydrateCatalogMedia(plan, providers, hydrated);
 
     await finalizeHydratedBlueprint(
-        { text: textProvider, image: imageProvider },
+        providers,
         cache,
         salesChannelName,
-        hydratedBlueprint,
+        hydrated,
         existingProperties,
-        { variantImages: !hydrateOnly }
+        { variantImages: !plan.only }
     );
-    const collector = new PropertyCollector();
-
-    cache.saveHydratedBlueprint(salesChannelName, hydratedBlueprint);
+    cache.saveHydratedBlueprint(salesChannelName, hydrated);
     cache.recordGenerationStep(
         salesChannelName,
-        hydrateOnly ? `hydrate:${hydrateOnly}` : "hydrate",
-        buildGenerationStep(estimate.selection, !hydrateOnly && imageProvider.name !== "noop")
+        plan.only ? `hydrate:${plan.only}` : "hydrate",
+        buildGenerationStep(plan.estimate.selection, !plan.only && imagesEnabled(providers.image))
+    );
+    return formatHydrateResult(plan, hydrated, providers.text, Boolean(options.force));
+}
+
+/** Existing property groups from Shopware; none when Shopware is not configured or unreachable */
+async function loadExistingProperties(
+    connection: ShopwareConnection | undefined
+): Promise<ExistingProperty[]> {
+    try {
+        const resolved = connection ?? shopwareConnectionFromEnv();
+        if (!resolved) return [];
+        const dataHydrator = await connectShopware(resolved);
+        return await dataHydrator.getExistingPropertyGroups();
+    } catch {
+        return [];
+    }
+}
+
+/** Generate and save the CMS texts and images for the store description */
+async function hydrateCmsContent(
+    plan: HydrationPlan,
+    providers: HydrationProviders,
+    description: string
+): Promise<number> {
+    const { cache, salesChannelName } = plan;
+    const cmsBlueprint = generateCmsBlueprint(salesChannelName);
+    const hydratedCms = await hydrateCmsBlueprint(cmsBlueprint, providers.text, description);
+    cache.saveCmsBlueprint(salesChannelName, hydratedCms);
+    await hydrateCmsImages(providers.image, cache, salesChannelName, description);
+    return hydratedCms.pages.length;
+}
+
+/** --only=cms: CMS texts and images, the catalog stays untouched */
+async function hydrateCmsOnly(
+    plan: HydrationPlan,
+    providers: HydrationProviders
+): Promise<string[]> {
+    const { cache, salesChannelName, estimate } = plan;
+    const description = resolveCmsStoreDescription(
+        salesChannelName,
+        plan.blueprint.salesChannel.description,
+        plan.hydrated?.salesChannel.description
+    );
+    const pages = await hydrateCmsContent(plan, providers, description);
+    cache.recordGenerationStep(
+        salesChannelName,
+        "hydrate:cms",
+        buildGenerationStep(estimate.selection, imagesEnabled(providers.image))
     );
 
-    const results = [
+    return [
+        `=== Blueprint Hydrate (cms only) ===`,
+        `Name: ${salesChannelName}`,
+        ``,
+        `CMS blueprint hydrated:`,
+        `  Pages: ${pages}`,
+        `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "cms-blueprint.json")}`,
+        ...formatActualUsage(providers.text, estimate.selection),
+    ];
+}
+
+/**
+ * Catalog texts for the run: a selective pass on the existing hydrated blueprint, or a
+ * full hydration. --only=categories/properties fall back to full without one.
+ */
+async function hydrateCatalogText(
+    plan: HydrationPlan,
+    textProvider: TextProvider,
+    existingProperties: ExistingProperty[]
+): Promise<HydratedBlueprint> {
+    const { cache, salesChannelName, blueprint, hydrated, only } = plan;
+    // Property cache next to the run cache (CACHE_DIR), not always ./generated
+    const hydrator = new BlueprintHydrator(textProvider, cache.getCacheDir());
+
+    if (hydrated && only === "categories") return hydrator.hydrateCategoriesOnly(hydrated);
+    if (hydrated && only === "properties") {
+        return hydrator.hydratePropertiesOnly(hydrated, existingProperties);
+    }
+    if (hydrated && only === "variants") {
+        const result = await hydrator.hydrateVariantsOnly(hydrated, plan.variantSettings);
+        // Keep blueprint.json in step, so a later full re-hydration uses the same settings
+        cache.saveBlueprint(salesChannelName, {
+            ...blueprint,
+            variants: { ...plan.variantSettings },
+        });
+        return result;
+    }
+
+    const inspiration = cache.loadInspiration(salesChannelName) ?? undefined;
+    if (inspiration) {
+        logger.info(`  Using inspiration from ${inspiration.sourceUrl}`, { cli: true });
+    }
+    return hydrator.hydrate(blueprint, existingProperties, inspiration);
+}
+
+/** Full hydration only: CMS content, product and category images, theme media */
+async function hydrateCatalogMedia(
+    plan: HydrationPlan,
+    providers: HydrationProviders,
+    hydrated: HydratedBlueprint
+): Promise<void> {
+    const { cache, salesChannelName, blueprint } = plan;
+    await hydrateCmsContent(
+        plan,
+        providers,
+        resolveCmsStoreDescription(
+            salesChannelName,
+            blueprint.salesChannel.description,
+            hydrated.salesChannel.description
+        )
+    );
+    if (!imagesEnabled(providers.image)) return;
+
+    await hydrateProductImages(providers.image, cache, salesChannelName, hydrated);
+    const storeDescription =
+        hydrated.salesChannel.description ||
+        blueprint.salesChannel.description ||
+        `${salesChannelName} webshop`;
+    await hydrateThemeMedia(
+        providers.image,
+        cache,
+        salesChannelName,
+        storeDescription,
+        hydrated.brandColors
+    );
+}
+
+function hydrateModeLabel(only: HydrateOnly | undefined, force: boolean): string {
+    if (only) return `${only} only`;
+    return force ? "full (--rehydrate)" : "full";
+}
+
+function formatHydrateResult(
+    plan: HydrationPlan,
+    hydrated: HydratedBlueprint,
+    textProvider: TextProvider,
+    force: boolean
+): string[] {
+    const { cache, salesChannelName, only } = plan;
+    const brandColors = hydrated.brandColors
+        ? [`  Brand colors: ${hydrated.brandColors.primary} / ${hydrated.brandColors.secondary}`]
+        : [];
+    const variantImagesHint =
+        only === "variants"
+            ? [
+                  ``,
+                  `Colour images follow the new colours with: ` +
+                      `blueprint hydrate --name=${salesChannelName} --only=variant-images`,
+              ]
+            : [];
+
+    return [
         `=== Blueprint Hydrate ===`,
         `Name: ${salesChannelName}`,
-        hydrateOnly
-            ? `Mode: ${hydrateOnly} only`
-            : forceHydration
-              ? `Mode: full (--rehydrate)`
-              : `Mode: full`,
+        `Mode: ${hydrateModeLabel(only, force)}`,
         `Log file: ${logger.getLogFile()}`,
         ``,
         `Hydrated blueprint saved:`,
-        `  Mode: ${hydrateOnly || "full"}`,
-        `  Property groups: ${hydratedBlueprint.propertyGroups.length}`,
-        `  Manufacturers: ${collector.collectManufacturers(hydratedBlueprint).length}`,
-        `  Variants: ${formatVariantSettings(blueprintVariantSettings(hydratedBlueprint))}`,
-    ];
-
-    if (hydratedBlueprint.brandColors) {
-        results.push(
-            `  Brand colors: ${hydratedBlueprint.brandColors.primary} / ${hydratedBlueprint.brandColors.secondary}`
-        );
-    }
-
-    results.push(
+        `  Mode: ${only || "full"}`,
+        `  Property groups: ${hydrated.propertyGroups.length}`,
+        `  Manufacturers: ${new PropertyCollector().collectManufacturers(hydrated).length}`,
+        `  Variants: ${formatVariantSettings(blueprintVariantSettings(hydrated))}`,
+        ...brandColors,
         `  Saved to: ${cacheFileForDisplay(cache, salesChannelName, "hydrated-blueprint.json")}`,
-        ...formatActualUsage(textProvider, estimate.selection)
-    );
-    if (hydrateOnly === "variants") {
-        results.push(
-            ``,
-            `Colour images follow the new colours with: ` +
-                `blueprint hydrate --name=${salesChannelName} --only=variant-images`
-        );
-    }
-    return results;
+        ...formatActualUsage(textProvider, plan.estimate.selection),
+        ...variantImagesHint,
+    ];
 }
 
 /**
@@ -607,7 +667,7 @@ export async function finalizeHydratedBlueprint(
         blueprint,
         existingProperties
     );
-    if (!options.variantImages || providers.image.name === "noop") return;
+    if (!options.variantImages || !imagesEnabled(providers.image)) return;
     await hydrateVariantImages(providers.image, cache, salesChannelName, blueprint);
 }
 
@@ -625,7 +685,8 @@ export async function fixBlueprint(salesChannelName: string): Promise<string[]> 
     }
 
     const { text: textProvider } = createProvidersFromEnv();
-    const hydrator = new BlueprintHydrator(textProvider);
+    // Property cache next to the run cache (CACHE_DIR), not always ./generated
+    const hydrator = new BlueprintHydrator(textProvider, cache.getCacheDir());
 
     const placeholderCategories = hydrator.findPlaceholderCategories(blueprint.categories);
     const placeholderProducts = hydrator.findPlaceholderProducts(blueprint.products);
