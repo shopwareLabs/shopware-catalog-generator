@@ -1411,6 +1411,92 @@ describe("VariantProcessor", () => {
                 expect(configuratorOptionIds(mockApi)).toEqual(["opt-matte-f", "opt-gloss-f"]);
             });
 
+            test("prefers the cached group when the blueprint group lacks the selected options", async () => {
+                writeCachedGroup("cache-store-d", cachedGroup("Size", ["XS", "M", "XL"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-blueprint-partial",
+                    configs: [
+                        { group: "Size", selectedOptions: ["XS", "M", "XL"], priceModifiers: {} },
+                    ],
+                    // Plain product property "Size: Medium", not the variant options
+                    propertyGroups: [
+                        {
+                            id: "pg-size-blueprint",
+                            name: "Size",
+                            displayType: "text",
+                            options: [{ id: "opt-medium", name: "Medium" }],
+                        },
+                    ],
+                    salesChannelName: "cache-store-d",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-size",
+                            name: "Size",
+                            options: [
+                                { id: "opt-medium", name: "Medium" },
+                                { id: "opt-xs", name: "XS" },
+                                { id: "opt-m", name: "M" },
+                                { id: "opt-xl", name: "XL" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                expect(configuratorOptionIds(mockApi)).toEqual(["opt-xs", "opt-m", "opt-xl"]);
+            });
+
+            test("prefers the cached group when the blueprint group has only some selected options", async () => {
+                writeCachedGroup(
+                    "cache-store-e",
+                    cachedGroup("Storage", ["64GB", "128GB", "256GB"])
+                );
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-blueprint-some",
+                    configs: [
+                        {
+                            group: "Storage",
+                            selectedOptions: ["64GB", "128GB", "256GB"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    propertyGroups: [
+                        {
+                            id: "pg-storage-blueprint",
+                            name: "Storage",
+                            displayType: "text",
+                            options: [
+                                { id: "opt-64-bp", name: "64GB" },
+                                { id: "opt-128-bp", name: "128GB" },
+                            ],
+                        },
+                    ],
+                    salesChannelName: "cache-store-e",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-storage",
+                            name: "Storage",
+                            options: [
+                                { id: "opt-64", name: "64GB" },
+                                { id: "opt-128", name: "128GB" },
+                                { id: "opt-256", name: "256GB" },
+                            ],
+                        },
+                    ],
+                }));
+
+                const result = await VariantProcessor.process(context);
+
+                expect(result.processed).toBe(1);
+                expect(configuratorOptionIds(mockApi)).toEqual(["opt-64", "opt-128", "opt-256"]);
+            });
+
             test("adds missing cached options to an existing group", async () => {
                 writeCachedGroup(
                     "cache-store-c",

@@ -209,9 +209,10 @@ class VariantProcessorImpl implements PostProcessor {
         if (variantCount === 0) return "skipped";
 
         const groupNames = resolvedGroups.map((g) => g.group.name).join(" + ");
-        logger.info(`      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})`, {
-            cli: true,
-        });
+        logger.info(
+            `      ✓ ${product.name}: Created ${variantCount} variants (${groupNames})${formatIssues(resolution.issues)}`,
+            { cli: true }
+        );
         return "processed";
     }
 
@@ -377,16 +378,24 @@ class VariantProcessorImpl implements PostProcessor {
 
     /**
      * Find the property group of a variant config: blueprint first, then the
-     * PropertyCache (creating the group in Shopware if needed), then a Shopware search
+     * PropertyCache (creating the group in Shopware if needed), then a Shopware search.
+     *
+     * The blueprint group only collects the options that products use as plain
+     * properties (e.g. "Size: Medium"), so it is skipped when it lacks the selected
+     * variant options. The blueprint group is still the last resort.
      */
     private async findPropertyGroup(
         context: PostProcessorContext,
-        groupName: string
+        config: VariantConfig
     ): Promise<PropertyGroup | null> {
+        const blueprintGroup = this.findPropertyGroupInBlueprint(context, config.group);
+        if (blueprintGroup && hasSelectedOptions(blueprintGroup, config)) {
+            return blueprintGroup;
+        }
         return (
-            this.findPropertyGroupInBlueprint(context, groupName) ??
-            (await this.ensurePropertyGroupInShopware(context, groupName)) ??
-            (await this.getPropertyGroup(context, groupName))
+            (await this.ensurePropertyGroupInShopware(context, config.group)) ??
+            (await this.getPropertyGroup(context, config.group)) ??
+            blueprintGroup
         );
     }
 
@@ -401,7 +410,7 @@ class VariantProcessorImpl implements PostProcessor {
         const resolution: GroupResolution = { resolved: [], issues: [] };
 
         for (const config of configs) {
-            const propertyGroup = await this.findPropertyGroup(context, config.group);
+            const propertyGroup = await this.findPropertyGroup(context, config);
             const selection = selectVariantOptions(config, propertyGroup);
             if (selection.issue) resolution.issues.push(selection.issue);
             if (selection.resolved) resolution.resolved.push(selection.resolved);
@@ -660,6 +669,12 @@ function loadVariantConfigs(
 /** Issue list as log suffix: " (a; b)", or "" when there are none */
 function formatIssues(issues: string[]): string {
     return issues.length > 0 ? ` (${issues.join("; ")})` : "";
+}
+
+/** The group contains every selected option (case-insensitive) */
+function hasSelectedOptions(group: PropertyGroup, config: VariantConfig): boolean {
+    const names = new Set(group.options.map((o) => o.name.toLowerCase()));
+    return config.selectedOptions.every((o) => names.has(o.toLowerCase()));
 }
 
 /** One name contains the other (both lowercase) */
