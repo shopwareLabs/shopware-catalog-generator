@@ -11,36 +11,12 @@ import type {
     VariantConfig,
 } from "../../../src/types/index.js";
 
-import {
-    isTransientShopwareSyncError,
-    VariantProcessor,
-} from "../../../src/post-processors/variant-processor.js";
+import { VariantProcessor } from "../../../src/post-processors/variant-processor.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
 import { createMockApiHelpers, createMockProductMetadata } from "../../mocks/index.js";
 
 describe("VariantProcessor", () => {
-    describe("isTransientShopwareSyncError", () => {
-        test("returns true for deadlock and savepoint errors", () => {
-            expect(
-                isTransientShopwareSyncError(
-                    "SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock"
-                )
-            ).toBe(true);
-            expect(
-                isTransientShopwareSyncError(
-                    "SQLSTATE[42000]: Syntax error or access violation: 1305 SAVEPOINT DOCTRINE_2 does not exist"
-                )
-            ).toBe(true);
-        });
-
-        test("returns false for non-transient errors", () => {
-            expect(isTransientShopwareSyncError("Validation failed: missing required field")).toBe(
-                false
-            );
-        });
-    });
-
     describe("metadata", () => {
         test("has correct name", () => {
             expect(VariantProcessor.name).toBe("variants");
@@ -293,8 +269,16 @@ describe("VariantProcessor", () => {
                 data: [
                     {
                         id: "p1",
-                        children: [{ id: "child-1" }, { id: "child-2" }],
-                        configuratorSettings: [],
+                        children: [
+                            { id: "child-s", options: [{ id: "opt-s" }] },
+                            { id: "child-m", options: [{ id: "opt-m" }] },
+                            { id: "child-l", options: [{ id: "opt-l" }] },
+                        ],
+                        configuratorSettings: [
+                            { id: "cs-s", optionId: "opt-s" },
+                            { id: "cs-m", optionId: "opt-m" },
+                            { id: "cs-l", optionId: "opt-l" },
+                        ],
                     },
                 ],
             });
@@ -319,7 +303,7 @@ describe("VariantProcessor", () => {
             expect(result.errors).toHaveLength(0);
         });
 
-        test("skips products with existing configurator settings", async () => {
+        test("completes a partly created variant product and removes stale variants", async () => {
             const colorConfig: VariantConfig = {
                 group: "Color",
                 selectedOptions: ["Red", "Blue"],
@@ -356,16 +340,26 @@ describe("VariantProcessor", () => {
                 ["p1", { isVariant: true, variantConfigs: [colorConfig] }],
             ]);
 
+            // An interrupted run left only the Red variant and its setting, plus a
+            // Green variant that is no longer in the blueprint
             const mockApi = createMockApiHelpers();
             mockApi.mockPostResponse("search/product", {
                 data: [
                     {
                         id: "p1",
-                        children: [],
-                        configuratorSettings: [{ id: "config-1" }],
+                        children: [
+                            { id: "child-red", options: [{ id: "opt-red" }] },
+                            { id: "child-green", optionIds: ["opt-green"] },
+                        ],
+                        configuratorSettings: [
+                            { id: "cs-red", optionId: "opt-red" },
+                            { id: "cs-green", optionId: "opt-green" },
+                        ],
                     },
                 ],
             });
+            mockApi.mockSearchResponse("currency", [{ id: "currency-eur" }]);
+            mockApi.mockSyncSuccess();
 
             const { context } = createTestContext({
                 blueprint,
@@ -375,9 +369,98 @@ describe("VariantProcessor", () => {
             });
             const result = await VariantProcessor.process(context);
 
-            // p1 should be skipped (already has configurator settings)
-            expect(result.skipped).toBe(1);
-            expect(result.processed).toBe(0);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toHaveLength(0);
+
+            const bodies = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body) as Array<
+                Record<string, { entity: string; action: string; payload: unknown[] }>
+            >;
+            const ops = bodies.flatMap((b) => Object.values(b));
+            const deletedProducts = ops.find(
+                (o) => o.entity === "product" && o.action === "delete"
+            );
+            const deletedSettings = ops.find((o) => o.entity === "product_configurator_setting");
+            expect(deletedProducts?.payload).toEqual([{ id: "child-green" }]);
+            expect(deletedSettings?.payload).toEqual([{ id: "cs-green" }]);
+
+            const parentUpdate = bodies.find((b) => b.updateParent)?.updateParent?.payload[0] as {
+                configuratorSettings: Array<{ optionId: string }>;
+            };
+            expect(parentUpdate.configuratorSettings.map((s) => s.optionId)).toEqual(["opt-blue"]);
+
+            const created = bodies.find((b) => b.createVariants)?.createVariants?.payload as Array<{
+                options: Array<{ id: string }>;
+            }>;
+            expect(created.map((v) => v.options.map((o) => o.id))).toEqual([["opt-blue"]]);
+        });
+
+        test("deletes only stale settings when no child is stale", async () => {
+            const colorConfig: VariantConfig = {
+                group: "Color",
+                selectedOptions: ["Red", "Blue"],
+                priceModifiers: {},
+            };
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Product 1",
+                        metadata: createMockProductMetadata({
+                            isVariant: true,
+                            variantConfigs: [colorConfig],
+                        }),
+                    }),
+                ],
+                propertyGroups: [
+                    {
+                        id: "pg-color",
+                        name: "Color",
+                        displayType: "color",
+                        options: [
+                            { id: "opt-red", name: "Red" },
+                            { id: "opt-blue", name: "Blue" },
+                        ],
+                    },
+                ],
+            });
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/product", {
+                data: [
+                    {
+                        id: "p1",
+                        children: [
+                            { id: "child-red", optionIds: ["opt-red"] },
+                            { id: "child-blue", optionIds: ["opt-blue"] },
+                        ],
+                        configuratorSettings: [
+                            { id: "cs-red", optionId: "opt-red" },
+                            { id: "cs-blue", optionId: "opt-blue" },
+                            { id: "cs-old", optionId: "opt-old" },
+                        ],
+                    },
+                ],
+            });
+            mockApi.mockSyncSuccess();
+            const { context } = createTestContext({
+                blueprint,
+                metadataMap: new Map([["p1", { isVariant: true, variantConfigs: [colorConfig] }]]),
+                dryRun: false,
+                mockApi,
+            });
+
+            const result = await VariantProcessor.process(context);
+
+            expect(result.errors).toHaveLength(0);
+            const bodies = mockApi.getCallsByEndpoint("_action/sync").map((c) => c.body);
+            expect(bodies).toEqual([
+                {
+                    deleteStaleSettings: {
+                        entity: "product_configurator_setting",
+                        action: "delete",
+                        payload: [{ id: "cs-old" }],
+                    },
+                },
+            ]);
         });
 
         test("processes multiple property groups with cartesian product", async () => {
@@ -1063,6 +1146,36 @@ describe("VariantProcessor", () => {
             expect(configuratorOptionIds(mockApi)).toEqual(["opt-red", "opt-blue"]);
         });
 
+        test("picks one option per name when the group has the name in two cases", async () => {
+            const { context, mockApi } = setupVariantRun({
+                productId: "res-case-dupes",
+                configs: [
+                    {
+                        group: "Quantity",
+                        selectedOptions: ["10 Pairs", "20 pairs"],
+                        priceModifiers: {},
+                    },
+                ],
+                propertyGroups: [
+                    {
+                        id: "pg-quantity",
+                        name: "Quantity",
+                        displayType: "text",
+                        options: [
+                            { id: "opt-10-lower", name: "10 pairs" },
+                            { id: "opt-10-exact", name: "10 Pairs" },
+                            { id: "opt-20-upper", name: "20 Pairs" },
+                            { id: "opt-20-exact", name: "20 pairs" },
+                        ],
+                    },
+                ],
+            });
+
+            await VariantProcessor.process(context);
+
+            expect(configuratorOptionIds(mockApi)).toEqual(["opt-10-exact", "opt-20-exact"]);
+        });
+
         test("creates variants for the resolved groups when one group is missing", async () => {
             const { context, mockApi } = setupVariantRun({
                 productId: "res-partial",
@@ -1249,7 +1362,10 @@ describe("VariantProcessor", () => {
 
             expect(mockApi.getCallsByEndpoint("search/product")[0]?.body).toEqual({
                 ids: ["res-check-body"],
-                associations: { children: {}, configuratorSettings: {} },
+                associations: {
+                    children: { associations: { options: {} } },
+                    configuratorSettings: {},
+                },
             });
         });
 
@@ -1538,6 +1654,113 @@ describe("VariantProcessor", () => {
                 expect(groupSync).toContain('"name":"Satin"');
                 // Group search is repeated after the sync (cache cleared)
                 expect(mockApi.getCallsByEndpoint("search/property-group")).toHaveLength(2);
+            });
+
+            test("adds missing options to an existing group that has more options than the cache", async () => {
+                writeCachedGroup("cache-store-f", cachedGroup("Volume", ["1 L", "3 L", "5 L"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-larger",
+                    configs: [
+                        {
+                            group: "Volume",
+                            selectedOptions: ["1 L", "3 L", "5 L"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-f",
+                });
+                // Plain product properties, only "5 L" is a variant option
+                const shopOptions = ["20 L", "10 L", "2 Litre Pot", "120 cm", "5 l"].map(
+                    (name, i) => ({ id: `opt-shop-${i}`, name })
+                );
+                answerGroupSearch(mockApi, () => ({
+                    data: [{ id: "pg-volume", name: "Volume", options: shopOptions }],
+                }));
+
+                await VariantProcessor.process(context);
+
+                const groupSync = syncBodies(mockApi).find((b) =>
+                    b.includes("createPropertyGroup")
+                );
+                expect(groupSync).toContain('"id":"pg-volume"');
+                expect(groupSync).toContain('"name":"1 L"');
+                expect(groupSync).toContain('"name":"3 L"');
+                // "5 l" already exists (case-insensitive), so no duplicate "5 L"
+                expect(groupSync).not.toContain('"name":"5 L"');
+            });
+
+            test("adds selected variant options that the cached group does not list", async () => {
+                // Cached plain-property options differ from the variant options
+                writeCachedGroup("cache-store-g", cachedGroup("Size", ["100 ml", "200 ml"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-selected",
+                    configs: [
+                        {
+                            group: "Size",
+                            selectedOptions: ["Small", "Medium", "Large"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-g",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-size",
+                            name: "Size",
+                            options: [
+                                { id: "opt-100", name: "100 ml" },
+                                { id: "opt-200", name: "200 ml" },
+                                { id: "opt-medium", name: "Medium" },
+                            ],
+                        },
+                    ],
+                }));
+
+                await VariantProcessor.process(context);
+
+                const groupSync = syncBodies(mockApi).find((b) =>
+                    b.includes("createPropertyGroup")
+                );
+                expect(groupSync).toContain('"id":"pg-size"');
+                expect(groupSync).toContain('"name":"Small"');
+                expect(groupSync).toContain('"name":"Large"');
+                expect(groupSync?.split('"name":"Medium"')).toHaveLength(2);
+            });
+
+            test("adds selected options to a shop group without a cached definition", async () => {
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-no-cache",
+                    configs: [
+                        {
+                            group: "Width",
+                            selectedOptions: ["Narrow", "Wide"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-h",
+                });
+                answerGroupSearch(mockApi, () => ({
+                    data: [
+                        {
+                            id: "pg-width",
+                            name: "Width",
+                            options: [
+                                { id: "opt-narrow", name: "Narrow" },
+                                { id: "opt-regular", name: "Regular" },
+                            ],
+                        },
+                    ],
+                }));
+
+                await VariantProcessor.process(context);
+
+                const groupSync = syncBodies(mockApi).find((b) =>
+                    b.includes("createPropertyGroup")
+                );
+                expect(groupSync).toContain('"id":"pg-width"');
+                expect(groupSync).toContain('"name":"Wide"');
+                expect(groupSync?.split('"name":"Narrow"')).toHaveLength(2);
             });
 
             test("does not sync when every cached option name already exists", async () => {

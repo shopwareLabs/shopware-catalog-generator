@@ -503,6 +503,35 @@ export class ShopwareCleanup extends ShopwareClient {
     }
 
     /**
+     * Delete the given products if they still exist (variant children cascade).
+     * Product IDs are deterministic, so products left over from a deleted
+     * SalesChannel would otherwise be reused with their old variants.
+     * @returns Number of deleted products
+     */
+    async deleteProductsByIds(productIds: string[]): Promise<number> {
+        if (!this.isAuthenticated() || productIds.length === 0) {
+            return 0;
+        }
+
+        const products = await this.fetchAllPages<Schemas["Product"]>(
+            async (body) => {
+                const { data } = await this.getClient().invoke(
+                    "searchProduct post /search/product",
+                    { body }
+                );
+                return data as { data?: Schemas["Product"][]; total?: number };
+            },
+            { filter: [{ type: "equalsAny", field: "id", value: productIds }] }
+        );
+        if (products.length === 0) return 0;
+
+        const payload = products.map((p) => ({ id: p.id }));
+        await this.sync([{ entity: "product", action: "delete", payload }]);
+        logger.info(`Deleted ${products.length} leftover products.`);
+        return products.length;
+    }
+
+    /**
      * Delete all categories under a root category
      * @param rootCategoryId - The root category ID
      * @returns Number of deleted categories

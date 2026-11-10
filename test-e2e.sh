@@ -308,6 +308,10 @@ if [ -n "$CLEANUP_ONLY" ]; then
     echo "  Cleaning up unused property groups..."
     bun run cleanup -- --unused-props || true
 
+    # Product images stay on disk after their products are deleted
+    echo "  Cleaning up orphaned product media..."
+    bun run cleanup -- --orphaned-media || true
+
     echo "Cleanup complete."
     exit 0
 fi

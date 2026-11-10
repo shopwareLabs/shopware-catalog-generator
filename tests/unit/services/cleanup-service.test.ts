@@ -16,6 +16,7 @@ import {
     cleanupSalesChannelData,
     resolveCleanupProcessors,
 } from "../../../src/services/cleanup-service.js";
+import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 
 interface FakeShopware extends CleanupShopware {
     calls: string[];
@@ -41,6 +42,10 @@ function fakeShopware(overrides: Partial<CleanupShopware> = {}): FakeShopware {
                 rootCategoryDeleted: options.deleteSalesChannel,
                 errors: [],
             };
+        },
+        deleteProductsByIds: async (ids) => {
+            calls.push(`products-by-id:${ids.join(",")}`);
+            return ids.length;
         },
         deleteUnusedPropertyGroups: async (dryRun) => {
             calls.push(`unused-props:${dryRun}`);
@@ -89,9 +94,25 @@ describe("cleanup-service", () => {
     test("core cleanup deletes products and categories, not processor entities", async () => {
         const lines = await cleanupSalesChannelData(BASE, deps);
 
-        expect(shopware.calls).toEqual(["core:false:false"]);
+        expect(shopware.calls).toEqual(["products-by-id:", "core:false:false"]);
         expect(lines).toContain("Products deleted: 5");
         expect(lines.some((l) => l.startsWith("Note: Processor entities"))).toBe(true);
+        expect(errors(lines)).toEqual([]);
+    });
+
+    test("deletes the cached blueprint's products by ID before the core cleanup", async () => {
+        // Product IDs are deterministic: leftovers of a deleted SalesChannel would be reused
+        cache.saveHydratedBlueprint(
+            "garden",
+            createTestBlueprint({
+                products: [createTestProduct({ id: "p-1" }), createTestProduct({ id: "p-2" })],
+            })
+        );
+
+        const lines = await cleanupSalesChannelData(BASE, deps);
+
+        expect(shopware.calls).toEqual(["products-by-id:p-1,p-2", "core:false:false"]);
+        expect(lines).toContain("Products deleted by blueprint ID: 2");
         expect(errors(lines)).toEqual([]);
     });
 
@@ -119,6 +140,7 @@ describe("cleanup-service", () => {
 
         expect(shopware.calls).toEqual([
             `processors:sc-garden:${registry.getNames().join(",")}:false`,
+            "products-by-id:",
             "core:false:false",
         ]);
     });
@@ -238,6 +260,7 @@ describe("cleanup-service", () => {
             "Delete property groups: No",
             "[DRY RUN] Would delete:",
             '  - Products in SalesChannel "garden"',
+            "  - Products of its cached blueprint (also without the SalesChannel)",
             "  - Categories under its root category",
             "",
         ]);

@@ -185,6 +185,50 @@ describe("ShopwareCleanup", () => {
         });
     });
 
+    describe("deleteProductsByIds", () => {
+        test("searches the given IDs and deletes the ones that exist", async () => {
+            const { cleanup, mockClient } = createTestableCleanup();
+            mockClient.mockSearchResponse("product", {
+                data: [{ id: "prod-1", name: "Product 1" }],
+                total: 1,
+            });
+
+            const count = await cleanup.deleteProductsByIds(["prod-1", "prod-gone"]);
+
+            expect(count).toBe(1);
+            const search = mockClient.getCallsByOperation("/search/product")[0];
+            const body = (search?.params as { body?: { filter?: unknown[] } })?.body;
+            expect(body?.filter).toEqual([
+                { type: "equalsAny", field: "id", value: ["prod-1", "prod-gone"] },
+            ]);
+            const syncBody = (
+                mockClient.getCallsByOperation("sync post")[0]?.params as {
+                    body?: unknown[];
+                }
+            )?.body;
+            expect(syncBody?.[0]).toEqual({
+                entity: "product",
+                action: "delete",
+                payload: [{ id: "prod-1" }],
+            });
+        });
+
+        test("does not call Shopware without IDs", async () => {
+            const { cleanup, mockClient } = createTestableCleanup();
+
+            expect(await cleanup.deleteProductsByIds([])).toBe(0);
+            expect(mockClient.calls).toHaveLength(0);
+        });
+
+        test("does not sync when none of the products exist", async () => {
+            const { cleanup, mockClient } = createTestableCleanup();
+            mockClient.mockSearchResponse("product", { data: [], total: 0 });
+
+            expect(await cleanup.deleteProductsByIds(["prod-gone"])).toBe(0);
+            expect(mockClient.getCallsByOperation("sync post")).toHaveLength(0);
+        });
+    });
+
     // =========================================================================
     // Tests: deleteCategoriesUnderRoot
     // =========================================================================
