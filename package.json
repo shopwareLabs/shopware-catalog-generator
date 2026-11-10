@@ -19,6 +19,10 @@
         "lint": "oxlint --fix && bun run typecheck:all && bun run lint:dead && bun run lint:no-cast",
         "lint:no-cast": "bun run scripts/lint-no-cast.ts",
         "lint:dead": "knip",
+        "quality": "fallow health --production --top 20 && fallow dupes --production --top 10",
+        "quality:health": "fallow health --production --hotspots --targets --top 20",
+        "quality:dupes": "fallow dupes",
+        "quality:mutation": "fallow mutation --allow-dirty",
         "format": "npx oxfmt --write .",
         "check-format": "npx oxfmt --check .",
         "blueprint": "bun run src/main.ts blueprint",
@@ -33,7 +37,7 @@
         "cache:empty-trash": "bun run src/cache-cli.ts empty-trash",
         "logs:clear": "rm -rf logs/",
         "cleanup": "bun run src/cleanup-cli.ts",
-        "cleanup:props": "bun run src/cleanup-cli.ts --all-props",
+        "cleanup:props": "bun run src/cleanup-cli.ts --unused-props",
         "cleanup:media": "bun run src/cleanup-cli.ts --orphaned-media",
         "test": "bun test",
         "test:watch": "bun test --watch",
@@ -51,17 +55,18 @@
     "dependencies": {
         "@shopware/api-client": "^1.7.0",
         "cheerio": "^1.2.0",
-        "openai": "^7.51.0",
+        "openai": "^7.55.0",
         "sharp": "^0.35.5",
         "zod": "^4.6.7"
     },
     "devDependencies": {
         "@types/bun": "^1.4.4",
         "@wong2/mcp-cli": "^2.0.0",
-        "fastmcp": "^4.24.2",
-        "knip": "^6.44.1",
-        "oxfmt": "^0.76.0",
-        "oxlint": "^1.91.0",
+        "fallow": "^3.42.0",
+        "fastmcp": "^4.25.0",
+        "knip": "^6.44.2",
+        "oxfmt": "^0.78.0",
+        "oxlint": "^1.93.0",
         "typescript": "^7.0.2"
     }
 }

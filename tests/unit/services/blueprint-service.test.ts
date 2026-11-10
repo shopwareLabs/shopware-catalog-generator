@@ -1,9 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import type { HydrateDeps } from "../../../src/services/blueprint-service.js";
 
 import { DataCache } from "../../../src/cache.js";
+import { imagesEnabled, NoOpImageProvider } from "../../../src/providers/index.js";
 import {
+    estimateBlueprintCost,
     finalizeHydratedBlueprint,
+    hydrateBlueprint,
     resolveCmsStoreDescription,
 } from "../../../src/services/blueprint-service.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
@@ -118,5 +125,94 @@ describe("finalizeHydratedBlueprint", () => {
         );
 
         expect(image.edits).toHaveLength(0);
+    });
+});
+
+describe("hydrateBlueprint and estimateBlueprintCost", () => {
+    let root: string;
+    let cache: DataCache;
+    let text: MockTextProvider;
+
+    beforeEach(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "hydrate-service-"));
+        cache = new DataCache({ cacheDir: path.join(root, "generated") });
+        text = new MockTextProvider();
+    });
+
+    afterEach(() => {
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const deps = (image = new NoOpImageProvider()): HydrateDeps => ({
+        cache,
+        providers: { text, image },
+        loadExistingProperties: async () => [],
+    });
+
+    const saveBlueprints = (withHydrated: boolean): void => {
+        const hydrated = createTestBlueprint();
+        cache.saveBlueprint("test-store", hydrated);
+        if (withHydrated) cache.saveHydratedBlueprint("test-store", hydrated);
+    };
+
+    test("imagesEnabled is false only for the disabled image provider", () => {
+        expect(imagesEnabled(new NoOpImageProvider())).toBe(false);
+        expect(imagesEnabled(new EditingImageProvider())).toBe(true);
+    });
+
+    test("refuses to overwrite an existing hydrated blueprint without --only or --rehydrate", async () => {
+        saveBlueprints(true);
+        const lines = await hydrateBlueprint("test-store", {}, deps());
+
+        expect(lines[0]).toStartWith("Error: Hydrated blueprint already exists");
+        expect(text.callCount).toBe(0);
+    });
+
+    test("returns the same errors from hydrate and estimate", async () => {
+        const noBlueprint = await hydrateBlueprint("test-store", {}, deps());
+        expect(noBlueprint[0]).toStartWith('Error: No blueprint found for "test-store"');
+        expect(estimateBlueprintCost("test-store", {}, cache)).toEqual(noBlueprint);
+
+        saveBlueprints(false);
+        const variants = await hydrateBlueprint("test-store", { only: "variants" }, deps());
+        expect(variants[0]).toStartWith("Error: --only=variants needs a hydrated blueprint");
+        expect(estimateBlueprintCost("test-store", { only: "variants" }, cache)).toEqual(variants);
+
+        const overrides = { variants: { colors: "6" } };
+        const misplaced = await hydrateBlueprint("test-store", overrides, deps());
+        expect(misplaced[0]).toStartWith(
+            "Error: Variant settings can only change with --only=variants"
+        );
+        expect(estimateBlueprintCost("test-store", overrides, cache)).toEqual(misplaced);
+
+        expect(text.callCount).toBe(0);
+    });
+
+    test("--only=variants rejects a share change", async () => {
+        saveBlueprints(true);
+        const lines = await hydrateBlueprint(
+            "test-store",
+            { only: "variants", variants: { share: "0.5" } },
+            deps()
+        );
+
+        expect(lines[0]).toStartWith("Error: --variant-share can only be set at blueprint create");
+    });
+
+    test("--only=variant-images does nothing when images are disabled", async () => {
+        saveBlueprints(true);
+        const lines = await hydrateBlueprint("test-store", { only: "variant-images" }, deps());
+
+        expect(lines).toContain("Images are disabled (IMAGE_PROVIDER=none), nothing to do.");
+        expect(cache.loadGenerationLog("test-store")).toBeNull();
+    });
+
+    test("estimate forecasts a valid run without AI calls", () => {
+        saveBlueprints(false);
+        const lines = estimateBlueprintCost("test-store", {}, cache);
+
+        expect(lines.some((l) => l.startsWith("Error:"))).toBe(false);
+        expect(lines.length).toBeGreaterThan(0);
+        expect(text.callCount).toBe(0);
     });
 });

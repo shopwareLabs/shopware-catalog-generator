@@ -147,21 +147,38 @@ interface ProcessContext {
 
 ### POST /generate
 
-Start background generation.
+Start background generation. The handler lives in `src/server/generate-route.ts` and calls
+`runGenerate()` from the services layer, the same pipeline as the CLI and MCP `generate`
+(validation, self-healing hydration, translations, variants). The body accepts the MCP
+`generate` parameters (`generateRequestParams`) plus the server-only fields.
 
 **Request:**
 
 ```json
 {
     "envPath": "http://localhost:8000",
-    "salesChannel": "furniture",
-    "description": "Wood furniture store",
-    "productCount": 90,
     "shopwareUser": "admin",
     "shopwarePassword": "shopware",
-    "skipProcessors": false
+    "name": "furniture",
+    "description": "Wood furniture store",
+    "products": 90,
+    "languages": "de-DE",
+    "variantColors": 6,
+    "dryRun": false,
+    "noTemplate": false,
+    "skipProcessors": false,
+    "cache": { "clearFirst": false },
+    "inspirationUrl": "https://example-furniture.com"
 }
 ```
+
+- Required: `envPath`, `shopwareUser`, `shopwarePassword`. Invalid bodies return 400.
+- `name` falls back to the inspiration URL host, then `demo-store`.
+- `languages` defaults to `TRANSLATION_LANGUAGES`, else English only (no prompt).
+- Variant fields: `variantColors`, `variantOptions`, `maxVariants`, `variantShare`.
+- Older names still work: `salesChannel` (name), `productCount` (products), `skipTemplate` (noTemplate).
+- A run that ends without an upload summary marks the process `failed` with the first `Error:` line.
+  Otherwise `result` holds the summary plus `errors` (e.g. post-processor errors).
 
 **Response:**
 
@@ -236,7 +253,6 @@ Health check.
 
 Use consistent phase names across tasks:
 
-- `auth` - Shopware authentication
 - `blueprint` - Blueprint creation/loading (current: 0-2)
 - `upload` - Shopware sync (current: 0-4 for categories, groups, products)
 - `processors` - Post-processor execution (current: 0-N processors)

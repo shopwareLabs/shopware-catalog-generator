@@ -9,6 +9,7 @@ import type { DataCache } from "../cache.js";
 import type { HydratedBlueprint } from "../types/index.js";
 
 import { hydrateThemeMedia } from "../blueprint/index.js";
+import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, runProcessors } from "../post-processors/index.js";
 import { createProvidersFromEnv } from "../providers/index.js";
 import { DataHydrator, detectShopwareCapabilities } from "../shopware/index.js";
@@ -16,6 +17,41 @@ import { withFictionalBranding } from "../utils/index.js";
 import { createProcessorDeps } from "./shopware-context.js";
 
 export const THEME_MEDIA_KEYS = ["store-logo", "store-favicon", "store-share"] as const;
+
+export const IMAGE_FIX_TYPES = ["product", "category", "cms", "theme"] as const;
+export type ImageFixType = (typeof IMAGE_FIX_TYPES)[number];
+
+export interface ImageFixOptions {
+    type: ImageFixType;
+    /** Product/category name or ID, CMS page name, theme media key (theme: default "all") */
+    target?: string;
+    dryRun: boolean;
+}
+
+/** Regenerate the images of one target, picked by type (one entry point for CLI and MCP) */
+export async function fixImages(
+    salesChannelName: string,
+    options: ImageFixOptions,
+    cache: DataCache = createCacheFromEnv()
+): Promise<string[]> {
+    const blueprint = cache.loadHydratedBlueprint(salesChannelName);
+    if (!blueprint) {
+        return [
+            `Error: No hydrated blueprint found for "${salesChannelName}". ` +
+                `Run: blueprint hydrate --name=${salesChannelName}`,
+        ];
+    }
+    const { type, target, dryRun } = options;
+    if (type === "theme") {
+        return fixThemeImages(salesChannelName, blueprint, cache, target, dryRun);
+    }
+    if (!target) {
+        const what = type === "cms" ? "CMS page name" : `${type} name or ID`;
+        return [`Error: target is required for type "${type}" (${what})`];
+    }
+    const fix = { product: fixProductImages, category: fixCategoryImages, cms: fixCmsImages }[type];
+    return fix(salesChannelName, blueprint, cache, target, dryRun);
+}
 
 export interface ImageFixUploadParams {
     salesChannelName: string;

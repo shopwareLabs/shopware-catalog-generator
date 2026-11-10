@@ -535,38 +535,7 @@ export class ShopwareHydrator extends ShopwareClient {
      * Used by the new generate flow that passes all category assignments
      */
     async hydrateEnvWithProductsDirect(
-        products: Array<{
-            id: string;
-            name: string;
-            description: string;
-            price: number;
-            stock: number;
-            categoryIds?: string[];
-            options?: Array<{ id: string; name: string }>;
-            hasSalesPrice?: boolean;
-            salePercentage?: number;
-            hasTieredPricing?: boolean;
-            isTopseller?: boolean;
-            isNew?: boolean;
-            isShippingFree?: boolean;
-            weight?: number;
-            width?: number;
-            height?: number;
-            length?: number;
-            ean?: string;
-            manufacturerNumber?: string;
-            minPurchase?: number;
-            maxPurchase?: number;
-            purchaseSteps?: number;
-            metaTitle?: string;
-            metaDescription?: string;
-            deliveryTimeIndex?: number;
-            type?: ProductType;
-            packaging?: ProductPackaging;
-            customFields?: ProductCustomFieldValues;
-            ogTitle?: string;
-            ogDescription?: string;
-        }>,
+        products: DirectProductInput[],
         salesChannelId: string,
         navigationCategoryId: string
     ): Promise<number> {
@@ -590,177 +559,16 @@ export class ShopwareHydrator extends ShopwareClient {
             }),
         ]);
 
-        const productPayload = products.map((p) => {
-            // Build category assignments - include navigation root + all assigned categories
-            const categories = [{ id: navigationCategoryId }];
-            if (p.categoryIds) {
-                for (const catId of p.categoryIds) {
-                    if (catId !== navigationCategoryId) {
-                        categories.push({ id: catId });
-                    }
-                }
-            }
-
-            // Build base price entry with optional listPrice for sale items
-            const priceEntry: PricePayload = {
-                currencyId: currencyId,
-                gross: p.price,
-                net: p.price,
-                linked: true,
-            };
-
-            if (p.hasSalesPrice && p.salePercentage) {
-                const originalPrice = Math.round((p.price / (1 - p.salePercentage)) * 100) / 100;
-                priceEntry.listPrice = {
-                    currencyId: currencyId,
-                    gross: originalPrice,
-                    net: originalPrice,
-                    linked: true,
-                };
-                // Lowest price of the last 30 days (EU price indication): between sale and list price
-                const regulationPrice = Math.round(((p.price + originalPrice) / 2) * 100) / 100;
-                priceEntry.regulationPrice = {
-                    currencyId: currencyId,
-                    gross: regulationPrice,
-                    net: regulationPrice,
-                    linked: true,
-                };
-            }
-
-            const product: ProductSyncPayload = {
-                id: p.id,
-                productNumber: `AI-${p.id}`,
-                name: p.name,
-                description: p.description,
-                stock: p.stock,
-                taxId: taxId,
-                price: [priceEntry],
-                visibilities: [
-                    {
-                        id: this.generateVisibilityId(p.id, salesChannelId),
-                        productId: p.id,
-                        salesChannelId: salesChannelId,
-                        visibility: 30,
-                    },
-                ],
-                categories,
-                markAsTopseller: p.isTopseller ?? false,
-                shippingFree: p.isShippingFree ?? false,
-                weight: p.weight,
-                width: p.width,
-                height: p.height,
-                length: p.length,
-                ean: p.ean,
-                manufacturerNumber: p.manufacturerNumber,
-                ...(p.type && { type: p.type }),
-                ...(p.customFields && { customFields: p.customFields }),
-                ...(p.ogTitle && { ogTitle: p.ogTitle }),
-                ...(p.ogDescription && { ogDescription: p.ogDescription }),
-            };
-
-            // Packaging / reference price ("6 pc, 1 pc = $4.99")
-            if (p.packaging) {
-                const unitId = unitIds.get(p.packaging.unitShortCode);
-                if (unitId) {
-                    product.unitId = unitId;
-                }
-                product.purchaseUnit = p.packaging.purchaseUnit;
-                product.referenceUnit = p.packaging.referenceUnit;
-                product.packUnit = p.packaging.packUnit;
-                product.packUnitPlural = p.packaging.packUnitPlural;
-            }
-
-            // "New" badge: always set to current upload time so the badge
-            // never ages out on the storefront, regardless of when the blueprint
-            // was originally generated.
-            if (p.isNew) {
-                product.releaseDate = new Date().toISOString();
-            }
-
-            // Delivery time (deterministic round-robin via index set in Phase 1)
-            if (p.deliveryTimeIndex !== undefined && deliveryTimeIds.length > 0) {
-                product.deliveryTimeId =
-                    deliveryTimeIds[p.deliveryTimeIndex % deliveryTimeIds.length];
-            }
-
-            // Purchase constraints
-            if (p.minPurchase) {
-                product.minPurchase = p.minPurchase;
-                product.purchaseSteps = p.purchaseSteps ?? p.minPurchase;
-            }
-            if (p.maxPurchase) {
-                product.maxPurchase = p.maxPurchase;
-            }
-
-            // SEO metadata
-            if (p.metaTitle) {
-                product.metaTitle = p.metaTitle;
-            }
-            if (p.metaDescription) {
-                product.metaDescription = p.metaDescription;
-            }
-
-            // Property options
-            if (p.options && p.options.length > 0) {
-                product.properties = p.options.map((option) => ({ id: option.id }));
-            }
-
-            // Graduated/tiered pricing via product_price entities.
-            // IDs are derived deterministically from the product UUID so re-syncs
-            // upsert the existing rows instead of appending duplicates.
-            if (p.hasTieredPricing && ruleId) {
-                const round = (v: number): number => Math.round(v * 100) / 100;
-                // Replace last hex digit of product UUID with tier index (0-f).
-                // Guarantees a stable, valid UUID for up to 16 tiers per product.
-                const tierId = (i: number): string => p.id.slice(0, -1) + i.toString(16);
-                const tieredPrices: TieredPricePayload[] = [
-                    {
-                        id: tierId(0),
-                        ruleId,
-                        quantityStart: 1,
-                        quantityEnd: 9,
-                        price: [
-                            {
-                                currencyId,
-                                gross: round(p.price),
-                                net: round(p.price),
-                                linked: true,
-                            },
-                        ],
-                    },
-                    {
-                        id: tierId(1),
-                        ruleId,
-                        quantityStart: 10,
-                        quantityEnd: 49,
-                        price: [
-                            {
-                                currencyId,
-                                gross: round(p.price * 0.9),
-                                net: round(p.price * 0.9),
-                                linked: true,
-                            },
-                        ],
-                    },
-                    {
-                        id: tierId(2),
-                        ruleId,
-                        quantityStart: 50,
-                        price: [
-                            {
-                                currencyId,
-                                gross: round(p.price * 0.8),
-                                net: round(p.price * 0.8),
-                                linked: true,
-                            },
-                        ],
-                    },
-                ];
-                product.prices = tieredPrices;
-            }
-
-            return product;
-        });
+        const upload: ProductUploadContext = {
+            taxId,
+            currencyId,
+            deliveryTimeIds,
+            ruleId,
+            unitIds,
+            salesChannelId,
+            navigationCategoryId,
+        };
+        const productPayload = products.map((p) => buildDirectProductPayload(p, upload));
 
         // Sync products in batches of 50
         const BATCH_SIZE = 50;
@@ -1466,15 +1274,6 @@ export class ShopwareHydrator extends ShopwareClient {
     }
 
     /**
-     * Generate a deterministic visibility ID from product and sales channel IDs.
-     * Uses SHA256 hash for collision resistance.
-     */
-    private generateVisibilityId(productId: string, salesChannelId: string): string {
-        const hash = createHash("sha256").update(`${productId}:${salesChannelId}`).digest("hex");
-        return hash.slice(0, 32);
-    }
-
-    /**
      * Upload images for categories that have them
      */
     private async uploadCategoryImages(categories: CategoryNode[]): Promise<void> {
@@ -1681,4 +1480,184 @@ function collectPackagingUnits(
         });
     }
     return [...byShortCode.values()];
+}
+
+/** Product as passed to `hydrateEnvWithProductsDirect` (built from blueprint products) */
+interface DirectProductInput {
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+    stock: number;
+    categoryIds?: string[];
+    options?: Array<{ id: string; name: string }>;
+    hasSalesPrice?: boolean;
+    salePercentage?: number;
+    hasTieredPricing?: boolean;
+    isTopseller?: boolean;
+    isNew?: boolean;
+    isShippingFree?: boolean;
+    weight?: number;
+    width?: number;
+    height?: number;
+    length?: number;
+    ean?: string;
+    manufacturerNumber?: string;
+    minPurchase?: number;
+    maxPurchase?: number;
+    purchaseSteps?: number;
+    metaTitle?: string;
+    metaDescription?: string;
+    deliveryTimeIndex?: number;
+    type?: ProductType;
+    packaging?: ProductPackaging;
+    customFields?: ProductCustomFieldValues;
+    ogTitle?: string;
+    ogDescription?: string;
+}
+
+/** Shop lookups shared by every product of one upload */
+interface ProductUploadContext {
+    taxId: string;
+    currencyId: string;
+    deliveryTimeIds: string[];
+    ruleId: string | null;
+    unitIds: Map<string, string>;
+    salesChannelId: string;
+    navigationCategoryId: string;
+}
+
+const roundPrice = (value: number): number => Math.round(value * 100) / 100;
+
+function linkedPrice(currencyId: string, gross: number): PricePayload {
+    return { currencyId, gross, net: gross, linked: true };
+}
+
+/**
+ * Deterministic visibility ID from product and SalesChannel IDs (SHA256 for collision resistance).
+ */
+function visibilityId(productId: string, salesChannelId: string): string {
+    return createHash("sha256").update(`${productId}:${salesChannelId}`).digest("hex").slice(0, 32);
+}
+
+/**
+ * Base price. Sale items also get a list price and the lowest price of the last 30 days
+ * (EU price indication), which lies between sale and list price.
+ */
+function productPrice(p: DirectProductInput, currencyId: string): PricePayload {
+    const price = linkedPrice(currencyId, p.price);
+    if (!p.hasSalesPrice || !p.salePercentage) return price;
+
+    const listPrice = roundPrice(p.price / (1 - p.salePercentage));
+    return {
+        ...price,
+        listPrice: linkedPrice(currencyId, listPrice),
+        regulationPrice: linkedPrice(currencyId, roundPrice((p.price + listPrice) / 2)),
+    };
+}
+
+/** Graduated prices: 1-9 full price, 10-49 minus 10%, 50+ minus 20% */
+const PRICE_TIERS: Array<{ quantityStart: number; quantityEnd?: number; factor: number }> = [
+    { quantityStart: 1, quantityEnd: 9, factor: 1 },
+    { quantityStart: 10, quantityEnd: 49, factor: 0.9 },
+    { quantityStart: 50, factor: 0.8 },
+];
+
+/**
+ * Tiered prices via product_price entities. The last hex digit of the product UUID is replaced
+ * by the tier index, so re-syncs upsert the same rows instead of appending duplicates.
+ */
+function tieredPrices(
+    p: DirectProductInput,
+    ruleId: string,
+    currencyId: string
+): TieredPricePayload[] {
+    return PRICE_TIERS.map((tier, index) => ({
+        id: p.id.slice(0, -1) + index.toString(16),
+        ruleId,
+        quantityStart: tier.quantityStart,
+        ...(tier.quantityEnd !== undefined && { quantityEnd: tier.quantityEnd }),
+        price: [linkedPrice(currencyId, roundPrice(p.price * tier.factor))],
+    }));
+}
+
+/** Packaging / reference price ("6 pc, 1 pc = $4.99") */
+function packagingFields(
+    packaging: ProductPackaging,
+    unitIds: Map<string, string>
+): Partial<ProductSyncPayload> {
+    const unitId = unitIds.get(packaging.unitShortCode);
+    return {
+        ...(unitId && { unitId }),
+        purchaseUnit: packaging.purchaseUnit,
+        referenceUnit: packaging.referenceUnit,
+        packUnit: packaging.packUnit,
+        packUnitPlural: packaging.packUnitPlural,
+    };
+}
+
+/** Purchase limits and SEO fields, only when set */
+function purchaseAndSeoFields(p: DirectProductInput): Partial<ProductSyncPayload> {
+    return {
+        ...(p.minPurchase && {
+            minPurchase: p.minPurchase,
+            purchaseSteps: p.purchaseSteps ?? p.minPurchase,
+        }),
+        ...(p.maxPurchase && { maxPurchase: p.maxPurchase }),
+        ...(p.metaTitle && { metaTitle: p.metaTitle }),
+        ...(p.metaDescription && { metaDescription: p.metaDescription }),
+    };
+}
+
+/** Delivery time by round-robin over the index set in Phase 1 (stable across runs) */
+function deliveryTimeId(p: DirectProductInput, deliveryTimeIds: string[]): string | undefined {
+    if (p.deliveryTimeIndex === undefined || deliveryTimeIds.length === 0) return undefined;
+    return deliveryTimeIds[p.deliveryTimeIndex % deliveryTimeIds.length];
+}
+
+function buildDirectProductPayload(
+    p: DirectProductInput,
+    ctx: ProductUploadContext
+): ProductSyncPayload {
+    const delivery = deliveryTimeId(p, ctx.deliveryTimeIds);
+    const product: ProductSyncPayload = {
+        id: p.id,
+        productNumber: `AI-${p.id}`,
+        name: p.name,
+        description: p.description,
+        stock: p.stock,
+        taxId: ctx.taxId,
+        price: [productPrice(p, ctx.currencyId)],
+        visibilities: [
+            {
+                id: visibilityId(p.id, ctx.salesChannelId),
+                productId: p.id,
+                salesChannelId: ctx.salesChannelId,
+                visibility: 30,
+            },
+        ],
+        // Navigation root first, then every assigned category
+        categories: uniqueIds([ctx.navigationCategoryId, ...(p.categoryIds ?? [])]),
+        markAsTopseller: p.isTopseller ?? false,
+        shippingFree: p.isShippingFree ?? false,
+        weight: p.weight,
+        width: p.width,
+        height: p.height,
+        length: p.length,
+        ean: p.ean,
+        manufacturerNumber: p.manufacturerNumber,
+        ...(p.type && { type: p.type }),
+        ...(p.customFields && { customFields: p.customFields }),
+        ...(p.ogTitle && { ogTitle: p.ogTitle }),
+        ...(p.ogDescription && { ogDescription: p.ogDescription }),
+        ...(p.packaging && packagingFields(p.packaging, ctx.unitIds)),
+        // "New" badge: always the upload time, so the badge never ages out on the storefront
+        ...(p.isNew && { releaseDate: new Date().toISOString() }),
+        ...(delivery && { deliveryTimeId: delivery }),
+        ...purchaseAndSeoFields(p),
+        ...(p.options?.length && { properties: p.options.map((option) => ({ id: option.id })) }),
+        ...(p.hasTieredPricing &&
+            ctx.ruleId && { prices: tieredPrices(p, ctx.ruleId, ctx.currencyId) }),
+    };
+    return product;
 }

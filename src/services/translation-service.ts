@@ -86,11 +86,6 @@ export function tryParseLanguageSelection(value: string | undefined): {
     }
 }
 
-/** Language selection from the `TRANSLATION_LANGUAGES` environment variable */
-export function languageSelectionFromEnv(): LanguageSelection | undefined {
-    return parseLanguageSelection(process.env.TRANSLATION_LANGUAGES);
-}
-
 function uniqueNonEnglish(locales: string[]): string[] {
     return [...new Set(locales)].filter((l) => languageOf(l) !== "en");
 }

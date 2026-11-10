@@ -26,3 +26,5 @@ ehthumbs.db
 Thumbs.db
 generated-lanes/
 e2e-results/
+coverage/
+.fallow/

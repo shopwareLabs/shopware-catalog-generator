@@ -145,9 +145,14 @@ describe("MCP CLI end-to-end", () => {
     test(
         "rejects invalid tool arguments before execution",
         async () => {
-            await expect(
-                callTool("blueprint_create", { name: "invalid-smoke", products: "three" })
-            ).rejects.toThrow("parameter validation failed: products");
+            // fastmcp >= 4.25 returns validation failures as a tool error result (MCP spec),
+            // so the client can correct its arguments, instead of a protocol error
+            const result = await callTool("blueprint_create", {
+                name: "invalid-smoke",
+                products: "three",
+            });
+            expect(result.isError).toBe(true);
+            expect(result.content[0]?.text).toContain("parameter validation failed: products");
             expect(
                 await Bun.file(
                     join(directory, "generated/sales-channels/invalid-smoke/blueprint.json")

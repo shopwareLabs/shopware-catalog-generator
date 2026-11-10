@@ -978,9 +978,11 @@ export class DataCache implements DataCacheApi {
 /**
  * Create a DataCache instance from environment variables
  */
-export function createCacheFromEnv(): DataCache {
-    const enabled = process.env.CACHE_ENABLED !== "false";
-    const cacheDir = process.env.CACHE_DIR || "./generated";
+export function createCacheFromEnv(
+    env: Record<string, string | undefined> = process.env
+): DataCache {
+    const enabled = env.CACHE_ENABLED !== "false";
+    const cacheDir = env.CACHE_DIR || "./generated";
 
     return new DataCache({
         enabled,

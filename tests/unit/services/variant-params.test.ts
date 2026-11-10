@@ -4,8 +4,8 @@ import { z } from "zod";
 import {
     variantOverridesFromParams,
     variantSettingParams,
-} from "../../../../src/mcp/tools/variant-params.js";
-import { VARIANT_SETTING_LIMITS } from "../../../../src/types/index.js";
+} from "../../../src/services/variant-params.js";
+import { VARIANT_SETTING_LIMITS } from "../../../src/types/index.js";
 
 const schema = z.object(variantSettingParams);
 

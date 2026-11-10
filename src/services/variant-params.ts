@@ -1,10 +1,10 @@
 /**
- * Variant setting parameters shared by the MCP tools (same ranges as the CLI flags)
+ * Variant setting parameters shared by the MCP tools and the HTTP server (same ranges as the CLI flags)
  */
 
-import type { VariantSettingOverrides } from "../../blueprint/index.js";
+import type { VariantSettingOverrides } from "../blueprint/index.js";
 
-import { VARIANT_SETTING_LIMITS, VariantSettingSchemas } from "../../types/index.js";
+import { VARIANT_SETTING_LIMITS, VariantSettingSchemas } from "../types/index.js";
 
 const { colors, options, maxVariants, share } = VARIANT_SETTING_LIMITS;
 

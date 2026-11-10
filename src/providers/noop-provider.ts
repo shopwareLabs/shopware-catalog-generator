@@ -16,3 +16,8 @@ export class NoOpImageProvider implements ImageProvider {
         return null;
     }
 }
+
+/** False for the disabled image provider (IMAGE_PROVIDER=none) */
+export function imagesEnabled(provider: ImageProvider): boolean {
+    return !(provider instanceof NoOpImageProvider);
+}

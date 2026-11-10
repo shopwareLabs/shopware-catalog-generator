@@ -318,3 +318,69 @@ describe("ManufacturerProcessor with a stale cache", () => {
         expect(saved.find((m) => m.name === "Existing Corp")?.description).toBe("cached text");
     });
 });
+
+describe("ManufacturerProcessor sync errors", () => {
+    const blueprint = createTestBlueprint({
+        products: [
+            createTestProduct({ id: "p1", metadata: { manufacturerName: "Existing Corp" } }),
+            createTestProduct({ id: "p2", metadata: { manufacturerName: "New Corp" } }),
+        ],
+    });
+
+    function setup(existing: Array<{ id: string; name: string }>, failSync = true) {
+        const { context, mockApi, mockCache } = createTestContext({ blueprint, dryRun: false });
+        mockApi.mockPostResponse("search/product-manufacturer", {
+            total: existing.length,
+            data: existing,
+        });
+        mockApi.mockPostResponse("search/product", { data: [] });
+        if (failSync) mockApi.mockPostFailure("_action/sync", new Error("boom"));
+        return { context, mockApi, mockCache };
+    }
+
+    test("a failed create is reported and products are not assigned", async () => {
+        const { context, mockApi, mockCache } = setup([
+            { id: "shop-existing", name: "Existing Corp" },
+        ]);
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.errors).toEqual(["Failed to create manufacturers: boom"]);
+        expect(result.processed).toBe(0);
+        expect(result.skipped).toBe(1);
+        const searches = mockApi.getCallsByEndpoint("search/product");
+        expect(searches.some((c) => c.endpoint.endsWith("search/product"))).toBe(false);
+        expect(mockCache.saveManufacturersMock).toHaveBeenCalled();
+    });
+
+    test("a failed assignment is reported", async () => {
+        const { context } = setup([
+            { id: "shop-existing", name: "Existing Corp" },
+            { id: "shop-new", name: "New Corp" },
+        ]);
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.errors).toEqual(["Failed to assign manufacturers: boom"]);
+        expect(result.processed).toBe(0);
+        expect(result.skipped).toBe(2);
+    });
+
+    test("assigns each product its manufacturer ID", async () => {
+        const { context, mockApi } = setup(
+            [
+                { id: "shop-existing", name: "Existing Corp" },
+                { id: "shop-new", name: "New Corp" },
+            ],
+            false
+        );
+        await ManufacturerProcessor.process(context);
+
+        const update = mockApi
+            .getCallsByEndpoint("_action/sync")
+            .find((c) => (c.body as Record<string, unknown>).updateProductManufacturers);
+        const body = update?.body as Record<string, { payload: unknown[] }>;
+        expect(body.updateProductManufacturers?.payload).toEqual([
+            { id: "p1", manufacturerId: "shop-existing" },
+            { id: "p2", manufacturerId: "shop-new" },
+        ]);
+    });
+});

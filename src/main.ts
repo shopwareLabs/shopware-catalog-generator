@@ -34,6 +34,45 @@ export { CLIError, parseCliArgs };
 // CLI Argument Parsing
 // =============================================================================
 
+type CliFlags = Record<string, string | boolean>;
+
+/** Commands with a subcommand as first positional argument */
+const COMMANDS_WITH_SUBCOMMAND = new Set(["blueprint", "image", "template"]);
+
+/**
+ * Flags after the command: `--key=value`, `--key value`, `--key` (true) and `-k` (true).
+ * The first positional argument becomes `subcommand` for commands that have one.
+ */
+function parseFlags(command: string, args: string[]): CliFlags {
+    const flags: CliFlags = {};
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i] ?? "";
+        if (arg.startsWith("--")) {
+            const [key = "", ...rest] = arg.slice(2).split("=");
+            const next = args[i + 1];
+            const takesNext = rest.length === 0 && next !== undefined && !next.startsWith("-");
+            const value = rest.length > 0 ? rest.join("=") : takesNext ? next : true;
+            if (takesNext) i++;
+            if (key) flags[key] = value;
+            continue;
+        }
+        if (arg.startsWith("-")) {
+            if (arg.length > 1) flags[arg.slice(1)] = true;
+            continue;
+        }
+        if (arg && COMMANDS_WITH_SUBCOMMAND.has(command) && !flags.subcommand) {
+            flags.subcommand = arg;
+        }
+    }
+    return flags;
+}
+
+/** String value of a flag; a flag given without value is undefined */
+const stringFlag = (flags: CliFlags, key: string): string | undefined => {
+    const value = flags[key];
+    return typeof value === "string" ? value : undefined;
+};
+
 function parseCliArgs(): CliArgs {
     const args = process.argv.slice(2);
 
@@ -42,57 +81,29 @@ function parseCliArgs(): CliArgs {
     }
 
     const command = args[0] as CliArgs["command"];
-
-    const flags: Record<string, string | boolean> = {};
-    for (let i = 1; i < args.length; i++) {
-        const arg = args[i];
-        if (!arg) continue;
-
-        if (arg.startsWith("--")) {
-            const parts = arg.slice(2).split("=");
-            const key = parts[0] || "";
-            let value: string | true = parts.length > 1 ? parts.slice(1).join("=") || "" : true;
-            if (value === true) {
-                const next = args[i + 1];
-                if (next && !next.startsWith("-")) {
-                    value = next;
-                    i++;
-                }
-            }
-            if (key) {
-                flags[key] = value;
-            }
-        } else if (arg.startsWith("-")) {
-            const key = arg.slice(1);
-            if (key) {
-                flags[key] = true;
-            }
-        } else if (
-            (command === "blueprint" || command === "image" || command === "template") &&
-            !flags.subcommand
-        ) {
-            flags.subcommand = arg;
-        }
-    }
+    const flags = parseFlags(command, args.slice(1));
+    const products = flags.products;
+    const only = stringFlag(flags, "only");
 
     return {
         command,
-        subcommand: flags.subcommand as CliArgs["subcommand"],
-        name: flags.name as string | undefined,
-        description: flags.description as string | undefined,
-        url: flags.url as string | undefined,
-        products: flags.products ? parseInt(flags.products as string, 10) : undefined,
-        target: flags.target as string | undefined,
+        subcommand: stringFlag(flags, "subcommand") as CliArgs["subcommand"],
+        name: stringFlag(flags, "name"),
+        description: stringFlag(flags, "description"),
+        url: stringFlag(flags, "url"),
+        // A bare --products stays NaN, so validation rejects it instead of using the default
+        products: products ? parseInt(String(products), 10) : undefined,
+        target: stringFlag(flags, "target"),
         interactive: flags.i === true || flags.interactive === true,
-        only: flags.only ? (flags.only as string).split(",") : undefined,
+        only: only ? only.split(",") : undefined,
         dryRun: flags["dry-run"] === true,
         noTemplate: flags["no-template"] === true,
         rehydrate: flags.rehydrate === true,
-        type: flags.type as string | undefined,
-        languages: typeof flags.languages === "string" ? flags.languages : undefined,
-        formality: typeof flags.formality === "string" ? flags.formality : undefined,
+        type: stringFlag(flags, "type"),
+        languages: stringFlag(flags, "languages"),
+        formality: stringFlag(flags, "formality"),
         force: flags.force === true,
-        e2e: typeof flags.e2e === "string" ? flags.e2e : undefined,
+        e2e: stringFlag(flags, "e2e"),
         variants: variantOverridesFromFlags(flags),
     };
 }
@@ -212,7 +223,7 @@ async function main(): Promise<void> {
 
             case "template":
                 if (args.subcommand === "metadata") {
-                    templateMetadataCommand(args);
+                    await templateMetadataCommand(args);
                 } else {
                     showHelp();
                     throw new CLIError(
