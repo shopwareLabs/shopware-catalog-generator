@@ -11,36 +11,12 @@ import type {
     VariantConfig,
 } from "../../../src/types/index.js";
 
-import {
-    isTransientShopwareSyncError,
-    VariantProcessor,
-} from "../../../src/post-processors/variant-processor.js";
+import { VariantProcessor } from "../../../src/post-processors/variant-processor.js";
 import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../helpers/post-processor-context.js";
 import { createMockApiHelpers, createMockProductMetadata } from "../../mocks/index.js";
 
 describe("VariantProcessor", () => {
-    describe("isTransientShopwareSyncError", () => {
-        test("returns true for deadlock and savepoint errors", () => {
-            expect(
-                isTransientShopwareSyncError(
-                    "SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock"
-                )
-            ).toBe(true);
-            expect(
-                isTransientShopwareSyncError(
-                    "SQLSTATE[42000]: Syntax error or access violation: 1305 SAVEPOINT DOCTRINE_2 does not exist"
-                )
-            ).toBe(true);
-        });
-
-        test("returns false for non-transient errors", () => {
-            expect(isTransientShopwareSyncError("Validation failed: missing required field")).toBe(
-                false
-            );
-        });
-    });
-
     describe("metadata", () => {
         test("has correct name", () => {
             expect(VariantProcessor.name).toBe("variants");

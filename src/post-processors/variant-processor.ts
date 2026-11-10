@@ -25,11 +25,10 @@ import {
     createShortHash,
     generateUUID,
     logger,
-    sleep,
     toKebabCase,
     uniqueById,
 } from "../utils/index.js";
-import { errorMessage } from "./processor-utils.js";
+import { errorMessage, syncWithRetry } from "./processor-utils.js";
 
 interface PropertyOption {
     id: string;
@@ -70,16 +69,6 @@ interface ExistingVariantData {
     configuratorSettings?: Array<{ id: string }>;
 }
 
-export function isTransientShopwareSyncError(errorText: string): boolean {
-    const normalized = errorText.toLowerCase();
-    return (
-        normalized.includes("deadlock found when trying to get lock") ||
-        normalized.includes("sqlstate[40001]") ||
-        normalized.includes("savepoint doctrine_") ||
-        normalized.includes("lock wait timeout exceeded")
-    );
-}
-
 /**
  * Variant Processor implementation
  */
@@ -96,8 +85,6 @@ class VariantProcessorImpl implements PostProcessor {
     private ensuredGroups: Set<string> = new Set();
     // Property cache for group definitions
     private propertyCache: PropertyCache | null = null;
-    private readonly syncRetryAttempts = 3;
-    private readonly syncRetryBaseDelayMs = 500;
 
     async process(context: PostProcessorContext): Promise<PostProcessorResult> {
         const { blueprint } = context;
@@ -291,7 +278,7 @@ class VariantProcessorImpl implements PostProcessor {
         );
 
         const allOptions = [...(existingGroup?.options || []), ...newOptions];
-        const response = await this.syncWithRetry(context, "property group sync", {
+        const response = await syncWithRetry(context, "property group sync", {
             createPropertyGroup: {
                 entity: "property_group",
                 action: "upsert",
@@ -440,7 +427,7 @@ class VariantProcessorImpl implements PostProcessor {
         }
 
         // Update parent with all configurator settings
-        const updateParentResponse = await this.syncWithRetry(
+        const updateParentResponse = await syncWithRetry(
             context,
             "update parent configurator settings",
             {
@@ -515,7 +502,7 @@ class VariantProcessorImpl implements PostProcessor {
             };
         });
 
-        const createVariantsResponse = await this.syncWithRetry(context, "create variants", {
+        const createVariantsResponse = await syncWithRetry(context, "create variants", {
             createVariants: {
                 entity: "product",
                 action: "upsert",
@@ -540,7 +527,7 @@ class VariantProcessorImpl implements PostProcessor {
             visibility: 30,
         }));
 
-        const visibilityResponse = await this.syncWithRetry(context, "variant visibility", {
+        const visibilityResponse = await syncWithRetry(context, "variant visibility", {
             addVisibility: {
                 entity: "product_visibility",
                 action: "upsert",
@@ -555,50 +542,6 @@ class VariantProcessorImpl implements PostProcessor {
         }
 
         return variantPayload.length;
-    }
-
-    private async syncWithRetry(
-        context: PostProcessorContext,
-        operationName: string,
-        payload: unknown
-    ): Promise<{ ok: boolean; status: number; errorText?: string }> {
-        let delayMs = this.syncRetryBaseDelayMs;
-        let lastStatus = 500;
-        let lastErrorText = "Unknown error";
-
-        for (let attempt = 1; attempt <= this.syncRetryAttempts; attempt++) {
-            try {
-                const response = await apiPost(context, "_action/sync", payload);
-                if (response.ok) {
-                    return { ok: true, status: response.status };
-                }
-
-                lastStatus = response.status;
-                lastErrorText = await response.text();
-            } catch (error) {
-                lastStatus = 500;
-                lastErrorText = errorMessage(error);
-            }
-
-            const transient = isTransientShopwareSyncError(lastErrorText);
-            const isLastAttempt = attempt === this.syncRetryAttempts;
-            if (!transient || isLastAttempt) {
-                return {
-                    ok: false,
-                    status: lastStatus,
-                    errorText: lastErrorText,
-                };
-            }
-
-            logger.warn(
-                `Transient Shopware sync error during ${operationName} (attempt ${attempt}/${this.syncRetryAttempts}). Retrying in ${delayMs}ms...`,
-                { cli: true }
-            );
-            await sleep(delayMs);
-            delayMs *= 2;
-        }
-
-        return { ok: false, status: lastStatus, errorText: lastErrorText };
     }
 
     /**

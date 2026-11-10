@@ -27,7 +27,7 @@ import {
 } from "../utils/index.js";
 import { CategoryImageProcessor } from "./category-image-processor.js";
 import { uploadImageWithRetry } from "./image-utils.js";
-import { errorMessage } from "./processor-utils.js";
+import { errorMessage, syncWithRetry } from "./processor-utils.js";
 
 /** Product with metadata and the number of its views that have a cached image */
 interface ProductWithCachedImages {
@@ -601,17 +601,18 @@ async function createProductMediaEntities(
         ...(mediaFolderId && { mediaFolderId }),
         ...buildProductMediaTexts(product.name, img.view),
     }));
-    const mediaResponse = await apiPost(context, "_action/sync", {
+    const mediaResponse = await syncWithRetry(context, "create media", {
         createMedia: { entity: "media", action: "upsert", payload: mediaPayload },
     });
     if (mediaResponse.ok) return;
 
-    const errorText = await mediaResponse.text();
     logger.apiError("_action/sync (create media)", mediaResponse.status, {
         productId: product.id,
-        error: errorText,
+        error: mediaResponse.errorText,
     });
-    throw new Error(`Failed to create media entities: ${mediaResponse.status}`);
+    throw new Error(
+        mediaResponse.errorText ?? `Failed to create media entities: ${mediaResponse.status}`
+    );
 }
 
 /**
@@ -638,7 +639,7 @@ async function linkProductMedia(
         }),
     };
 
-    const syncResponse = await apiPost(context, "_action/sync", {
+    const syncResponse = await syncWithRetry(context, "link product media", {
         createProductMedia: {
             entity: "product_media",
             action: "upsert",
@@ -648,13 +649,14 @@ async function linkProductMedia(
     });
     if (syncResponse.ok) return;
 
-    const errorText = await syncResponse.text();
     logger.apiError("_action/sync (product_media)", syncResponse.status, {
         productId: product.id,
         productName: product.name,
-        error: errorText,
+        error: syncResponse.errorText,
     });
-    throw new Error(`Failed to link media to product: ${syncResponse.status}`);
+    throw new Error(
+        syncResponse.errorText ?? `Failed to link media to product: ${syncResponse.status}`
+    );
 }
 
 /** Upload one image file (with retry for transient failures); never throws */
