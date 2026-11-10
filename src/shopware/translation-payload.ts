@@ -29,7 +29,7 @@ import {
     productMediaTexts,
     variantMediaTexts,
 } from "../fixtures/index.js";
-import { buildBlueprintCategoryPathMap, chunkArray } from "../utils/index.js";
+import { buildBlueprintCategoryPathMap, chunkArray, deriveProductSeoMeta } from "../utils/index.js";
 
 type Fields = Record<string, unknown>;
 type TranslationsByLanguage = Record<string, Fields>;
@@ -147,8 +147,10 @@ function productFields(
     const texts = content.kind === "source" ? english : content.file.products[product.id];
     if (!texts) return null;
 
-    const metaTitle = texts.metaTitle;
-    const metaDescription = texts.metaDescription;
+    // Translations derive their meta texts like English does. Translation files from older
+    // runs contain AI-translated meta descriptions that can exceed Shopware's 255 characters.
+    const { metaTitle, metaDescription } =
+        content.kind === "source" ? texts : deriveProductSeoMeta(texts.name, texts.description);
     return {
         name: texts.name,
         description: texts.description,

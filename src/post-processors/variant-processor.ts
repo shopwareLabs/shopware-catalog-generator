@@ -27,6 +27,7 @@ import {
     logger,
     sleep,
     toKebabCase,
+    uniqueById,
 } from "../utils/index.js";
 
 interface PropertyOption {
@@ -536,9 +537,11 @@ class VariantProcessorImpl implements PostProcessor {
                 continue;
             }
 
-            // Filter to selected options only
+            // Filter to selected options only. One option per ID: a group can list the
+            // same option twice, and Shopware rejects duplicate configurator settings.
+            const groupOptions = uniqueById(propertyGroup.options);
             const selectedOptionNames = new Set(config.selectedOptions.map((o) => o.toLowerCase()));
-            const selectedOptions = propertyGroup.options.filter((o) =>
+            const selectedOptions = groupOptions.filter((o) =>
                 selectedOptionNames.has(o.name.toLowerCase())
             );
 
@@ -546,7 +549,7 @@ class VariantProcessorImpl implements PostProcessor {
             const finalOptions =
                 selectedOptions.length >= 2
                     ? selectedOptions
-                    : propertyGroup.options.slice(0, Math.min(3, propertyGroup.options.length));
+                    : groupOptions.slice(0, Math.min(3, groupOptions.length));
 
             if (finalOptions.length >= 2) {
                 if (selectedOptions.length < 2) {
@@ -614,15 +617,9 @@ class VariantProcessorImpl implements PostProcessor {
         );
 
         if (!updateParentResponse.ok) {
+            // Existing variants are skipped before (productHasVariants), so a duplicate
+            // entry here is a real error, not "already exists"
             const errorText = updateParentResponse.errorText ?? "Unknown error";
-
-            if (errorText.includes("Duplicate entry") || errorText.includes("1062")) {
-                logger.info(`      ⊘ ${product.name}: Configurator settings already exist`, {
-                    cli: true,
-                });
-                return 0;
-            }
-
             logger.apiError("_action/sync (configuratorSettings)", updateParentResponse.status, {
                 productId: product.id,
                 error: errorText,

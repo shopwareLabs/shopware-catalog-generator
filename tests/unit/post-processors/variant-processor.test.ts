@@ -588,6 +588,75 @@ describe("VariantProcessor", () => {
             expect(result.errors).toHaveLength(0);
         });
 
+        test("sends each option once when the group lists it twice", async () => {
+            const colorConfig: VariantConfig = {
+                group: "Color",
+                selectedOptions: ["Multicolor Floral", "Navy"],
+                priceModifiers: {},
+            };
+            const propertyGroups: BlueprintPropertyGroup[] = [
+                {
+                    id: "pg-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [
+                        { id: "opt-floral", name: "Multicolor floral" },
+                        { id: "opt-floral", name: "Multicolor floral" },
+                        { id: "opt-navy", name: "Navy" },
+                    ],
+                },
+            ];
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p1",
+                        name: "Midi Dress",
+                        metadata: createMockProductMetadata({
+                            isVariant: true,
+                            variantConfigs: [colorConfig],
+                        }),
+                    }),
+                ],
+                propertyGroups,
+            });
+            const metadataMap = new Map<string, Partial<ProductMetadata>>([
+                ["p1", { isVariant: true, variantConfigs: [colorConfig] }],
+            ]);
+
+            const mockApi = createMockApiHelpers();
+            mockApi.mockPostResponse("search/property-group", { data: [] });
+            mockApi.mockPostResponse("search/product", {
+                data: [{ id: "p1", children: [], configuratorSettings: [] }],
+            });
+            mockApi.mockPostResponse("search/currency", { data: [{ id: "currency-eur" }] });
+            mockApi.setDefaultPostResponse({ success: true });
+            mockApi.mockSyncSuccess();
+
+            const { context } = createTestContext({
+                blueprint,
+                metadataMap,
+                dryRun: false,
+                mockApi,
+            });
+            const result = await VariantProcessor.process(context);
+
+            const parentCall = mockApi
+                .getCallsByEndpoint("_action/sync")
+                .find((call) => (call.body as Record<string, unknown>)?.updateParent !== undefined);
+            const body = parentCall?.body as {
+                updateParent: {
+                    payload: Array<{ configuratorSettings: Array<{ optionId: string }> }>;
+                };
+            };
+            const optionIds = body.updateParent.payload[0]?.configuratorSettings.map(
+                (c) => c.optionId
+            );
+
+            expect(optionIds).toEqual(["opt-floral", "opt-navy"]);
+            expect(result.processed).toBe(1);
+            expect(result.errors).toHaveLength(0);
+        });
+
         test("finds property group via partial match", async () => {
             const sizeConfig: VariantConfig = {
                 group: "Size Type",

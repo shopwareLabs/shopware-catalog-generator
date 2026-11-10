@@ -54,6 +54,42 @@ function createMockBlueprint(
 
 describe("PropertyCollector", () => {
     describe("collectFromBlueprint", () => {
+        test("merges values that differ only in casing", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Color", value: "Multicolor Floral" }] },
+                { id: "2", properties: [{ group: "color", value: "multicolor floral" }] },
+            ]);
+
+            const groups = collector.collectFromBlueprint(blueprint);
+
+            expect(groups).toHaveLength(1);
+            expect(groups[0]?.name).toBe("Color");
+            expect(groups[0]?.options.map((o) => o.name)).toEqual(["Multicolor Floral"]);
+        });
+
+        test("does not duplicate an existing option with different casing", () => {
+            const collector = new PropertyCollector();
+            const blueprint = createMockBlueprint([
+                { id: "1", properties: [{ group: "Color", value: "Multicolor Floral" }] },
+            ]);
+            const existingProperties = [
+                {
+                    id: "group-color",
+                    name: "Color",
+                    displayType: "color",
+                    options: [{ id: "opt-floral", name: "Multicolor floral" }],
+                },
+            ];
+
+            const groups = collector.collectFromBlueprint(blueprint, existingProperties);
+
+            // One option, with the Shopware ID and casing
+            expect(groups[0]?.options).toHaveLength(1);
+            expect(groups[0]?.options[0]?.id).toBe("opt-floral");
+            expect(groups[0]?.options[0]?.name).toBe("Multicolor floral");
+        });
+
         test("collects unique property groups", () => {
             const collector = new PropertyCollector();
             const blueprint = createMockBlueprint([
