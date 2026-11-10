@@ -41,6 +41,17 @@ import {
 // =============================================================================
 
 /**
+ * Product fields sent to the AI. The meta title and description stay in the source (they
+ * are uploaded for English and part of the source hash) but are not translated: the
+ * upload derives them from the translated name and description (`deriveProductSeoMeta`).
+ */
+export function translatableProductFields(
+    product: TranslationSource["products"][string] | undefined
+): Record<string, string> {
+    return product ? { name: product.name, description: product.description } : {};
+}
+
+/**
  * Collect the English content that gets translated.
  *
  * Keys survive the Shopware ID remapping done during sync: category paths, product IDs,
@@ -623,8 +634,11 @@ export async function translateCatalog(
     const productResult = await translateItems(
         ctx,
         limiter,
-        { mode: "copy", label: "product names, descriptions and SEO texts", context: storeContext },
-        productSplit.stale.map((id) => ({ key: id, fields: { ...source.products[id] } })),
+        { mode: "copy", label: "product names and descriptions", context: storeContext },
+        productSplit.stale.map((id) => ({
+            key: id,
+            fields: translatableProductFields(source.products[id]),
+        })),
         TRANSLATION_BATCH_SIZES.products
     );
     const products: TranslationFile["products"] = { ...productSplit.reused };
@@ -632,8 +646,6 @@ export async function translateCatalog(
         products[id] = {
             name: fields.name ?? source.products[id]?.name ?? "",
             description: fields.description ?? "",
-            ...(fields.metaTitle && { metaTitle: fields.metaTitle }),
-            ...(fields.metaDescription && { metaDescription: fields.metaDescription }),
             sourceHash: productHashes.get(id) ?? "",
         };
     }

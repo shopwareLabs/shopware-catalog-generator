@@ -203,6 +203,22 @@ describe("translateCatalog", () => {
         expect(file.fixtures["manufacturer.description"]).toBe("DE {name} makes products.");
     });
 
+    test("does not send product meta texts to the AI (upload derives them)", async () => {
+        const provider = createTranslatingProvider();
+        const p1 = { name: "Linen Sofa", description: "A sofa", metaDescription: "Cut off..." };
+        const { file } = await translate(provider, {
+            source: { ...SOURCE, products: { ...SOURCE.products, p1 } },
+        });
+
+        const productItem = provider
+            .getCalls()
+            .filter((call) => call.schemaName === "TranslatedItems")
+            .flatMap((call) => requestedItems(call.messages))
+            .find((item) => item.key === "p1");
+        expect(Object.keys(productItem?.fields ?? {})).toEqual(["name", "description"]);
+        expect(file.products.p1).not.toHaveProperty("metaDescription");
+    });
+
     test("reuses unchanged entries from the previous file without AI calls", async () => {
         const first = await translate(createTranslatingProvider());
         const provider = createTranslatingProvider();

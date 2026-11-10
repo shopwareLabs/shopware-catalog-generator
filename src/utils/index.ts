@@ -84,6 +84,7 @@ export {
     capitalizeString,
     createShortHash,
     decodeHtmlEntities,
+    deriveProductSeoMeta,
     generateCategoryPlaceholder,
     generateNumericHash,
     generateProductPlaceholder,

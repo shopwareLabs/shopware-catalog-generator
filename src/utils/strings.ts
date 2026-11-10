@@ -35,7 +35,7 @@ export function decodeHtmlEntities(str: string): string {
         .replace(/&lt;/g, "<")
         .replace(/&gt;/g, ">")
         .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
+        .replace(/&#0*39;/g, "'")
         .replace(/&#x27;/g, "'");
 }
 
@@ -53,6 +53,30 @@ export function normalizeDescription(description: string): string {
     // Collapse whitespace after entity decoding
     clean = clean.replace(/\s+/g, " ").trim();
     return clean;
+}
+
+const META_TITLE_MAX_LENGTH = 70;
+const META_DESCRIPTION_MAX_LENGTH = 160;
+
+/**
+ * SEO meta title and description of a product, derived from its name and HTML description.
+ *
+ * Used for English and for every translation, so all languages stay within the same
+ * limits (Shopware stores both in 255-character fields). Translating the cut-off English
+ * meta description instead lets the AI "finish" it, which can exceed 255 characters.
+ */
+export function deriveProductSeoMeta(
+    name: string,
+    description: string
+): { metaTitle: string; metaDescription: string } {
+    const plain = normalizeDescription(description);
+    return {
+        metaTitle: name.slice(0, META_TITLE_MAX_LENGTH),
+        metaDescription:
+            plain.length > META_DESCRIPTION_MAX_LENGTH
+                ? `${plain.slice(0, META_DESCRIPTION_MAX_LENGTH - 3)}...`
+                : plain,
+    };
 }
 
 /**

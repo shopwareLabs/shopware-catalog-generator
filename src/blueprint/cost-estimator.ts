@@ -28,7 +28,11 @@ import type {
 
 import { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "../fixtures/index.js";
 import { countCategories } from "../utils/index.js";
-import { collectTerms, TRANSLATION_BATCH_SIZES } from "./hydrators/translation.js";
+import {
+    collectTerms,
+    TRANSLATION_BATCH_SIZES,
+    translatableProductFields,
+} from "./hydrators/translation.js";
 
 /** Products per AI batch (mirrors ProductHydrator MAX_BATCH_SIZE) */
 const PRODUCT_BATCH_SIZE = 10;
@@ -171,7 +175,7 @@ function translationWorkload(source: TranslationSource): { calls: number; payloa
     const payloadTokens =
         tokensOf(terms) +
         tokensOf(categoryDescriptions) +
-        tokensOf(source.products) +
+        tokensOf(Object.values(source.products).map(translatableProductFields)) +
         tokensOf(source.reviews) +
         tokensOf(source.cms) +
         tokensOf(source.fixtures);
@@ -186,8 +190,6 @@ function translationWorkload(source: TranslationSource): { calls: number; payloa
 const TYPICAL_TEXT_LENGTH = {
     productName: 40,
     productDescription: 800,
-    metaTitle: 40,
-    metaDescription: 160,
     categoryName: 18,
     categoryDescription: 120,
     /** Property group and option names collected per product (variants, filters) */
@@ -222,8 +224,6 @@ export function estimateTranslationSource(
                 {
                     name: filler(TYPICAL_TEXT_LENGTH.productName, p.id),
                     description: filler(TYPICAL_TEXT_LENGTH.productDescription, p.id),
-                    metaTitle: filler(TYPICAL_TEXT_LENGTH.metaTitle, p.id),
-                    metaDescription: filler(TYPICAL_TEXT_LENGTH.metaDescription, p.id),
                 },
             ])
         ),
