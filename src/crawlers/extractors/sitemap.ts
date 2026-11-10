@@ -72,6 +72,14 @@ interface SitemapScope {
     pathPrefix: string | null;
     /** Locale code from the base URL path (e.g. "de-de"), used to rank sub-sitemaps. */
     localeCode: string;
+    /** Skip product sub-sitemaps of an index (category fallback discovery). */
+    skipProductSitemaps: boolean;
+}
+
+export interface SitemapDiscoveryOptions {
+    /** Only read non-product sub-sitemaps, to find category pages when product pages
+     * carry no category breadcrumbs. */
+    skipProductSitemaps?: boolean;
 }
 
 function isValidUrl(url: string): boolean {
@@ -99,10 +107,18 @@ function collectLocs(locs: string[], scope: SitemapScope, out: string[]): void {
     }
 }
 
+const PRODUCT_SCORE = 0;
+
+/** Category patterns are checked first: WooCommerce names its category sitemap
+ * `product_cat-sitemap.xml`, which would otherwise count as a product sitemap. */
 function contentScore(url: string): number {
-    if (/\bprod\b|product|produkt|artikel/i.test(url)) return 0;
-    if (/categor|kategorie|collection/i.test(url)) return 10;
+    if (/categor|kategorie|collection|product_cat/i.test(url)) return 10;
+    if (/\bprod\b|product|produkt|artikel/i.test(url)) return PRODUCT_SCORE;
     return 20;
+}
+
+function isProductSitemap(url: string): boolean {
+    return contentScore(url) === PRODUCT_SCORE;
 }
 
 /** Lower is better: product/category content first, locale match gets a bonus. */
@@ -147,7 +163,9 @@ async function processSitemapIndex(
     out: string[],
     depth: number
 ): Promise<void> {
-    const subUrls = extractLocsFromXml(xml).filter(isValidUrl);
+    const subUrls = extractLocsFromXml(xml)
+        .filter(isValidUrl)
+        .filter((url) => !scope.skipProductSitemaps || !isProductSitemap(url));
     let validCount = 0;
     let attempts = 0;
     for (const subUrl of sortSubSitemaps(subUrls, scope.localeCode)) {
@@ -180,13 +198,18 @@ function basePathOf(baseUrl: string): string {
 
 /** If baseUrl has a non-trivial path (e.g. /de/de/), restrict to that prefix so
  * multi-locale sitemaps (IKEA, Zara, etc.) don't bleed in other locales. */
-function buildSitemapScope(baseUrl: string, origin: string): SitemapScope {
+function buildSitemapScope(
+    baseUrl: string,
+    origin: string,
+    options: SitemapDiscoveryOptions
+): SitemapScope {
     const basePath = basePathOf(baseUrl);
     const pathSegments = new URL(baseUrl).pathname.split("/").filter(Boolean);
     return {
         origin,
         pathPrefix: basePath.length > 1 ? `${origin}${basePath}` : null,
         localeCode: pathSegments.join("-").toLowerCase(),
+        skipProductSitemaps: options.skipProductSitemaps ?? false,
     };
 }
 
@@ -236,11 +259,14 @@ function originOf(url: string): string | null {
 
 /** Fetch and parse sitemap.xml, returning up to MAX_SITEMAP_URLS discovered URLs.
  * No URL classification — the page classifier handles that at fetch time. */
-export async function discoverFromSitemap(baseUrl: string): Promise<string[]> {
+export async function discoverFromSitemap(
+    baseUrl: string,
+    options: SitemapDiscoveryOptions = {}
+): Promise<string[]> {
     const origin = originOf(baseUrl);
     if (!origin) return [];
 
-    const scope = buildSitemapScope(baseUrl, origin);
+    const scope = buildSitemapScope(baseUrl, origin, options);
     const candidates = await collectSitemapCandidates(baseUrl, origin);
 
     const urls = await firstSitemapWithUrls(candidates, scope);
@@ -284,11 +310,23 @@ function roundRobin(groups: string[][], n: number): string[] {
     return result;
 }
 
+export interface SampleOptions {
+    /** Put branches with a single URL into one shared group. Use it when many one-off
+     * pages (blog posts at the root) would otherwise crowd out a large branch. */
+    mergeSingleUrlBranches?: boolean;
+}
+
+function mergeSingleUrlBranches(groups: string[][]): string[][] {
+    const singles = groups.filter((group) => group.length === 1).flat();
+    const multi = groups.filter((group) => group.length > 1);
+    return singles.length > 0 ? [...multi, singles] : multi;
+}
+
 /** Sample up to n URLs, picking one from each path branch for diversity.
  * Uses 2-segment branching when all URLs share the same first segment (e.g.
  * books.toscrape where everything is under /catalogue/ but category vs product
  * pages differ at the second segment). */
-export function sampleUrls(urls: string[], n: number): string[] {
+export function sampleUrls(urls: string[], n: number, options: SampleOptions = {}): string[] {
     if (urls.length <= n) return urls;
 
     // If one first-segment bucket holds the vast majority (>80%) of URLs,
@@ -298,5 +336,5 @@ export function sampleUrls(urls: string[], n: number): string[] {
     const maxBucketSize = Math.max(...byFirstSegment.map((group) => group.length));
     const groups = maxBucketSize / urls.length > 0.8 ? groupByBranch(urls, 2) : byFirstSegment;
 
-    return roundRobin(groups, n);
+    return roundRobin(options.mergeSingleUrlBranches ? mergeSingleUrlBranches(groups) : groups, n);
 }

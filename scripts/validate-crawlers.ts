@@ -77,7 +77,7 @@ const STORES: StoreSpec[] = [
         minCategories: 3,
         minProducts: 0,
         requireColors: true,
-        note: "categories from /de/sitemap-*.xml; products via Phase 4 link-follow (best-effort, JS-heavy); sitemap can be flaky",
+        note: "product pages lack category breadcrumbs; categories (collections) via category fallback; sitemap can be flaky",
     },
     {
         name: "Koro Drogerie",
@@ -113,7 +113,7 @@ const STORES: StoreSpec[] = [
         minCategories: 10,
         minProducts: 10,
         requireColors: true,
-        note: "JSON-LD Product + BreadcrumbList; standard WooCommerce schema output",
+        note: "no Product JSON-LD (og:type=article); WooCommerce body class + category fallback",
     },
     {
         name: "mey.com",

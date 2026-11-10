@@ -33,6 +33,19 @@ const CMS_TYPES = new Set([
     "profilepage",
 ]);
 
+/** Body classes that e-commerce platforms set on every page of one type. They identify
+ * the page even when structured data is missing (WooCommerce without Product JSON-LD
+ * emits og:type=article on product pages). */
+const PLATFORM_BODY_CLASSES: ReadonlyArray<[className: string, type: PageType]> = [
+    ["single-product", "product"], // WooCommerce product page
+    ["tax-product_cat", "category"], // WooCommerce product category archive
+];
+
+function classifyFromBodyClass($: CheerioAPI): PageType | null {
+    const classes = new Set(($("body").attr("class") ?? "").split(/\s+/));
+    return PLATFORM_BODY_CLASSES.find(([className]) => classes.has(className))?.[1] ?? null;
+}
+
 const PRICE_RE = /\d{1,4}[.,]\d{2}\s*[€£$]|[€£$]\s*\d{1,4}[.,]\d{2}/g;
 const CART_RE =
     /in\s*den\s*warenkorb|add\s*to\s*cart|add\s*to\s*basket|add\s*to\s*bag|jetzt\s*kaufen|buy\s*now/gi;
@@ -166,6 +179,10 @@ export function classifyPage(html: string, $: CheerioAPI): PageType {
     // Tier 1: JSON-LD Schema.org definitive product/category signal
     const jsonLd = classifyFromJsonLd($);
     if (jsonLd.strong) return jsonLd.strong;
+
+    // Tier 1: platform page-type body class, checked before og:type article
+    const fromBodyClass = classifyFromBodyClass($);
+    if (fromBodyClass) return fromBodyClass;
 
     // Tier 1: og:type article is a definitive CMS signal
     // Strip legacy "og:" prefix (some shops emit content="og:product" instead of "product")

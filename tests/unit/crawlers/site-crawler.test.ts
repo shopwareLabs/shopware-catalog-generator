@@ -670,3 +670,79 @@ describe("crawlForInspiration — characterization", () => {
         }
     });
 });
+
+describe("crawlForInspiration — product pages without category breadcrumbs", () => {
+    const productPage = (name: string): string => `<!DOCTYPE html><html><head>
+        <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[
+            {"name":"Home"},{"name":"${name}"}]}</script>
+        <script type="application/ld+json">{"@type":"Product","name":"${name}","sku":"1"}</script>
+        </head><body></body></html>`;
+    const categoryPage = (name: string): string => `<!DOCTYPE html><html><head>
+        <script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[
+            {"name":"Home"},{"name":"${name}"}]}</script>
+        </head><body class="archive tax-product_cat"><h1>${name}</h1></body></html>`;
+    const urlset = (paths: string[]): string =>
+        `<urlset>${paths.map((p) => `<url><loc>https://shop.test/${p}</loc></url>`).join("")}</urlset>`;
+
+    // Five product sub-sitemaps fill the discovery limit (5 valid sub-sitemaps), so the
+    // main pass never reads the category sitemap; only the fallback does.
+    const products = ["Raw Almonds", "Chia Seeds", "Oat Flakes", "Dried Figs", "Rye Flour"];
+    const categories = ["Nuts", "Seeds", "Grains"];
+    const productSitemaps = products.map((_, i) => `https://shop.test/product-sitemap${i}.xml`);
+    const routes: Record<string, string> = {
+        "https://shop.test": "<html><head></head><body></body></html>",
+        "https://shop.test/sitemap.xml": `<sitemapindex>${[
+            ...productSitemaps,
+            "https://shop.test/category-sitemap.xml",
+        ]
+            .map((loc) => `<sitemap><loc>${loc}</loc></sitemap>`)
+            .join("")}</sitemapindex>`,
+        ...Object.fromEntries(productSitemaps.map((loc, i) => [loc, urlset([`p/${i}`])])),
+        "https://shop.test/category-sitemap.xml": urlset(categories.map((_, i) => `c/${i}`)),
+        ...Object.fromEntries(
+            products.map((name, i) => [`https://shop.test/p/${i}`, productPage(name)])
+        ),
+        ...Object.fromEntries(
+            categories.map((name, i) => [`https://shop.test/c/${i}`, categoryPage(name)])
+        ),
+    };
+
+    test("drops the breadcrumb entry that repeats the product name", async () => {
+        const origFetch = globalThis.fetch;
+        mockFetch(async (input) => {
+            const body = routes[input.toString()];
+            return {
+                ok: !!body,
+                headers: { get: () => "text/html" },
+                text: async () => body ?? "",
+            };
+        });
+        try {
+            const result = await crawlForInspiration("https://shop.test");
+            products.forEach((name) => expect(result.categories).not.toContain(name));
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+
+    test("reads category pages from non-product sub-sitemaps when categories are missing", async () => {
+        const origFetch = globalThis.fetch;
+        mockFetch(async (input) => {
+            const body = routes[input.toString()];
+            return {
+                ok: !!body,
+                headers: { get: () => "text/html" },
+                text: async () => body ?? "",
+            };
+        });
+        try {
+            const result = await crawlForInspiration("https://shop.test");
+            expect(result.categories).toEqual(expect.arrayContaining(categories));
+            expect(result.exampleProducts.map((p) => p.name)).toEqual(
+                expect.arrayContaining(products)
+            );
+        } finally {
+            globalThis.fetch = origFetch;
+        }
+    });
+});
