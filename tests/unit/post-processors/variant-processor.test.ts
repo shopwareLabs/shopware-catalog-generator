@@ -1540,6 +1540,39 @@ describe("VariantProcessor", () => {
                 expect(mockApi.getCallsByEndpoint("search/property-group")).toHaveLength(2);
             });
 
+            test("adds missing options to an existing group that has more options than the cache", async () => {
+                writeCachedGroup("cache-store-f", cachedGroup("Volume", ["1 L", "3 L", "5 L"]));
+                const { context, mockApi } = setupVariantRun({
+                    productId: "ens-larger",
+                    configs: [
+                        {
+                            group: "Volume",
+                            selectedOptions: ["1 L", "3 L", "5 L"],
+                            priceModifiers: {},
+                        },
+                    ],
+                    salesChannelName: "cache-store-f",
+                });
+                // Plain product properties, only "5 L" is a variant option
+                const shopOptions = ["20 L", "10 L", "2 Litre Pot", "120 cm", "5 l"].map(
+                    (name, i) => ({ id: `opt-shop-${i}`, name })
+                );
+                answerGroupSearch(mockApi, () => ({
+                    data: [{ id: "pg-volume", name: "Volume", options: shopOptions }],
+                }));
+
+                await VariantProcessor.process(context);
+
+                const groupSync = syncBodies(mockApi).find((b) =>
+                    b.includes("createPropertyGroup")
+                );
+                expect(groupSync).toContain('"id":"pg-volume"');
+                expect(groupSync).toContain('"name":"1 L"');
+                expect(groupSync).toContain('"name":"3 L"');
+                // "5 l" already exists (case-insensitive), so no duplicate "5 L"
+                expect(groupSync).not.toContain('"name":"5 L"');
+            });
+
             test("does not sync when every cached option name already exists", async () => {
                 writeCachedGroup(
                     "cache-store-d",

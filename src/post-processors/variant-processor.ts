@@ -263,11 +263,9 @@ class VariantProcessorImpl implements PostProcessor {
             return null;
         }
 
+        // Compare option names, not counts: a shop group can have more options
+        // (plain product properties) and still lack the variant options
         const existingGroup = await this.getPropertyGroup(context, groupName);
-        if (existingGroup && existingGroup.options.length >= cachedGroup.options.length) {
-            return existingGroup;
-        }
-
         const newOptions = missingCachedOptions(cachedGroup, existingGroup);
         if (existingGroup && newOptions.length === 0) {
             return existingGroup;
@@ -700,9 +698,11 @@ function missingCachedOptions(
     cachedGroup: CachedPropertyGroup,
     existingGroup: PropertyGroup | null
 ): PropertyOption[] {
-    const existingOptionNames = new Set(existingGroup?.options.map((o) => o.name) || []);
+    const existingOptionNames = new Set(
+        existingGroup?.options.map((o) => o.name.toLowerCase()) || []
+    );
     return cachedGroup.options
-        .filter((name) => !existingOptionNames.has(name))
+        .filter((name) => !existingOptionNames.has(name.toLowerCase()))
         .map((name) => ({ id: generateUUID(), name }));
 }
 
