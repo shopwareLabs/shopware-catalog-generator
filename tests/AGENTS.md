@@ -65,6 +65,7 @@ tests/
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
 │   ├── fetch-mock.ts         # mockFetch (stubs globalThis.fetch)
+│   ├── image-factory.ts      # createUncompressedImage: large lossless image (compression tests)
 │   ├── post-processor-context.ts  # createTestContext — PostProcessorContext with mock API + cache
 │   ├── recording-services.ts # recordingServices: command services that record calls (parity tests)
 │   └── translation-factory.ts # Languages + createTranslationFile for translation upload tests

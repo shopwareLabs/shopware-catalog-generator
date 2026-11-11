@@ -17,6 +17,7 @@ import {
 import { DataCache } from "../../../../src/cache.js";
 import { DEFAULT_VARIANT_SETTINGS } from "../../../../src/types/index.js";
 import { createTestBlueprint, createTestProduct } from "../../../helpers/blueprint-factory.js";
+import { createUncompressedImage } from "../../../helpers/image-factory.js";
 import { EditingImageProvider, MockImageProvider } from "../../../mocks/image-provider.mock.js";
 
 const SC = "test-store";
@@ -195,6 +196,23 @@ describe("hydrateVariantImages", () => {
             sourceHash: hashImage(SOURCE),
             imageModel: "mock",
         });
+    });
+
+    test("caches colour images as compressed WebP", async () => {
+        const edited = await createUncompressedImage();
+        const cache = createTestCache();
+        const provider = new EditingImageProvider();
+        provider.setEditResult(edited.toString("base64"));
+        const blueprint = createTestBlueprint({
+            products: [colourProduct("p1", [NAVY, BURGUNDY], ["front"])],
+        });
+        saveParent(cache, "p1", "front");
+
+        await hydrateVariantImages(provider, cache, SC, blueprint, "all");
+
+        const cached = cache.images.loadImageWithView(SC, "p1", "front--burgundy", "product_media");
+        expect(cached).not.toBeNull();
+        expect(Buffer.from(cached ?? "", "base64").length).toBeLessThan(edited.length);
     });
 
     test("is idempotent and regenerates only stale images after the parent changed", async () => {

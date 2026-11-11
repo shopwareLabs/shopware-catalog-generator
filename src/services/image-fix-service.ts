@@ -13,7 +13,7 @@ import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, runProcessors } from "../post-processors/index.js";
 import { createProvidersFromEnv } from "../providers/index.js";
 import { DataHydrator, detectShopwareCapabilities } from "../shopware/index.js";
-import { withFictionalBranding } from "../utils/index.js";
+import { compressImage, withFictionalBranding } from "../utils/index.js";
 import { createProcessorDeps } from "./shopware-context.js";
 
 export const THEME_MEDIA_KEYS = ["store-logo", "store-favicon", "store-share"] as const;
@@ -110,7 +110,7 @@ export async function fixProductImages(
             salesChannelName,
             product.id,
             desc.view,
-            imageData,
+            await compressImage(imageData),
             prompt,
             undefined,
             "product_media"
@@ -175,7 +175,7 @@ export async function fixCategoryImages(
         salesChannelName,
         category.id,
         "banner",
-        imageData,
+        await compressImage(imageData),
         prompt,
         undefined,
         "category_media"

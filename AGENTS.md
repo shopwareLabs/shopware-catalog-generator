@@ -174,6 +174,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
+│   ├── image-compress.ts     # compressImage (WebP q80 before caching, single lossy pass)
 │   ├── image-format.ts       # detectImageFormat (magic bytes → extension + mime type)
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
@@ -272,6 +273,7 @@ tests/
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
 │   ├── fetch-mock.ts         # mockFetch (stubs globalThis.fetch)
+│   ├── image-factory.ts      # createUncompressedImage (large lossless test image)
 │   ├── post-processor-context.ts # createTestContext — builds PostProcessorContext with mocks
 │   ├── recording-services.ts # recordingServices (parity tests)
 │   └── translation-factory.ts # Test languages + createTranslationFile
@@ -775,6 +777,8 @@ The image hydrator in `src/blueprint/hydrators/image.ts` centralizes ALL image g
 sizes like 1024x1024 or 1536x1024. When specific dimensions are needed (e.g. 474x70 for a logo),
 the `trimAndResize()` function trims whitespace borders and resizes to the exact target dimensions.
 This is applied to all theme media (logo, favicon, share icon) during hydration.
+All other generated images (product, category, CMS, colour variants) are re-encoded as WebP
+quality 80 by `compressImage()` before they are cached (~5% of the provider's size, same look).
 
 | Theme Image     | Target Size | Purpose                      |
 | --------------- | ----------- | ---------------------------- |

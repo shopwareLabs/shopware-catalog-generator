@@ -20,6 +20,7 @@ import type {
 } from "../../types/index.js";
 
 import {
+    compressImage,
     buildImagePrompt,
     ConcurrencyLimiter,
     executeWithRetry,
@@ -183,7 +184,7 @@ export async function hydrateCmsImages(
                 salesChannelName,
                 spec.key,
                 spec.key,
-                base64,
+                await compressImage(base64),
                 spec.prompt,
                 undefined,
                 "cms_media"
@@ -273,7 +274,7 @@ export async function hydrateProductImages(
                     salesChannelName,
                     task.id,
                     task.view,
-                    base64,
+                    await compressImage(base64),
                     task.prompt,
                     imageProvider.name,
                     mediaType

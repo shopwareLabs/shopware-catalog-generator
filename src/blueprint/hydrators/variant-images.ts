@@ -22,6 +22,7 @@ import type {
 } from "../../types/index.js";
 
 import {
+    compressImage,
     ConcurrencyLimiter,
     createShortHash,
     executeWithRetry,
@@ -303,7 +304,7 @@ async function recolorOne(
 
     const prompt = buildRecolorPrompt(task.color);
     try {
-        const base64 = await executeWithRetry(
+        const edited = await executeWithRetry(
             async () => {
                 const data = await editImage(prompt, source);
                 if (!data) throw new Error("Image edit returned null");
@@ -311,6 +312,7 @@ async function recolorOne(
             },
             { maxRetries: 3, baseDelay: 5000 }
         );
+        const base64 = await compressImage(edited);
         cache.images.saveVariantColorImage(salesChannelName, task.productId, task.view, base64, {
             prompt,
             imageModel: providerName,
