@@ -6,18 +6,21 @@
  * The routes live in src/server/routes.ts.
  */
 
+import { resolveServerConfig } from "./server/config.js";
 import { processManager } from "./server/index.js";
 import { createRequestHandler } from "./server/routes.js";
 import { runGenerate } from "./services/generate-service.js";
 
-const port = Number(process.env.SERVER_PORT) || 3000;
+const config = resolveServerConfig(process.env);
 
 const server = Bun.serve({
-    port,
-    fetch: createRequestHandler({ runGenerate, processManager }),
+    port: config.port,
+    hostname: config.hostname,
+    fetch: createRequestHandler({ runGenerate, processManager, token: config.token }),
 });
 
-console.log(`Server started on port ${server.port}`);
+console.log(`Server started on http://${config.hostname}:${server.port}`);
+if (config.token) console.log(`Requests need: Authorization: Bearer <SERVER_TOKEN>`);
 console.log(`Endpoints:`);
 console.log(`  POST /generate     - Start generation (returns processId)`);
 console.log(`  GET  /status/:id   - Get process status and logs`);

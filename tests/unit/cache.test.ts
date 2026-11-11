@@ -439,6 +439,26 @@ describe("DataCache", () => {
             expect(restored).toBe(false);
             expect(cache.listTrash()).toContain(item);
         });
+
+        test("restoreFromTrash never moves paths outside the trash folder", () => {
+            cache.saveSalesChannelMetadata(TEST_SALES_CHANNEL, "Description");
+            cache.clearSalesChannel(TEST_SALES_CHANNEL);
+            const victim = path.join(TEST_CACHE_DIR, "victim");
+            fs.mkdirSync(victim, { recursive: true });
+            fs.writeFileSync(path.join(victim, "keep.txt"), "keep");
+            const trashItem = cache.listTrash()[0] as string;
+
+            const restored = cache.restoreFromTrash(
+                `${trashItem}/../../generated/victim`,
+                path.join(TEST_CACHE_DIR, "sales-channels", "stolen")
+            );
+
+            expect(restored).toBe(false);
+            expect(fs.existsSync(path.join(victim, "keep.txt"))).toBe(true);
+            expect(fs.existsSync(path.join(TEST_CACHE_DIR, "sales-channels", "stolen"))).toBe(
+                false
+            );
+        });
     });
 
     describe("disabled cache", () => {

@@ -1213,6 +1213,8 @@ CACHE_ENABLED=true
 
 # Server
 SERVER_PORT=3000
+SERVER_HOST=127.0.0.1  # Other hosts require SERVER_TOKEN
+SERVER_TOKEN=xxx       # Optional: requests need "Authorization: Bearer <token>"
 ```
 
 ## CLI Usage

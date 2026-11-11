@@ -59,6 +59,14 @@ function serializeErrors(_key: string, value: unknown): unknown {
     };
 }
 
+/** Query parameters that carry credentials, e.g. Pollinations `&key=sk_...` in image URLs */
+const SECRET_QUERY_PARAM = /([?&](?:key|api_key|apikey|token|access_token)=)[^&\s"'\\]+/gi;
+
+/** Replace credentials in URLs with [REDACTED] before a line reaches the log file */
+export function redactSecrets(text: string): string {
+    return text.replace(SECRET_QUERY_PARAM, "$1[REDACTED]");
+}
+
 class Logger {
     private logDir: string;
     private logFile: string;
@@ -152,7 +160,7 @@ class Logger {
             line += `\n${dataStr}`;
         }
 
-        fs.appendFileSync(this.logFile, line + "\n");
+        fs.appendFileSync(this.logFile, redactSecrets(line) + "\n");
     }
 
     /**
