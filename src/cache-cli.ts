@@ -81,8 +81,14 @@ export async function runCacheCli(
                 { confirm: rest.includes("--confirm") },
                 options
             );
+        case undefined:
+        case "--help":
+        case "-h":
+            console.log(USAGE);
+            return;
         default:
             console.log(USAGE);
+            throw new CLIError(`Unknown command: ${command}`, "CACHE_ERROR");
     }
 }
 

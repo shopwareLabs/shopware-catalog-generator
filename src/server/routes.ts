@@ -8,6 +8,7 @@
 import type { RunGenerate } from "../services/generate-service.js";
 import type { ProcessManager } from "./process-manager.js";
 
+import { isAuthorized } from "./config.js";
 import { handleGenerate } from "./generate-route.js";
 
 export interface ServerDeps {
@@ -15,6 +16,8 @@ export interface ServerDeps {
     processManager: Pick<ProcessManager, "start" | "get" | "getLogs" | "getStats">;
     /** Seconds since the server process started (default: process.uptime) */
     uptime?: () => number;
+    /** Bearer token required on every request (SERVER_TOKEN); undefined = no auth */
+    token?: string;
 }
 
 const STATUS_PREFIX = "/status/";
@@ -78,6 +81,9 @@ export function routeRequest(request: Request, deps: ServerDeps): Response | Pro
     const { pathname } = new URL(request.url);
     const method = request.method;
 
+    if (!isAuthorized(request, deps.token)) {
+        return errorResponse("Unauthorized", 401);
+    }
     if (method === "POST" && pathname === "/generate") {
         return handleGenerate(request, deps);
     }

@@ -41,6 +41,7 @@ The server module provides:
 | `process-manager.ts` | ProcessManager class and types                                     |
 | `routes.ts`          | `routeRequest`, `createRequestHandler`, status and health handlers |
 | `generate-route.ts`  | POST /generate: `parseGenerateBody`, `runGenerateTask` (thin)      |
+| `config.ts`          | `resolveServerConfig` (host, port, token), `isAuthorized`          |
 
 ## Usage
 
@@ -144,6 +145,19 @@ interface ProcessContext {
 | -------------- | ------ | -------------------------------- |
 | `MAX_LOGS`     | 1000   | Max log entries per process      |
 | `RETENTION_MS` | 30 min | Time to keep completed processes |
+
+### Host and authentication
+
+The server spends the operator's AI keys, so it listens on `127.0.0.1` by default.
+
+| Variable       | Default     | Description                                                     |
+| -------------- | ----------- | --------------------------------------------------------------- |
+| `SERVER_PORT`  | `3000`      | Port                                                            |
+| `SERVER_HOST`  | `127.0.0.1` | Interface; anything but loopback requires `SERVER_TOKEN`        |
+| `SERVER_TOKEN` | (none)      | Every request must send `Authorization: Bearer <token>`, or 401 |
+
+`resolveServerConfig` throws at startup when `SERVER_HOST` is not a loopback address and no
+token is set. The token check uses a constant-time comparison.
 
 ## API Endpoints
 

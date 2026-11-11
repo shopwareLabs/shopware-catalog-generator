@@ -113,6 +113,21 @@ export class ShopwareClient {
     }
 
     /**
+     * Make one Admin API request to check the credentials. The admin client logs in lazily,
+     * so isAuthenticated() is also true for a wrong password.
+     */
+    async verifyLogin(): Promise<boolean> {
+        if (!this.client) return false;
+        try {
+            await this.client.invoke("infoShopwareVersion get /_info/version", {});
+            return true;
+        } catch (error) {
+            logger.warn("Shopware login check failed", { data: error });
+            return false;
+        }
+    }
+
+    /**
      * Get a fresh access token from the session.
      * The official client handles token refresh automatically.
      */

@@ -380,6 +380,11 @@ Run as an HTTP service with background processing:
 bun run server
 ```
 
+The server listens on `127.0.0.1:3000` by default. To reach it from other machines, set
+`SERVER_HOST` (e.g. `0.0.0.0`) **and** `SERVER_TOKEN`; every request then needs
+`Authorization: Bearer <token>`. The server refuses to start on a public host without a token,
+because each request spends your AI credits.
+
 | Method | Endpoint      | Description                             |
 | ------ | ------------- | --------------------------------------- |
 | POST   | `/generate`   | Start generation (returns process ID)   |

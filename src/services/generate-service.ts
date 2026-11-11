@@ -162,6 +162,8 @@ export async function runGenerate(
     if (!connection) {
         return out.end(`Error: SW_ENV_URL environment variable is required`);
     }
+    const loginError = await checkShopwareLogin(connection, options);
+    if (loginError) return out.end(loginError);
 
     progress("blueprint", 0, 2);
     const blueprintError = await prepareBlueprints(
@@ -201,6 +203,24 @@ export async function runGenerate(
         out,
         progress
     );
+}
+
+/**
+ * Check the credentials with one API request before any AI work, so a wrong password fails
+ * fast instead of after a paid hydration. The upload connects again later.
+ */
+async function checkShopwareLogin(
+    connection: ShopwareConnection,
+    options: GenerateOptions
+): Promise<string | null> {
+    if (options.dryRun) return null;
+    const failed = `Error: Authentication with Shopware failed (${connection.url})`;
+    try {
+        const dataHydrator = await connectShopware(connection);
+        return (await dataHydrator.verifyLogin()) ? null : failed;
+    } catch {
+        return failed;
+    }
 }
 
 /**

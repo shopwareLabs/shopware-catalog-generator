@@ -73,3 +73,28 @@ describe("cache-cli restore flags", () => {
         expect(result.stdout).toContain("restored");
     });
 });
+
+describe("cache-cli unknown commands", () => {
+    test("an unknown command prints the usage and exits 1", () => {
+        const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "cache-cli-test-"));
+        try {
+            const result = runCacheCli(["lsit"], cacheDir);
+            expect(result.exitCode).toBe(1);
+            expect(result.stderr).toContain("Unknown command: lsit");
+            expect(result.stdout).toContain("cache:list");
+        } finally {
+            fs.rmSync(cacheDir, { recursive: true, force: true });
+        }
+    });
+
+    test("no command prints the usage and exits 0", () => {
+        const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "cache-cli-test-"));
+        try {
+            const result = runCacheCli([], cacheDir);
+            expect(result.exitCode).toBe(0);
+            expect(result.stdout).toContain("cache:list");
+        } finally {
+            fs.rmSync(cacheDir, { recursive: true, force: true });
+        }
+    });
+});

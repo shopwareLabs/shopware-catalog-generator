@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
-import { logger } from "../../../src/utils/logger.js";
+import { logger, redactSecrets } from "../../../src/utils/logger.js";
 
 describe("Logger", () => {
     const testLogDir = path.join(process.cwd(), "tests", "logs");
@@ -78,6 +78,28 @@ describe("Logger", () => {
 
             expect(content).toContain("WARN");
             expect(content).toContain("warn test message");
+        });
+    });
+
+    describe("secret redaction", () => {
+        test("redactSecrets hides credential query parameters", () => {
+            expect(redactSecrets("https://x.test/img/a?width=1&key=sk_SECRET&model=flux")).toBe(
+                "https://x.test/img/a?width=1&key=[REDACTED]&model=flux"
+            );
+            expect(redactSecrets("?token=abc and ?monkey=1")).toBe(
+                "?token=[REDACTED] and ?monkey=1"
+            );
+        });
+
+        test("a failed fetch logged as data does not write the key to the file", async () => {
+            const error = await fetch("http://127.0.0.1:1/img?x=1&key=sk_SECRET").catch(
+                (e: unknown) => e
+            );
+            logger.warn("image generation failed:", { data: error });
+
+            const content = fs.readFileSync(logger.getLogFile(), "utf-8");
+            expect(content).not.toContain("sk_SECRET");
+            expect(content).toContain("key=[REDACTED]");
         });
     });
 

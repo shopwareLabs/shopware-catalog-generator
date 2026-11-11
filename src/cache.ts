@@ -220,6 +220,11 @@ export class DataCache implements DataCacheApi {
      * Restore a specific item from trash
      */
     restoreFromTrash(trashItemName: string, targetPath: string): boolean {
+        // Only direct entries of the trash folder: "x/../../victim" must never leave it
+        if (!this.listTrash().includes(trashItemName)) {
+            logger.info(`Trash item not found: ${trashItemName}`);
+            return false;
+        }
         const trashPath = path.join(this.trashDir, trashItemName);
         if (!fs.existsSync(trashPath)) {
             logger.info(`Trash item not found: ${trashItemName}`);

@@ -64,6 +64,33 @@ async function finishedProcess(
 }
 
 describe("routeRequest", () => {
+    test("returns 401 without the bearer token when SERVER_TOKEN is set", async () => {
+        let started = false;
+        const runGenerate: RunGenerate = async () => {
+            started = true;
+            return { lines: [] };
+        };
+        const guarded = { ...deps(new ProcessManager(), runGenerate), token: "s3cret" };
+
+        const response = await routeRequest(
+            request("/generate", "POST", { salesChannel: "music", ...CONNECTION }),
+            guarded
+        );
+
+        expect(response.status).toBe(401);
+        expect(started).toBe(false);
+    });
+
+    test("accepts requests with the bearer token", async () => {
+        const guarded = { ...deps(new ProcessManager()), token: "s3cret" };
+        const response = await routeRequest(
+            new Request("http://localhost/health", { headers: { authorization: "Bearer s3cret" } }),
+            guarded
+        );
+
+        expect(response.status).toBe(200);
+    });
+
     test("GET /health returns process counts and uptime", async () => {
         const manager = new ProcessManager();
         await finishedProcess(manager, async () => "done");
