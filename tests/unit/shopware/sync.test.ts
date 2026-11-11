@@ -7,6 +7,7 @@ import { describe, expect, mock, test } from "bun:test";
 import type { DataHydrator } from "../../../src/shopware/index.js";
 import type {
     BlueprintPropertyGroup,
+    CategoryNode,
     HydratedBlueprint,
     PropertyGroup,
     SalesChannelFull,
@@ -21,7 +22,11 @@ import {
 } from "../../../src/shopware/sync.js";
 import { ShopwareCapabilities } from "../../../src/shopware/version.js";
 import { logger } from "../../../src/utils/index.js";
-import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
+import {
+    createTestBlueprint,
+    createTestCategory,
+    createTestProduct,
+} from "../../helpers/blueprint-factory.js";
 
 const SHOPWARE_67 = ShopwareCapabilities.fromVersion("6.7.16.0");
 
@@ -332,6 +337,29 @@ describe("syncCategories", () => {
         expect(dataHydrator.createCategoryTree).toHaveBeenCalled();
         expect(result.size).toBeGreaterThan(0);
 
+        logger.setMcpMode(false);
+    });
+
+    test("hides categories without products from the navigation", async () => {
+        logger.setMcpMode(true);
+        const dataHydrator = createMockDataHydrator();
+        const blueprint: HydratedBlueprint = {
+            ...createTestBlueprint(),
+            categories: [
+                createTestCategory({ id: "cat-full", name: "Full" }),
+                createTestCategory({ id: "cat-empty", name: "Empty" }),
+            ],
+            products: [createTestProduct({ categoryIds: ["cat-full"] })],
+        };
+
+        await syncCategories(dataHydrator, blueprint, createMockSalesChannel(), true);
+
+        const tree = (dataHydrator.createCategoryTree as ReturnType<typeof mock>).mock
+            .calls[0]?.[0] as CategoryNode[];
+        expect(tree.map((c) => [c.name, c.visible])).toEqual([
+            ["Full", true],
+            ["Empty", false],
+        ]);
         logger.setMcpMode(false);
     });
 

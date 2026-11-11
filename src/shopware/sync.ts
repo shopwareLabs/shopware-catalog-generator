@@ -11,6 +11,7 @@ import path from "node:path";
 import type {
     BlueprintPropertyGroup,
     BlueprintPropertyOption,
+    CategoryNode,
     HydratedBlueprint,
     ProductCustomFieldValues,
     ProductPackaging,
@@ -29,6 +30,7 @@ import {
     buildCategoryPath,
     convertBlueprintCategories,
     findCategoryPathById,
+    hideEmptyCategories,
     logger,
 } from "../utils/index.js";
 
@@ -72,7 +74,7 @@ export async function syncCategories(
     // New SalesChannel: create all categories
     if (isNew) {
         const categoryIdMap = await dataHydrator.createCategoryTree(
-            categoryNodes,
+            categoryTreeForUpload(blueprint),
             salesChannel.navigationCategoryId,
             salesChannel.id
         );
@@ -127,12 +129,35 @@ export async function syncCategories(
 
     // Create/update categories (upsert)
     const categoryIdMap = await dataHydrator.createCategoryTree(
-        convertBlueprintCategories(blueprint.categories),
+        categoryTreeForUpload(blueprint),
         salesChannel.navigationCategoryId,
         salesChannel.id
     );
     logger.info(`  Synced ${categoryIdMap.size} categories`, { cli: true });
     return categoryIdMap;
+}
+
+/** Category nodes for the upload, empty categories hidden from the navigation */
+function categoryTreeForUpload(blueprint: HydratedBlueprint): CategoryNode[] {
+    const productCategoryIds = new Set(blueprint.products.flatMap((p) => p.categoryIds));
+    const nodes = hideEmptyCategories(
+        convertBlueprintCategories(blueprint.categories),
+        productCategoryIds
+    );
+    const hidden = countHidden(nodes);
+    if (hidden > 0) {
+        logger.info(`  ${hidden} categories without products are hidden from the navigation`, {
+            cli: true,
+        });
+    }
+    return nodes;
+}
+
+function countHidden(nodes: CategoryNode[]): number {
+    return nodes.reduce(
+        (sum, n) => sum + (n.visible === false ? 1 : 0) + countHidden(n.children),
+        0
+    );
 }
 
 // =============================================================================

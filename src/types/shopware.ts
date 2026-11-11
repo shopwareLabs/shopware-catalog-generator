@@ -322,6 +322,8 @@ export interface CategoryNode {
     productCount: number;
     /** Whether this category should have an image */
     hasImage: boolean;
+    /** Shown in the navigation (default: true). Empty categories are hidden */
+    visible?: boolean;
     /** Image data (populated after generation) */
     image?: ProductImage;
 }

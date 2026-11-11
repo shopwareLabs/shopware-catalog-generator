@@ -313,6 +313,23 @@ export function convertBlueprintCategories(categories: BlueprintCategory[]): Cat
 }
 
 /**
+ * Hide categories that have no products, neither themselves nor below them, from the
+ * navigation. A page without products looks broken in a demo shop.
+ */
+export function hideEmptyCategories(
+    nodes: CategoryNode[],
+    productCategoryIds: Set<string>
+): CategoryNode[] {
+    return nodes.map((node) => {
+        const children = hideEmptyCategories(node.children, productCategoryIds);
+        const hasProducts =
+            (node.id !== undefined && productCategoryIds.has(node.id)) ||
+            children.some((c) => c.visible !== false);
+        return { ...node, children, visible: hasProducts };
+    });
+}
+
+/**
  * Find category path by ID in a blueprint category tree.
  * Returns the full path string for a given category ID.
  *

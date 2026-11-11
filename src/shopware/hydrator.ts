@@ -1149,7 +1149,7 @@ export class ShopwareHydrator extends ShopwareClient {
                 displayNestedProducts: true,
                 type: "page",
                 productAssignmentType: "product",
-                visible: true,
+                visible: item.category.visible ?? true,
                 active: true,
             };
         });
