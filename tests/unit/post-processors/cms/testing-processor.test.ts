@@ -2,9 +2,13 @@ import { describe, expect, spyOn, test } from "bun:test";
 
 import type { PostProcessorContext } from "../../../../src/post-processors/index.js";
 
-import { TestingProcessor } from "../../../../src/post-processors/cms/testing-processor.js";
+import {
+    findProductIdByVariantFlag,
+    TestingProcessor,
+} from "../../../../src/post-processors/cms/testing-processor.js";
 import { ShopwareCapabilities } from "../../../../src/shopware/version.js";
 import { logger } from "../../../../src/utils/index.js";
+import { createTestBlueprint, createTestProduct } from "../../../helpers/blueprint-factory.js";
 import { createTestContext } from "../../../helpers/post-processor-context.js";
 import { createMockApiHelpers } from "../../../mocks/index.js";
 
@@ -698,5 +702,63 @@ describe("TestingProcessor (characterization)", () => {
 
             expect(result.errors).toEqual(["Cleanup failed: nope"]);
         });
+    });
+});
+
+describe("findProductIdByVariantFlag", () => {
+    const products = [
+        createTestProduct({ id: "variant-1", metadata: { isVariant: true } }),
+        createTestProduct({ id: "variant-2", metadata: { isVariant: true } }),
+        createTestProduct({ id: "simple-1", metadata: { isVariant: false } }),
+    ];
+
+    test("simple product skips the products that get variants", () => {
+        // Before the variant processor ran, Shopware reports childCount 0 for these too
+        expect(findProductIdByVariantFlag(products, false)).toBe("simple-1");
+    });
+
+    test("variant product is the first product that gets variants", () => {
+        expect(findProductIdByVariantFlag(products, true)).toBe("variant-1");
+    });
+
+    test("returns null when no product matches", () => {
+        expect(findProductIdByVariantFlag(products.slice(0, 2), false)).toBeNull();
+    });
+});
+
+describe("TestingProcessor product links", () => {
+    function productLinkPayloads(calls: Array<{ body?: unknown }>): Array<Record<string, unknown>> {
+        return calls
+            .flatMap((call) =>
+                Object.values((call.body ?? {}) as Record<string, { payload?: unknown }>).flatMap(
+                    (op) => (Array.isArray(op.payload) ? op.payload : [])
+                )
+            )
+            .filter((row: Record<string, unknown>) => row.linkType === "product");
+    }
+
+    test("re-run points an existing Simple Product link at a product without variants", async () => {
+        const mockApi = createMockApiHelpers();
+        mockApi.mockPostResponse("search/sales-channel", {
+            data: [{ id: "sc-123", navigationCategoryId: "root-cat-id" }],
+        });
+        // Every category already exists, including the link categories from an older run
+        mockApi.mockPostResponse("search/category", { data: [{ id: "existing-cat" }] });
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "variant-parent", metadata: { isVariant: true } }),
+                createTestProduct({ id: "simple-product", metadata: { isVariant: false } }),
+            ],
+        });
+
+        const { context } = createTestContext({ mockApi, blueprint });
+        await TestingProcessor.process(context);
+
+        const links = productLinkPayloads(mockApi.getCallsByEndpoint("_action/sync"));
+        const simple = links.find((row) => row.name === "Simple Product");
+        expect(simple).toMatchObject({ id: "existing-cat", internalLink: "simple-product" });
+        expect(links.find((row) => row.name === "Variant Product")?.internalLink).toBe(
+            "variant-parent"
+        );
     });
 });

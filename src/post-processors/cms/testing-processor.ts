@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { CmsPageFixture, ShopwareFeature } from "../../fixtures/index.js";
-import type { CategorySyncPayload } from "../../types/index.js";
+import type { BlueprintProduct, CategorySyncPayload } from "../../types/index.js";
 import type {
     PostProcessor,
     PostProcessorCleanupResult,
@@ -70,6 +70,18 @@ function errorMessage(error: unknown): string {
 /**
  * Testing Processor - Orchestrator for CMS demo pages and product demos
  */
+/**
+ * First blueprint product whose isVariant flag matches. The blueprint decides which products
+ * get variants, so this works before the variant processor ran and does not depend on
+ * Shopware's childCount, which is 0 until the children exist and are indexed.
+ */
+export function findProductIdByVariantFlag(
+    products: BlueprintProduct[],
+    isVariant: boolean
+): string | null {
+    return products.find((p) => p.metadata.isVariant === isVariant)?.id ?? null;
+}
+
 class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     readonly name = "cms-testing";
     readonly description = "Create Testing category hierarchy with CMS and Products sub-sections";
@@ -591,22 +603,19 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
                 continue;
             }
 
-            let subCategoryId = await findCategoryIdByName(context, cat.name, productsCategoryId);
-            if (!subCategoryId) {
-                subCategoryId = await this.createProductLinkCategory(
-                    context,
-                    cat.name,
-                    productsCategoryId,
-                    productId
-                );
-                if (subCategoryId) {
-                    logger.info(`    ✓ Created "${cat.name}" product link`, { cli: true });
-                } else {
-                    errors.push(`Failed to create "${cat.name}" product link`);
-                }
-            } else {
-                logger.info(`    ⊘ "${cat.name}" product link already exists`, { cli: true });
+            // Existing links are upserted too, so a re-run repairs a link to the wrong product
+            const existingId = await findCategoryIdByName(context, cat.name, productsCategoryId);
+            const saved = await this.upsertProductLinkCategory(
+                context,
+                { id: existingId ?? generateUUID(), name: cat.name, parentId: productsCategoryId },
+                productId
+            );
+            if (!saved) {
+                errors.push(`Failed to save "${cat.name}" product link`);
+                continue;
             }
+            const action = existingId ? "Updated" : "Created";
+            logger.info(`    ✓ ${action} "${cat.name}" product link`, { cli: true });
         }
     }
 
@@ -710,16 +719,14 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
     }
 
     /**
-     * Create a category that links to a product
+     * Create or update a category that links to a product
      */
-    private async createProductLinkCategory(
+    private async upsertProductLinkCategory(
         context: PostProcessorContext,
-        name: string,
-        parentId: string,
+        category: { id: string; name: string; parentId: string },
         productId: string
-    ): Promise<string | null> {
-        const categoryId = generateUUID();
-
+    ): Promise<boolean> {
+        const { id: categoryId, name, parentId } = category;
         const response = await apiPost(context, "_action/sync", {
             createCategory: {
                 entity: "category",
@@ -743,13 +750,13 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
 
         if (!response.ok) {
             const errorText = await response.text();
-            logger.apiError("_action/sync (create product link category)", response.status, {
+            logger.apiError("_action/sync (upsert product link category)", response.status, {
                 error: errorText,
             });
-            return null;
+            return false;
         }
 
-        return categoryId;
+        return true;
     }
 
     /**
@@ -1030,13 +1037,7 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
             return this.getMediaProductId(context);
         }
 
-        // For variant products, find a parent product with children
-        if (type === "variant") {
-            return Promise.resolve(this.getVariantProductId(context));
-        }
-
-        // For simple products, find a product without children and not a child
-        return this.getSimpleProductId(context);
+        return this.getBlueprintProductId(context, type === "variant");
     }
 
     /** Media showcase product (deterministic ID), if the media-product processor created it */
@@ -1068,57 +1069,9 @@ class TestingProcessorImpl extends BaseCmsProcessor implements PostProcessor {
         }
     }
 
-    /**
-     * Get a variant product (parent with children) from the blueprint.
-     *
-     * Uses the blueprint instead of querying Shopware's Elasticsearch index to avoid
-     * timing issues: childCount may not be indexed yet when this runs right after the
-     * variant processor creates the child products.
-     */
-    private getVariantProductId(context: PostProcessorContext): string | null {
-        const variantProduct = context.blueprint.products.find((p) => p.metadata.isVariant);
-        return variantProduct?.id ?? null;
-    }
-
-    /**
-     * Get a simple product (no parent, no children)
-     */
-    private async getSimpleProductId(context: PostProcessorContext): Promise<string | null> {
-        try {
-            interface ProductResponse {
-                data?: Array<{ id: string }>;
-            }
-
-            const response = await apiPost(context, "search/product", {
-                filter: [
-                    {
-                        type: "equals",
-                        field: "visibilities.salesChannelId",
-                        value: context.salesChannelId,
-                    },
-                    {
-                        type: "equals",
-                        field: "parentId",
-                        value: null,
-                    },
-                    {
-                        type: "equals",
-                        field: "childCount",
-                        value: 0,
-                    },
-                ],
-                limit: 1,
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as ProductResponse;
-                return data.data?.[0]?.id || null;
-            }
-        } catch (error) {
-            logger.warn("Failed to find simple product", { data: error });
-        }
-
-        return null;
+    /** First blueprint product with (variant) or without (simple) variants */
+    private getBlueprintProductId(context: PostProcessorContext, variant: boolean): string | null {
+        return findProductIdByVariantFlag(context.blueprint.products, variant);
     }
 
     /**
