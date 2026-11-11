@@ -25,7 +25,7 @@ import type {
 } from "../../types/index.js";
 import type { StoreContext } from "./product.js";
 
-import { executeWithRetry, logger, stripHtml } from "../../utils/index.js";
+import { deriveProductSeoMeta, executeWithRetry, logger, stripHtml } from "../../utils/index.js";
 import { flattenCategories } from "./category.js";
 
 /** Products per AI call */
@@ -68,6 +68,14 @@ export function stripVariantValues(product: BlueprintProduct): string {
     const [type, ...details] = product.name.split(NAME_SEPARATOR);
     const kept = details.filter((segment) => !values.has(productNameKey(segment)));
     return [type, ...kept].join(NAME_SEPARATOR);
+}
+
+/** Product with a new name; a derived meta title follows the name, so the SEO title is not stale */
+function withName(product: BlueprintProduct, name: string): BlueprintProduct {
+    if (name === product.name) return product;
+    if (!product.metaTitle) return { ...product, name };
+    const { metaTitle } = deriveProductSeoMeta(name, product.description);
+    return { ...product, name, metaTitle };
 }
 
 /** All products after the first one of each name */
@@ -219,7 +227,7 @@ function applyNames(
         if (taken.has(productNameKey(candidate))) return product;
         taken.add(productNameKey(candidate));
         renamed++;
-        return { ...product, name: candidate };
+        return withName(product, candidate);
     });
     return { products: result, renamed };
 }
@@ -238,7 +246,7 @@ export async function hydrateProductNames(
     blueprint: Pick<HydratedBlueprint, "categories" | "products">,
     store: StoreContext
 ): Promise<NameHydrationResult> {
-    const cleanedProducts = blueprint.products.map((p) => ({ ...p, name: stripVariantValues(p) }));
+    const cleanedProducts = blueprint.products.map((p) => withName(p, stripVariantValues(p)));
     const cleaned = cleanedProducts.filter((p, i) => p.name !== blueprint.products[i]?.name).length;
     const duplicates = findDuplicateNameProducts(cleanedProducts);
     if (duplicates.length === 0) {

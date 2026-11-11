@@ -134,6 +134,30 @@ describe("hydrateProductNames", () => {
         expect(provider.callCount).toBe(0);
     });
 
+    test("derives the meta title again from a cleaned or new name", async () => {
+        const provider = new MockTextProvider();
+        provider.setResponse("ProductNames", { names: [{ index: 1, name: "Cleaner - Citrus" }] });
+        const parent = {
+            ...variantParent("Ankle Boots - Black - Block Heel"),
+            metaTitle: "Ankle Boots - Black - Block Heel",
+        };
+        const products = [
+            parent,
+            createTestProduct({ id: "a", name: "Cleaner", metaTitle: "Cleaner" }),
+            createTestProduct({ id: "b", name: "Cleaner", metaTitle: "Cleaner" }),
+            createTestProduct({ id: "c", name: "Sponge - Black" }),
+        ];
+
+        const result = await hydrateProductNames(provider, { categories, products }, STORE);
+
+        expect(result.products.map((p) => [p.name, p.metaTitle])).toEqual([
+            ["Ankle Boots - Block Heel", "Ankle Boots - Block Heel"],
+            ["Cleaner", "Cleaner"],
+            ["Cleaner - Citrus", "Cleaner - Citrus"],
+            ["Sponge - Black", undefined],
+        ]);
+    });
+
     test("keeps the old name when the AI proposes a taken one or fails", async () => {
         const provider = new MockTextProvider();
         provider.setResponse("ProductNames", { names: [{ index: 1, name: "Sponge" }] });
