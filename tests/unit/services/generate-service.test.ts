@@ -114,6 +114,20 @@ describe("runGenerate (dry run, blueprint steps)", () => {
         return result.lines;
     }
 
+    test("stops before the blueprint and AI hydration when the Shopware login fails", async () => {
+        const lines = await run({
+            dryRun: false,
+            connection: {
+                url: "http://127.0.0.1:9",
+                credentials: { kind: "user", username: "admin", password: "wrong" },
+            },
+        });
+
+        expect(lines.at(-1)).toStartWith("Error: Authentication with Shopware failed");
+        expect(lines.some((l) => l.startsWith("Step 1"))).toBe(false);
+        expect(createCacheFromEnv().hasBlueprint(NAME)).toBe(false);
+    });
+
     test("uses the existing blueprints and stops after the dry run", async () => {
         saveBlueprints(["Alpha", "Beta"]);
 

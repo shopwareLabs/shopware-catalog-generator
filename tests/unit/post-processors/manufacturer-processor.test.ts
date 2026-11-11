@@ -260,6 +260,20 @@ describe("ManufacturerProcessor", () => {
             expect(unassignCall).toBeDefined();
         });
 
+        test("keeps the deleted count when the local cache cannot be cleared", async () => {
+            const { context, mockApi, mockCache } = createTestContext();
+            mockApi.mockSearchResponseSequence("product", [
+                [{ id: "p1", manufacturerId: "mfg-1" }],
+                [],
+            ]);
+            mockCache.saveManufacturersMock.mockImplementation(() => {
+                throw new Error("disk full");
+            });
+            const result = await ManufacturerProcessor.cleanup!(context);
+            expect(result.deleted).toBe(1);
+            expect(result.errors).toHaveLength(0);
+        });
+
         test("does not delete manufacturers still used by other products", async () => {
             const { context, mockApi } = createTestContext();
             mockApi.mockSearchResponseSequence("product", [

@@ -200,6 +200,21 @@ export function buildCategoryTranslations(input: TranslationPayloadInput): Field
     );
 }
 
+/**
+ * Translation of an option that was moved into this group by mergeSynonymPropertyGroups
+ * after the translation step ("4 sockets" from "Outlets" into "Outlet"): the translation
+ * file still has it under the old group name, so look it up in every group.
+ */
+function mergedOptionTranslation(
+    content: LanguageContent["content"],
+    optionName: string
+): string | undefined {
+    if (content.kind === "source") return undefined;
+    return Object.values(content.file.propertyGroups)
+        .map((group) => group.options?.[optionName])
+        .find((name) => name !== undefined);
+}
+
 export function buildPropertyGroupTranslations(input: TranslationPayloadInput): {
     groups: Fields[];
     options: Fields[];
@@ -243,7 +258,10 @@ export function buildPropertyGroupTranslations(input: TranslationPayloadInput): 
                     if (fixed) return [language.id, { name: fixed }];
                     const translated = groupTranslation(group.name, content);
                     if (!translated) return [language.id, null];
-                    const name = translated.options?.[option.name] ?? option.name;
+                    const name =
+                        translated.options?.[option.name] ??
+                        mergedOptionTranslation(content, option.name) ??
+                        option.name;
                     return [language.id, { name }];
                 })
             )

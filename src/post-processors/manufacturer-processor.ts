@@ -305,9 +305,20 @@ class ManufacturerProcessorImpl implements PostProcessor {
         });
 
         const deleted = await this.deleteOrphanedManufacturers(api, [...manufacturerIds]);
-        // Clear local cache so the next generate re-creates manufacturers in Shopware
-        context.cache.saveManufacturers(context.salesChannelName, []);
+        this.clearManufacturerCache(context);
         return deleted;
+    }
+
+    /** Clear the local cache so the next generate re-creates the manufacturers in Shopware */
+    private clearManufacturerCache(context: PostProcessorContext): void {
+        try {
+            context.cache.saveManufacturers(context.salesChannelName, []);
+        } catch (error) {
+            // The manufacturers are already deleted: report the cache, keep the count
+            logger.warn(`    ⚠ Could not clear the manufacturer cache: ${errorMessage(error)}`, {
+                cli: true,
+            });
+        }
     }
 
     /** Deletes the manufacturers that no product references any more; returns the count */

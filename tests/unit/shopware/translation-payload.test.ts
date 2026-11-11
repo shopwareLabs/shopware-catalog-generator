@@ -4,6 +4,7 @@ import type { CmsPageStructure, TranslationPayloadInput } from "../../../src/sho
 import type { BlueprintPropertyGroup } from "../../../src/types/index.js";
 
 import { buildTranslationSource } from "../../../src/blueprint/hydrators/translation.js";
+import { mergeSynonymPropertyGroups } from "../../../src/blueprint/property-synonyms.js";
 import { COLOR_FAMILY_GROUP_ID, COLOR_FAMILY_GROUP_NAME } from "../../../src/fixtures/index.js";
 import {
     buildCategoryTranslations,
@@ -255,6 +256,49 @@ describe("buildPropertyGroupTranslations", () => {
                 id: "fam-red",
                 translations: { "lang-de": { name: "Rot" }, "lang-ja": { name: "Red" } },
             },
+        ]);
+    });
+
+    test("translates options merged from a synonym group with the old group's text", () => {
+        const property = (group: string, value: string) => ({
+            metadata: { properties: [{ group, value }] },
+        });
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "a", ...property("Outlets", "4 sockets") }),
+                createTestProduct({ id: "b", ...property("Outlet", "2 sockets") }),
+                createTestProduct({ id: "c", ...property("Outlet", "6 sockets") }),
+            ],
+            propertyGroups: [
+                {
+                    id: "grp-outlets",
+                    name: "Outlets",
+                    displayType: "text",
+                    options: [{ id: "opt-4", name: "4 sockets" }],
+                },
+                {
+                    id: "grp-outlet",
+                    name: "Outlet",
+                    displayType: "text",
+                    options: [{ id: "opt-2", name: "2 sockets" }],
+                },
+            ],
+        });
+        const file = createTranslationFile({
+            propertyGroups: {
+                Outlets: { name: "Steckdosen", options: { "4 sockets": "4 Steckdosen" } },
+                Outlet: { name: "Steckdose", options: { "2 sockets": "2 Steckdosen" } },
+            },
+        });
+        expect(mergeSynonymPropertyGroups(blueprint)).toEqual([{ from: "Outlets", to: "Outlet" }]);
+
+        const { options } = buildPropertyGroupTranslations(
+            createInput({ blueprint, languages: [translation(DE, file)] })
+        );
+
+        expect(options).toEqual([
+            { id: "opt-2", translations: { "lang-de": { name: "2 Steckdosen" } } },
+            { id: "opt-4", translations: { "lang-de": { name: "4 Steckdosen" } } },
         ]);
     });
 });
