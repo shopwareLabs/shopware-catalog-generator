@@ -1373,7 +1373,9 @@ Hydration modes:
 - **--only=prices**: Re-price the products. The AI returns a typical retail price range per
   product (name, category, pack size; one call per 100 products), and the price is rolled inside
   it, seeded by the product ID (`hydrators/prices.ts`). Products the AI skips keep their price.
-  A full hydration runs this pass too
+  The same call checks the randomly assigned pack units: the AI keeps the pack, picks a fitting
+  one from `PACKAGING_OPTIONS`, or drops it ("none"). The upload clears the unit fields of
+  products without a pack. A full hydration runs this pass too
 - **--only=names**: Drop variant values from variant parent names ("Boots - Black - Block Heel"
   with Black, Burgundy, ... becomes "Boots - Block Heel"; no AI), then rename every product whose
   name another product already has ("750 ml" and "750ml" count as the same). One AI call per 25

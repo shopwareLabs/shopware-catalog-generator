@@ -191,13 +191,19 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - packaging", () => {
         ]);
     });
 
-    test("does not look up units when no product has packaging", async () => {
+    test("clears the pack fields without a unit lookup when no product has packaging", async () => {
         const { hydrator, searches, syncOps } = createMockShop();
 
         await hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-1", "nav-1");
 
         expect(searches.some((s) => s.includes("search/unit"))).toBe(false);
-        expect(productPayloads(syncOps)[0]?.unitId).toBeUndefined();
+        expect(productPayloads(syncOps)[0]).toMatchObject({
+            unitId: null,
+            purchaseUnit: null,
+            referenceUnit: null,
+            packUnit: null,
+            packUnitPlural: null,
+        });
     });
 });
 
@@ -310,6 +316,11 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - full payload", () => {
             metaTitle: "Meta title",
             metaDescription: "Meta description",
             properties: [{ id: "opt-1" }],
+            unitId: null,
+            purchaseUnit: null,
+            referenceUnit: null,
+            packUnit: null,
+            packUnitPlural: null,
             prices: [
                 {
                     id: `${id.slice(0, -1)}0`,
@@ -391,11 +402,11 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - full payload", () => {
             "metaTitle",
             "metaDescription",
             "releaseDate",
-            "unitId",
             "type",
         ]) {
             expect(product).not.toHaveProperty(key);
         }
+        expect(product?.unitId).toBeNull();
     });
 
     test("an explicit purchase step wins over the minimum purchase", async () => {

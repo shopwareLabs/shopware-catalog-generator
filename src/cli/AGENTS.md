@@ -151,7 +151,7 @@ bun run blueprint hydrate --name=music
 | `--only=cms`               | Only hydrate CMS blueprint text (`cms-blueprint.json`)         |
 | `--only=variants`          | Re-pick variant options with new settings (see below)          |
 | `--only=variant-images`    | Recolour product images per colour variant (OpenAI edits)      |
-| `--only=prices`            | Realistic prices per product (one AI call per 100 products)    |
+| `--only=prices`            | Realistic prices and fitting pack units (one AI call per 100)  |
 | `--only=names`             | Unique product names, no variant values in parent names        |
 | `--only=manufacturers`     | Fictional brands that fit the store (one AI call)              |
 | `--rehydrate`              | Force full re-hydration even if hydrated blueprint exists      |

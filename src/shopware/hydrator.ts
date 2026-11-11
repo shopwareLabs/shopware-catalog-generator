@@ -1616,11 +1616,21 @@ function tieredPrices(
     }));
 }
 
+/** Packaging fields cleared, for products without a pack (an earlier run may have set them) */
+const NO_PACKAGING: Partial<ProductSyncPayload> = {
+    unitId: null,
+    purchaseUnit: null,
+    referenceUnit: null,
+    packUnit: null,
+    packUnitPlural: null,
+};
+
 /** Packaging / reference price ("6 pc, 1 pc = $4.99") */
 function packagingFields(
-    packaging: ProductPackaging,
+    packaging: ProductPackaging | undefined,
     unitIds: Map<string, string>
 ): Partial<ProductSyncPayload> {
+    if (!packaging) return NO_PACKAGING;
     const unitId = unitIds.get(packaging.unitShortCode);
     return {
         ...(unitId && { unitId }),
@@ -1667,7 +1677,7 @@ function packagingAndDeliveryFields(
 ): Partial<ProductSyncPayload> {
     const delivery = deliveryTimeId(p, ctx.deliveryTimeIds);
     return {
-        ...(p.packaging && packagingFields(p.packaging, ctx.unitIds)),
+        ...packagingFields(p.packaging, ctx.unitIds),
         // "New" badge: always the upload time, so the badge never ages out on the storefront
         ...(p.isNew && { releaseDate: new Date().toISOString() }),
         ...(delivery && { deliveryTimeId: delivery }),

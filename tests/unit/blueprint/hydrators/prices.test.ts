@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import type { BlueprintProduct, ProductPackaging } from "../../../../src/types/index.js";
+
 import {
     hydratePrices,
     normalizePriceRange,
@@ -11,6 +13,15 @@ import { createTestCategory, createTestProduct } from "../../../helpers/blueprin
 import { MockTextProvider } from "../../../mocks/index.js";
 
 const STORE = { name: "test-store", description: "Test store" };
+
+const ROLL: ProductPackaging = {
+    unitShortCode: "m",
+    unitName: "Meter",
+    purchaseUnit: 5,
+    referenceUnit: 1,
+    packUnit: "Roll",
+    packUnitPlural: "Rolls",
+};
 
 function promptOf(provider: MockTextProvider, call = 0): string {
     return (
@@ -103,8 +114,37 @@ describe("hydratePrices", () => {
         expect(result.products[1]?.price).toBeGreaterThanOrEqual(399.99);
         const prompt = promptOf(provider);
         expect(prompt).toContain('Store: "test-store"');
-        expect(prompt).toContain("1. Foam Earplugs | category: Ear Protection | pack: 20 Piece");
+        expect(prompt).toContain(
+            "1. Foam Earplugs | category: Ear Protection | pack: Pack (20 Piece)"
+        );
         expect(prompt).toContain("2. Hearing Monitor");
+    });
+
+    test("keeps, switches or drops the pack the AI returns", async () => {
+        const provider = new MockTextProvider();
+        provider.setResponse("PriceRanges", {
+            prices: [
+                { index: 1, min: 10, max: 20, pack: "Pair (2 Piece)" },
+                { index: 2, min: 10, max: 20, pack: "none" },
+                { index: 3, min: 10, max: 20, pack: "Crate" },
+                { index: 4, min: 10, max: 20, pack: "Box" },
+            ],
+        });
+        const packed = (id: string): BlueprintProduct =>
+            createTestProduct({ id, metadata: { packaging: { ...ROLL } } });
+        const products = [packed("a"), packed("b"), packed("c"), createTestProduct({ id: "d" })];
+
+        const result = await hydratePrices(provider, { categories: [top], products }, STORE);
+
+        const packs = result.products.map((p) => p.metadata.packaging?.packUnit);
+        expect(packs).toEqual(["Pair", undefined, "Roll", undefined]);
+        expect(result.products[0]?.metadata.packaging).toMatchObject({
+            unitShortCode: "pc",
+            unitName: "Piece",
+            purchaseUnit: 2,
+        });
+        expect(result.repacked).toBe(2);
+        expect(promptOf(provider)).toContain("Pair (2 Piece), Set (3 Piece)");
     });
 
     test("keeps the price of products the AI skipped or gave an invalid range", async () => {

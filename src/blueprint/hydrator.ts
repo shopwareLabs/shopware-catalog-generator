@@ -271,11 +271,18 @@ export class BlueprintHydrator {
      * products). Names, properties and images stay untouched.
      */
     async hydratePricesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
-        const { products, priced } = await hydratePrices(this.textProvider, existingBlueprint, {
-            name: existingBlueprint.salesChannel.name,
-            description: existingBlueprint.salesChannel.description,
-        });
-        logger.info(`  Prices updated for ${priced}/${products.length} products`, { cli: true });
+        const { products, priced, repacked } = await hydratePrices(
+            this.textProvider,
+            existingBlueprint,
+            {
+                name: existingBlueprint.salesChannel.name,
+                description: existingBlueprint.salesChannel.description,
+            }
+        );
+        logger.info(
+            `  Prices updated for ${priced}/${products.length} products, ${repacked} packs changed`,
+            { cli: true }
+        );
         return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
     }
 

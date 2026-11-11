@@ -6,6 +6,10 @@
  * range for each product (with its category and pack size), and the price is rolled
  * inside that range. The roll is seeded by the product ID, so the same range always
  * gives the same price. Products the AI skips keep their price.
+ *
+ * The blueprint generator also hands out pack units at random ("Roll of 5 m" on a
+ * T-shirt). The same call checks them: the AI keeps the pack, picks a fitting one from
+ * PACKAGING_OPTIONS, or drops it. Products without a pack never get one.
  */
 
 import { z } from "zod";
@@ -14,10 +18,12 @@ import type {
     BlueprintCategory,
     BlueprintProduct,
     HydratedBlueprint,
+    ProductPackaging,
     TextProvider,
 } from "../../types/index.js";
 import type { StoreContext } from "./product.js";
 
+import { findPackagingUnit, PACKAGING_OPTIONS } from "../../fixtures/index.js";
 import { createSeededRandom, executeWithRetry, logger } from "../../utils/index.js";
 import { flattenCategories } from "./category.js";
 
@@ -28,7 +34,11 @@ const PriceRangeSchema = z.object({
     index: z.number().int(),
     min: z.number(),
     max: z.number(),
+    pack: z.string().optional(),
 });
+
+/** Answer for a pack that does not fit the product */
+const NO_PACK = "none";
 
 const PriceResponseSchema = z.object({
     prices: z.array(PriceRangeSchema),
@@ -38,6 +48,36 @@ const PriceResponseSchema = z.object({
 export interface PriceRange {
     min: number;
     max: number;
+}
+
+/** AI answer for one product: its price range and, for products with a pack, the pack */
+interface PriceAnswer {
+    range: PriceRange;
+    /** Pack label from PACKAGING_OPTIONS, NO_PACK, or undefined (keep the pack) */
+    pack?: string;
+}
+
+/** "Roll (5 Meter)" */
+function describePack(pack: { packUnit: string; purchaseUnit: number; unitName: string }) {
+    return `${pack.packUnit} (${pack.purchaseUnit} ${pack.unitName})`;
+}
+
+const PACK_CHOICES = PACKAGING_OPTIONS.map((o) =>
+    describePack({ ...o, unitName: findPackagingUnit(o.unitShortCode)?.name ?? o.unitShortCode })
+);
+
+/** Packaging for a pack answer: unchanged, another option, or none */
+export function resolvePackaging(
+    current: ProductPackaging | undefined,
+    answer: string | undefined
+): ProductPackaging | undefined {
+    if (!current || answer === undefined) return current;
+    const label = answer.trim().toLowerCase();
+    if (label === NO_PACK) return undefined;
+    const option = PACKAGING_OPTIONS.find((o) => label.startsWith(o.packUnit.toLowerCase()));
+    if (!option) return current;
+    const unit = findPackagingUnit(option.unitShortCode);
+    return { ...option, unitName: unit?.name ?? option.unitShortCode };
 }
 
 /** Name of the most specific category the product is assigned to */
@@ -65,7 +105,7 @@ function describeProduct(
     const parts = [
         `${index}. ${product.name}`,
         category ? `category: ${category}` : "",
-        pack ? `pack: ${pack.purchaseUnit} ${pack.unitName}` : "",
+        pack ? `pack: ${describePack(pack)}` : "",
     ];
     return parts.filter(Boolean).join(" | ");
 }
@@ -92,11 +132,14 @@ function buildMessages(
                 "- a realistic range for this product, not for the whole category",
                 "- max at most 3 times min",
                 "- keep the index of each product",
+                "- for a product with a pack: return pack, the pack it is really sold in.",
+                `  One of: ${PACK_CHOICES.join(", ")}, or "${NO_PACK}" when it is sold`,
+                "  one by one. Price the pack you return",
                 "",
                 "Products:",
                 ...lines,
                 "",
-                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9}]}',
+                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9},{"index":2,"min":12,"max":20,"pack":"Pair"}]}',
             ].join("\n"),
         },
     ];
@@ -111,26 +154,29 @@ export function normalizePriceRange(min: number, max: number): PriceRange | null
     return { min: Math.round(low * 100) / 100, max: Math.round(high * 100) / 100 };
 }
 
-function parseRanges(response: string, count: number): Map<number, PriceRange> {
+function parseAnswers(response: string, count: number): Map<number, PriceAnswer> {
     const json = response
         .replace(/```json?\n?/g, "")
         .replace(/```\n?/g, "")
         .trim();
     const parsed = PriceResponseSchema.parse(JSON.parse(json));
-    const entries = parsed.prices
-        .filter((p) => p.index >= 1 && p.index <= count)
-        .map((p) => [p.index, normalizePriceRange(p.min, p.max)] as const)
-        .filter((entry): entry is readonly [number, PriceRange] => entry[1] !== null);
-    return new Map(entries);
+    return new Map(
+        parsed.prices
+            .filter((p) => p.index >= 1 && p.index <= count)
+            .flatMap((p) => {
+                const range = normalizePriceRange(p.min, p.max);
+                return range ? [[p.index, { range, pack: p.pack }] as const] : [];
+            })
+    );
 }
 
 /** Ask the AI for one batch; an empty map on failure (prices stay as they are) */
-async function fetchBatchRanges(
+async function fetchBatchAnswers(
     textProvider: TextProvider,
     products: BlueprintProduct[],
     categories: Map<string, BlueprintCategory>,
     store: StoreContext
-): Promise<Map<string, PriceRange>> {
+): Promise<Map<string, PriceAnswer>> {
     const lines = products.map((p, i) => describeProduct(p, i + 1, categories));
     try {
         const response = await executeWithRetry(() =>
@@ -140,11 +186,11 @@ async function fetchBatchRanges(
                 "PriceRanges"
             )
         );
-        const byIndex = parseRanges(response, products.length);
+        const byIndex = parseAnswers(response, products.length);
         return new Map(
             products.flatMap((p, i) => {
-                const range = byIndex.get(i + 1);
-                return range ? [[p.id, range] as const] : [];
+                const answer = byIndex.get(i + 1);
+                return answer ? [[p.id, answer] as const] : [];
             })
         );
     } catch (error) {
@@ -185,6 +231,8 @@ export interface PriceHydrationResult {
     products: BlueprintProduct[];
     /** Products that got a new price */
     priced: number;
+    /** Products whose pack changed or was dropped */
+    repacked: number;
 }
 
 /**
@@ -198,15 +246,26 @@ export async function hydratePrices(
     const categories = new Map(flattenCategories(blueprint.categories).map((c) => [c.id, c]));
     logger.info(`  Pricing ${blueprint.products.length} products...`, { cli: true });
 
-    const ranges = new Map<string, PriceRange>();
+    const answers = new Map<string, PriceAnswer>();
     for (const batch of chunk(blueprint.products, PRICE_BATCH_SIZE)) {
-        const batchRanges = await fetchBatchRanges(textProvider, batch, categories, store);
-        for (const [id, range] of batchRanges) ranges.set(id, range);
+        const batchAnswers = await fetchBatchAnswers(textProvider, batch, categories, store);
+        for (const [id, answer] of batchAnswers) answers.set(id, answer);
     }
 
     const products = blueprint.products.map((product) => {
-        const range = ranges.get(product.id);
-        return range ? { ...product, price: rollPrice(product.id, range) } : product;
+        const answer = answers.get(product.id);
+        return answer ? applyAnswer(product, answer) : product;
     });
-    return { products, priced: ranges.size };
+    const repacked = products.filter(
+        (p, i) =>
+            p.metadata.packaging?.packUnit !== blueprint.products[i]?.metadata.packaging?.packUnit
+    ).length;
+    return { products, priced: answers.size, repacked };
+}
+
+function applyAnswer(product: BlueprintProduct, answer: PriceAnswer): BlueprintProduct {
+    const price = rollPrice(product.id, answer.range);
+    const packaging = resolvePackaging(product.metadata.packaging, answer.pack);
+    if (packaging === product.metadata.packaging) return { ...product, price };
+    return { ...product, price, metadata: { ...product.metadata, packaging } };
 }
