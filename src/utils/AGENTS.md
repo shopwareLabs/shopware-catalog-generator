@@ -67,6 +67,9 @@ import { countCategories, getLeafCategories, collectCategoryIdsByPath } from "./
 const count = countCategories(tree);
 const leaves = getLeafCategories(tree);
 const ids = collectCategoryIdsByPath(tree); // Map<path, id> (e.g., "Living Room > Sofas")
+
+// visible: false for categories without products in or below them (used by the upload)
+const nodes = hideEmptyCategories(tree, productCategoryIds);
 ```
 
 ### concurrency.ts

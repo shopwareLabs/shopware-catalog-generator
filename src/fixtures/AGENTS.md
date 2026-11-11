@@ -30,6 +30,7 @@ fixtures/
 ├── media-showcase.ts     # Media Showcase product + gallery files (MEDIA_SHOWCASE_FILES, feature per file)
 ├── media/                # Static GLB models + MP4 videos, LICENSES.md with sources and attribution
 ├── locale-currencies.ts  # Locale → currency for extra domains, DEFAULT_DOMAIN_LOCALES (de-DE)
+├── model-pricing.ts      # OpenAI list prices for the cost forecast (PRICING_AS_OF)
 ├── packaging-units.ts    # Units (pc, kg, m) and packaging options (Pair, Pack, Box, ...) for reference prices
 ├── promotions.ts         # Demo promotions (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 ├── color-families.ts     # 16 colour families ("Color family" filter group), fixed translations, deterministic IDs

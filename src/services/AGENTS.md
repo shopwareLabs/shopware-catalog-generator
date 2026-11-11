@@ -91,7 +91,8 @@ only available for providers that implement `TextProvider.getUsage()` (currently
 - `"variants"` — re-pick variant options with `options.variants` overrides and save them to `blueprint.json`
 - `"variant-images"` — recolour product images per colour variant (needs an image provider with
   `editImage`, otherwise returns a "Skipped" line). Records `hydrate:variant-images` in `generation.json`
-- `"prices"` — re-price products with AI price ranges, keeps names. Records `hydrate:prices`
+- `"prices"` — re-price products with AI price ranges and fix or drop their random pack units,
+  keeps names. Records `hydrate:prices`
 - `"names"` — drop variant values from variant parent names and rename duplicate product names.
   Records `hydrate:names`
 - `"manufacturers"` — replace the placeholder brands with fictional brands for the store (one AI
@@ -139,6 +140,10 @@ const lines = await runProcessorsForSalesChannel("music", ["images", "reviews"],
 | `inspirationUrl` | `string`                  | -                 | Crawl this store before the blueprint (server)                |
 | `skipProcessors` | `boolean`                 | `false`           | Upload only, no post-processors (server)                      |
 | `hooks`          | `GenerateHooks`           | -                 | `onLine` / `onProgress` for live output (server process logs) |
+
+Before the property groups are uploaded, `runGenerate` merges synonym property groups
+(`mergeSynonymPropertyGroups()` in `blueprint/property-synonyms.ts`, e.g. "Outlets" into
+"Outlet") and logs each merge.
 
 `runGenerate` returns `{ lines, summary? }`. `summary` (SalesChannel ID, counts, processor
 results) is only set when the upload ran; a run that stopped early ends with an `Error:` line.

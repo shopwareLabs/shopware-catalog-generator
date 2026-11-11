@@ -20,6 +20,7 @@ blueprint/
 ├── variant-settings.ts   # Variant settings (resolve, assign, pick, cap, re-pick) - no AI
 ├── cost-estimator.ts     # Hydration + translation cost forecast (no AI): tokens, images, USD
 ├── color-system.ts       # Colour system (no AI): normalise shades, "Color" + "Color family" groups
+├── property-synonyms.ts  # Merge synonym property groups before upload, find single-option groups (no AI)
 ├── index.ts              # Re-exports
 └── hydrators/            # Specialized hydration modules
     ├── category.ts       # Category names/descriptions via AI
@@ -30,6 +31,9 @@ blueprint/
     ├── theme.ts          # AI brand color generation (primary + secondary)
     ├── color-shades.ts   # hydrateColorShades: AI hex + family for unknown shade names (store context)
     ├── translation.ts    # translateCatalog: native-sounding translation per locale, reuses unchanged entries by source hash
+    ├── prices.ts         # hydratePrices: AI price range per product, seeded roll, fixes random pack units
+    ├── names.ts          # hydrateProductNames: variant values out of parent names, unique names
+    ├── manufacturers.ts  # hydrateManufacturers: fictional brands per top-level category (one AI call)
     └── index.ts          # Re-exports
 ```
 

@@ -67,11 +67,6 @@ src/
 │   ├── command.ts            # runCliCommand: CLI flags → command spec params
 │   └── shared.ts             # CLIError, validation helpers, executePostProcessors
 │
-├── services/                 # Shared application logic (used by both CLI and MCP)
-│   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
-│   ├── generate-service.ts   # runGenerate (one pipeline for CLI, MCP, server), runProcessorsForSalesChannel
-│   └── image-fix-service.ts  # fixProductImages, fixCategoryImages, fixCmsImages, fixThemeImages
-│
 ├── blueprint/                # Blueprint-based generation
 │   ├── AGENTS.md             # Blueprint module documentation
 │   ├── index.ts              # Re-exports all blueprint modules
@@ -82,6 +77,7 @@ src/
 │   ├── cost-estimator.ts     # Hydration cost forecast (tokens, images, USD)
 │   ├── variant-settings.ts   # Variant settings: resolve, assign variant products, pick, cap, re-pick
 │   ├── color-system.ts       # Colour system: shades in "Color", families in "Color family" (no AI)
+│   ├── property-synonyms.ts  # Merge property groups that name the same thing ("Outlet" / "Outlets")
 │   └── hydrators/            # Specialized hydration modules
 │       ├── index.ts          # Re-exports all hydrators
 │       ├── category.ts       # Category names/descriptions via AI
@@ -119,9 +115,11 @@ src/
 │   ├── image-processor.ts    # Multi-view product image generation
 │   ├── category-image-processor.ts # Category banner images
 │   ├── image-utils.ts        # Shared image utilities
+│   ├── processor-utils.ts    # errorMessage, syncWithRetry (transient sync errors like deadlocks)
 │   ├── manufacturer-processor.ts # Fictional manufacturer creation
 │   ├── promotion-processor.ts # Demo promotion codes (WELCOME10, SUMMER20, SAVE15, FREESHIP)
 │   ├── variant-processor.ts  # Variant product creation
+│   ├── variant-reconcile.ts  # Plan missing/stale variants of half-created variant products
 │   ├── variant-image-processor.ts # Colour images + gallery per colour variant
 │   ├── review-processor.ts   # Variable review counts, spread across SalesChannel languages
 │   ├── translation-processor.ts # Writes cached translations (no AI)
@@ -186,7 +184,7 @@ src/
 │   ├── clone.ts              # cloneDeep - typed structuredClone wrapper
 │   └── logger.ts             # File-based logging (logs/ folder)
 │
-├── services/                 # Shared application logic (CLI + MCP)
+├── services/                 # Shared application logic (CLI, MCP and server)
 │   ├── AGENTS.md             # Services documentation
 │   ├── blueprint-service.ts  # createBlueprint, hydrateBlueprint, fixBlueprint
 │   ├── generate-service.ts   # runGenerate (one pipeline for CLI, MCP, server), runProcessorsForSalesChannel
@@ -204,17 +202,21 @@ src/
 │   ├── AGENTS.md             # Server documentation
 │   ├── index.ts              # Exports ProcessManager + types
 │   ├── generate-route.ts     # POST /generate → runGenerate (thin wrapper)
+│   ├── routes.ts             # Request handler: POST /generate, GET /status/:id, GET /health
 │   └── process-manager.ts    # Background task management
 │
 ├── crawlers/                 # Website crawling for store inspiration
+│   ├── AGENTS.md             # Crawler documentation
 │   ├── index.ts              # Exports crawlForInspiration, InspirationData, InspirationDataSchema
 │   ├── types.ts              # InspirationData + ExampleProduct types with Zod schemas
 │   ├── site-crawler.ts       # crawlForInspiration(url, options): fetches URL, assembles InspirationData
+│   ├── page-classifier.ts    # classifyPage: product, category, cms or unknown
 │   └── extractors/           # Cheerio-based HTML extractors
 │       ├── index.ts          # Re-exports all extractors
 │       ├── image-color.ts    # Brand color extraction from brand images (apple-touch-icon, SVG, PNG)
 │       ├── json-ld.ts        # Extract schema.org JSON-LD (BreadcrumbList, Product, Organization)
-│       └── meta.ts           # Extract theme-color, og:description, CSS vars, nav categories
+│       ├── meta.ts           # Extract theme-color, og:description, CSS vars, nav categories
+│       └── sitemap.ts        # discoverFromSitemap, sampleUrls (page URLs from sitemap.xml)
 │
 ├── mcp/                      # MCP server for Cursor AI integration
 │   ├── AGENTS.md             # MCP server documentation
@@ -223,11 +225,11 @@ src/
 │       ├── index.ts          # Re-exports all tools
 │       ├── command-tool.ts   # registerCommandTool (specs from services/commands.ts)
 │       ├── blueprint.ts      # blueprint_create, blueprint_hydrate, blueprint_estimate, blueprint_translate, blueprint_fix, blueprint_inspire
-│       ├── generate.ts       # generate, process
-│       ├── image-fix.ts      # image_fix (regenerate product/category/CMS images)
+│       ├── generate.ts       # generate, process, list_processors
+│       ├── image-fix.ts      # image_fix (regenerate product/category/CMS/theme images)
 │       ├── template.ts       # template_metadata
-│       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore
-│       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props, cleanup_unused_options
+│       ├── cache.ts          # cache_list, cache_clear, cache_trash, cache_restore, cache_empty_trash
+│       └── cleanup.ts        # cleanup, cleanup_media, cleanup_unused_props, cleanup_unused_options, list_saleschannels
 │
 ├── cache.ts                  # DataCache class (+ blueprint storage)
 ├── image-cache.ts            # ImageCache (product/category/CMS/property media)
@@ -239,85 +241,40 @@ src/
 └── migrate-variants.ts       # Variant migration script
 
 scripts/
-└── lint-no-cast.ts           # Custom lint rule: no type casting
+├── lint-no-cast.ts           # Custom lint rule: no type casting
+├── validate-crawlers.ts      # bun run test:crawlers: crawl known stores, check expectations
+├── crawler-validation.ts     # Pure parts of validate-crawlers (checks, table output)
+└── reset-templates-history.sh # Squash the history of the templates repo
 
 tests/
-├── unit/                     # Unit tests (mirrors src/ structure)
-│   ├── blueprint/            # Blueprint tests
-│   │   ├── color-system.test.ts
-│   │   ├── generator.test.ts
-│   │   ├── hydrator.test.ts
-│   │   └── hydrators/
-│   │       ├── cms.test.ts
-│   │       ├── color-shades.test.ts
-│   │       ├── image.test.ts
-│   │       ├── theme.test.ts
-│   │       └── variant-images.test.ts
-│   ├── post-processors/      # Post-processor tests
-│   │   ├── registry.test.ts
-│   │   ├── customer-processor.test.ts
-│   │   ├── image-processor.test.ts
-│   │   ├── manufacturer-processor.test.ts
-│   │   ├── review-processor.test.ts
-│   │   ├── theme-processor.test.ts
-│   │   ├── variant-processor.test.ts
-│   │   ├── variant-image-processor.test.ts
-│   │   ├── digital-product-processor.test.ts
-│   │   ├── media-product-processor.test.ts
-│   │   ├── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
-│   │   └── cms/              # CMS processor tests
-│   │       ├── base-processor.test.ts
-│   │       ├── commerce-processor.test.ts
-│   │       ├── home-processor.test.ts
-│   │       ├── images-processor.test.ts
-│   │       ├── testing-processor.test.ts
-│   │       └── simple-processors.test.ts
-│   ├── providers/            # Provider tests
-│   │   └── pollinations-provider.test.ts
-│   ├── server/               # Server tests
-│   │   └── process-manager.test.ts
-│   ├── shopware/             # Shopware client tests
-│   │   ├── entities.test.ts
-│   │   ├── export.test.ts
-│   │   ├── hydrator-ordering.test.ts
-│   │   ├── storefront-check.test.ts
-│   │   ├── sync.test.ts
-│   │   └── version.test.ts
+├── unit/                     # Unit tests (mirrors src/ structure, see tests/AGENTS.md)
+│   ├── blueprint/            # Blueprint tests (+ hydrators/)
+│   ├── cli/                  # CLI modules + main.ts arg parser
+│   ├── crawlers/             # Crawler tests (classifier, extractors, sitemap, site-crawler)
+│   ├── e2e/                  # Unit tests for the e2e feature checks
 │   ├── fixtures/             # Fixture tests
-│   │   └── color-families.test.ts
+│   ├── mcp/                  # MCP tool tests
+│   ├── post-processors/      # Post-processor tests (+ cms/)
+│   │   └── no-ai-in-processors.test.ts  # Architectural: no AI calls in post-processors
+│   ├── providers/            # Provider tests
+│   ├── scripts/              # scripts/ tests
+│   ├── server/               # Server tests
+│   ├── services/             # Service tests (+ CLI/MCP/server parity tests)
+│   ├── shopware/             # Shopware client tests
 │   ├── templates/            # Template tests
-│   │   └── fetcher.test.ts
 │   ├── utils/                # Utility tests
-│   │   ├── arrays.test.ts
-│   │   ├── blueprint-validation.test.ts
-│   │   ├── category-tree.test.ts
-│   │   ├── color-normalize.test.ts
-│   │   ├── color-palette.test.ts
-│   │   ├── concurrency.test.ts
-│   │   ├── logger.test.ts
-│   │   ├── property-collector.test.ts
-│   │   ├── property-validation.test.ts
-│   │   ├── retry.test.ts
-│   │   ├── strings.test.ts
-│   │   ├── uuid.test.ts
-│   │   └── validation.test.ts
-│   ├── crawlers/             # Crawler tests
-│   │   ├── image-color.test.ts  # Brand image color extraction (SVG, PNG, priority, fallbacks)
-│   │   ├── json-ld.test.ts   # JSON-LD extractor (BreadcrumbList, Product, ItemList, Organization)
-│   │   ├── meta.test.ts      # Meta extractor (theme-color, CSS vars, og:description, nav)
-│   │   └── site-crawler.test.ts # crawlForInspiration with mocked fetch
-│   ├── cache.test.ts         # Root-level src/ file tests
-│   ├── property-cache.test.ts
-│   └── saleschannel-cache.test.ts
-├── integration/              # Integration tests
-│   └── blueprint.test.ts     # Blueprint integration
+│   └── *.test.ts             # Root-level src/ file tests (cache, image-cache, property-cache, ...)
+├── integration/              # Integration tests (blueprint, inspiration files, MCP smoke + CLI)
 ├── e2e/                      # E2E tests
 │   ├── verify.ts             # API verification script
 │   ├── checks/               # Feature checks, skipped when the shop lacks the feature
 │   └── browser-checks.md     # Browser verification guide
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
-│   └── post-processor-context.ts # createTestContext — builds PostProcessorContext with mocks
+│   ├── fetch-mock.ts         # mockFetch (stubs globalThis.fetch)
+│   ├── post-processor-context.ts # createTestContext — builds PostProcessorContext with mocks
+│   ├── recording-services.ts # recordingServices (parity tests)
+│   └── translation-factory.ts # Test languages + createTranslationFile
 └── mocks/                    # Test mocks
     ├── index.ts              # Re-exports + createMockProductMetadata
     ├── admin-client.mock.ts  # createMockAdminClient, createMockAdminClientWithInvoke
@@ -433,23 +390,22 @@ The default setup looks like this:
 | `{name}.{host}`    | English (from Storefront) | USD      | English          |
 | `{name}-de.{host}` | German (`de-DE`)          | EUR      | German (`de-DE`) |
 
-**Graceful fallback**: If German (`de-DE`) language or its snippet set is not installed in Shopware, a warning is logged and only the English/USD domain is created.
+**Graceful fallback**: If a locale's language or snippet set is not installed in Shopware, a warning is logged and that domain is skipped. The English/USD domain is always created.
 
 **Currency**: USD is used as the primary display currency for the SalesChannel. If USD is not found in Shopware, the Storefront's default currency is used as fallback. Product prices always use the **system base currency** (`factor = 1`, typically EUR) via `getDefaultCurrencyId()`, which Shopware's `PriceFieldSerializer` validates against.
 
-Both domains are created in a single `sync` call along with both languages and both currencies:
+All domains are created in a single `sync` call with the SalesChannel:
 
 ```typescript
 // Domain resolution in createSalesChannel()
-const [storefront, usdResult, eurResult, deLanguageResult, deSnippetResult, rootCategory] =
-    await Promise.all([
-        this.getFullSalesChannel("Storefront"),
-        this.getCurrencyId("USD").catch(() => null), // null → fallback to storefront
-        this.getCurrencyId("EUR").catch(() => null),
-        this.getLanguageId("de-DE"), // null → skip German domain
-        this.getSnippetSetId("de-DE"), // null → skip German domain
-        this.createRootCategory(sanitizedName),
-    ]);
+const [storefront, usdResult, rootCategory] = await Promise.all([
+    this.getFullSalesChannel("Storefront"),
+    this.getCurrencyId("USD").catch(() => null), // null → fallback to storefront
+    this.createRootCategory(sanitizedName),
+]);
+// buildSalesChannelDomains(): English domain + one per domainLocales(input.locales)
+// (DEFAULT_DOMAIN_LOCALES + requested, English excluded). Per locale, language, snippet set
+// and currency are looked up in parallel; a missing language or snippet set skips the domain.
 ```
 
 New lookup methods on `ShopwareClient`:
@@ -538,15 +494,16 @@ interface PostProcessorContext {
     salesChannelId: string;
     salesChannelName: string;
     blueprint: HydratedBlueprint;
-    cache: DataCache;
+    cache: DataCacheApi;
     textProvider?: TextProvider;
     imageProvider?: ImageProvider;
-    api: ShopwareApiHelpers; // Required — all API calls must go through this
+    api: ShopwareApi; // Required — all API calls must go through this
     shopware: ShopwareCapabilities; // Version + feature flags of the connected shop
     options: PostProcessorOptions;
 }
 
 interface PostProcessorOptions {
+    batchSize: number;
     dryRun: boolean;
     activeProcessors?: string[]; // Populated by runProcessors() — use for conditional rendering
 }
@@ -645,10 +602,10 @@ Inheritance hierarchy:
 
 ```
 ShopwareClient (auth, base API)
-    └── ShopwareHydrator (create operations, SalesChannels, category trees)
-    └── ShopwareExporter (export/sync existing data)
+    ├── ShopwareHydrator (create operations, SalesChannels, category trees)
+    │   └── DataHydrator (extends ShopwareHydrator, adds exporter + cleanup via composition)
+    ├── ShopwareExporter (export/sync existing data)
     └── ShopwareCleanup (delete operations, SalesChannel-centric)
-    └── DataHydrator (combines all three via composition)
 ```
 
 ### Export/Sync from Shopware
@@ -1238,6 +1195,7 @@ VARIANT_SHARE=0.3     # Share of products with variants (blueprint create)
 VARIANT_COLORS=4      # Colours per colour variant product
 VARIANT_OPTIONS=3     # Options per other variant group (Size, Material, ...)
 MAX_VARIANTS=24       # Max variants per product
+PRODUCTS_PER_CATEGORY=30  # Max products per top-level category (blueprint create)
 VARIANT_IMAGE_VIEWS=all  # Colour images for every view, or "cover" (first view only, cheaper)
 IMAGE_PROVIDER=pollinations|openai|none  # Auto-detected: pk_ → free Pollinations
 IMAGE_API_KEY=xxx                        # Not needed for pk_ keys
@@ -1462,9 +1420,9 @@ bun run image fix --name=music --type=theme --target=logo    # Regenerate logo o
 ```bash
 bun run cleanup -- --salesChannel="music"                  # Delete products + categories
 bun run cleanup -- --salesChannel="music" --props          # Also delete property groups
-bun run cleanup -- --salesChannel="music" --manufacturers  # Also delete manufacturers
+bun run cleanup -- --salesChannel="music" --manufacturers  # Only the store's manufacturers (no core cleanup)
 bun run cleanup -- --salesChannel="music" --delete         # Also delete SalesChannel
-bun run cleanup -- --salesChannel="music" --processors=cms # Cleanup specific processor entities
+bun run cleanup -- --salesChannel="music" --processors=customers # Cleanup specific processor entities
 bun run cleanup:media                                      # Delete orphaned product images
 ```
 
@@ -1474,7 +1432,8 @@ SalesChannel no longer exists. Otherwise a new upload would reuse them with thei
 
 **Processor-specific cleanup:** Use `--processors=<list>` to cleanup only entities created by specific
 post-processors. Each processor implements its own `cleanup()` method that knows how to remove its entities.
-Available processors with cleanup: `cms`, `customers`.
+Every processor except `translations` has a cleanup; `--processors=all` selects all of them. Names
+are the processor names (`cms-home`, `customers`, ...). Unknown names fail with the list of valid ones.
 
 ### E2E Testing
 
@@ -1556,8 +1515,8 @@ bun run logs:clear
 
 # Cleanup Shopware data
 bun run cleanup -- --salesChannel="test"
-bun run cleanup -- --salesChannel="test" --props --manufacturers
-bun run cleanup -- --salesChannel="test" --processors=cms  # Cleanup specific processor entities
+bun run cleanup -- --salesChannel="test" --props --delete  # Also property groups + SalesChannel
+bun run cleanup -- --salesChannel="test" --processors=customers  # Cleanup specific processor entities
 bun run cleanup:props
 bun run cleanup:media
 
@@ -1586,11 +1545,11 @@ Instead of grepping the codebase to discover commands, Cursor auto-discovers too
 | ------------------------ | ------------------------------------------------------ |
 | `blueprint_inspire`      | Crawl a real store URL and save inspiration.json       |
 | `blueprint_create`       | Generate blueprint.json (no AI)                        |
-| `blueprint_hydrate`      | Fill blueprint with AI content (supports `--only=cms`) |
+| `blueprint_hydrate`      | Fill blueprint with AI content (supports `only` modes) |
 | `blueprint_estimate`     | Forecast AI tokens, images and USD cost (no AI calls)  |
 | `blueprint_translate`    | Translate the hydrated catalog into other locales      |
 | `blueprint_fix`          | Fix placeholder names                                  |
-| `image_fix`              | Regenerate images (product/category/cms by type)       |
+| `image_fix`              | Regenerate images (product/category/cms/theme by type) |
 | `template_metadata`      | Write template.json (models, languages, tested lanes)  |
 | `generate`               | Full pipeline: create + hydrate + upload               |
 | `process`                | Run post-processors                                    |

@@ -1,8 +1,85 @@
 # Shopware Catalog Generator
 
-Generate AI-powered demo catalogs for Shopware. Creates SalesChannels with category trees, products, descriptions, images, reviews, variants, CMS pages, cross-selling, demo customers, promotions, and themed storefronts (AI-generated brand colors, logo, favicon).
+**A complete, realistic Shopware demo store from one command.** Describe a store ("an outdoor
+gear shop", "a drugstore") and the generator builds a SalesChannel that looks and feels like
+a real shop: a deep category tree, 90 products with believable names, prices and copy,
+product photos from several angles, colour variants with their own recoloured images, fictional
+brands, reviews, CMS pages, a themed storefront and a German translation, all written for that store.
+
+Or skip the AI entirely and load one of six [ready-made templates](#catalog-templates) in minutes.
 
 > **Architecture details:** See [CONCEPTS.md](CONCEPTS.md) for diagrams and in-depth explanations.
+
+## Highlights
+
+**Catalog content**
+
+- **Any store type.** Every prompt is derived from your store name and description. Nothing is
+  hardcoded for fashion, furniture or music.
+- **Deep category trees** with AI names, descriptions and banner images. Categories without
+  products are hidden from the navigation.
+- **90 products** (configurable) with unique names, rich descriptions, store-specific
+  properties, EANs, weights, delivery times, list prices, tiered prices and top sellers.
+- **Realistic prices:** the AI picks a plausible price range per product, plus pack units
+  ("Pair", "Pack", "Bag", "Roll") with reference prices where they make sense.
+- **Fictional brands** that fit the store, and image prompts that avoid real trademarks.
+- **Multi-view product images** (OpenAI or Pollinations), category banners, CMS images and a
+  theme with AI brand colours, logo, favicon and share image.
+
+**Variants and colours**
+
+- **Variant products** with colour, size, material and other groups. Share of variant products,
+  colours, options and the variant cap are all [configurable](src/cli/AGENTS.md#command-reference).
+- **Recoloured images per colour variant:** the parent photos are edited once per colour, so
+  every variant shows its own colour (needs OpenAI image editing).
+- **Colour families as filter:** precise shade names ("Sage", "Burgundy") on the product, 16
+  colour families ("Green", "Red") in the listing filter.
+
+**Languages**
+
+- **English and German storefronts** out of the box (USD and EUR domains), more locales with
+  `--languages=fr-FR,nl-NL`.
+- **Native-sounding translations**, not word-for-word: products, categories, properties, brands,
+  CMS texts, reviews, promotions and image alt texts. Re-runs only translate what changed.
+
+**Shop features for demos and QA**
+
+- **CMS showcase pages** for every CMS element (text, images, video, commerce, forms), a
+  homepage, footer and legal pages.
+- **Demo customers** (incl. a B2B group), **promotion codes**, **cross-selling**, a **digital
+  product** with download, and a **media showcase** with 3D models and videos.
+- **Reviews** spread across the storefront languages.
+
+**Built for real workflows**
+
+- **Cost forecast before any AI call** (`blueprint estimate`) and actual token usage after.
+- **Store inspiration:** crawl a real shop to borrow its category style, product examples and
+  brand colours.
+- **Version aware:** detects the Shopware version and feature flags, and only sends fields the
+  shop supports. One template works on every version.
+- **Idempotent and resumable:** re-runs update instead of duplicating, and a failed hydration
+  heals itself on the next run.
+- **CLI, HTTP server and MCP server** share one implementation, so AI assistants can drive
+  every command.
+
+## Tested Shopware Versions
+
+Supported: **Shopware 6.6 and newer**. 6.5 runs, but is best-effort (a warning is printed).
+
+The six [catalog templates](#catalog-templates) were generated with generator **2.0.0** and
+tested end to end (upload, all post-processors, data verification, storefront domains) on these
+lanes on **2026-11-11**:
+
+| Lane    | Shopware                                  | Result                                                                                     |
+| ------- | ----------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `65`    | 6.5 development build                     | ✅ all 6 pass (6.6+ features skipped)                                                      |
+| `66`    | 6.6 development build                     | ✅ all 6 pass (6.7+ features skipped)                                                      |
+| `67`    | 6.7.16.0                                  | ✅ all 6 pass                                                                              |
+| `68`    | 6.7 development build (`6.7.9999999-dev`) | ✅ all 6 pass                                                                              |
+| `trunk` | 6.7 development build (`6.7.9999999-dev`) | ⚠️ 5 of 6 pass (music: imperial-units check failed on a SalesChannel that already existed) |
+
+Each template's `template.json` records its exact results. To run the same matrix yourself, see
+[E2E Testing](#e2e-testing).
 
 ## Quick Start
 
@@ -38,7 +115,20 @@ This creates a SalesChannel named "music" with 3 top-level categories, ~90 produ
 
 ## Catalog Templates
 
-Pre-generated, ready-to-use catalogs are available at **[shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**. Currently included: `music`, `garden`, and `beauty`.
+Pre-generated, ready-to-use catalogs are available at **[shopware-catalog-templates](https://github.com/shopwareLabs/shopware-catalog-templates)**:
+
+| Template      | Store                                                |
+| ------------- | ---------------------------------------------------- |
+| `beauty`      | Makeup, skincare and beauty tools                    |
+| `drugstore`   | Beauty and personal care, health, household          |
+| `electronics` | Computers, phones, wearables, TV and audio           |
+| `fashion`     | Women's and men's fashion, shoes and accessories     |
+| `garden`      | Outdoor furniture, plants, garden tools and watering |
+| `music`       | Musical instruments, accessories, sheet music        |
+
+Every template has 90 products (27 with variants and recoloured colour images), English and
+German texts, CMS pages, a theme, and a `template.json` with the models used and the tested
+Shopware versions.
 
 When you run `generate`, the CLI automatically checks if a matching template exists. If found, it skips AI generation entirely and uploads the template directly:
 
@@ -159,16 +249,31 @@ To create integration credentials:
 
 ### Domains & Languages
 
-Every generated SalesChannel automatically gets two domains:
+Every generated SalesChannel gets an English domain plus one domain per extra locale
+(German by default):
 
 | Domain                     | Language | Currency |
 | -------------------------- | -------- | -------- |
 | `{name}.localhost:8000`    | English  | USD      |
 | `{name}-de.localhost:8000` | German   | EUR      |
 
-The German domain is only created if `de-DE` language and its snippet set are installed in Shopware. If not, a warning is logged and only the English domain is created.
+A locale's domain is only created if its language and snippet set are installed in Shopware. If not, a warning is logged and that domain is skipped.
 
 > To install German: **Settings → Shop → Languages → Add language → German**.
+
+### Translations
+
+English is generated first. A separate AI pass then translates the catalog per locale, aiming
+for copy a native speaker would write. The tone (du/Sie, tu/vous) is chosen per locale and
+can be set with `--formality`.
+
+```bash
+bun run blueprint translate --name=music --languages=de-DE,fr-FR  # translate (shows a cost forecast first)
+bun run generate --name=music --languages=de-DE                   # translate and upload in one go
+```
+
+`--languages` also takes `all` (every language of the SalesChannel) or `none`.
+`TRANSLATION_LANGUAGES` sets the default. Unchanged texts are reused on re-runs.
 
 ## CLI Usage
 
@@ -195,6 +300,19 @@ bun run generate --name=music
 ```
 
 `blueprint estimate` prints the expected tokens, image count and USD cost for the configured models. `blueprint hydrate` shows the same forecast before it starts and the actual token usage when it finishes.
+
+Re-hydrate only one part of an existing catalog with `--only` (product names stay stable, so
+images stay valid):
+
+```bash
+bun run blueprint hydrate --name=music --only=prices         # realistic prices and pack units
+bun run blueprint hydrate --name=music --only=names          # unique product names
+bun run blueprint hydrate --name=music --only=manufacturers  # fictional brands for the store
+bun run blueprint hydrate --name=music --only=variants --variant-colors=6
+bun run blueprint hydrate --name=music --only=variant-images # recolour images per colour variant
+```
+
+Other modes: `categories`, `properties`, `cms`. See the [CLI Reference](src/cli/AGENTS.md#command-reference).
 
 `blueprint inspire` extracts categories, example products, brand colors, and a description from a real store's static HTML. The data is saved as `inspiration.json` and automatically picked up by `blueprint hydrate` to orient AI generation. No API keys needed — uses `cheerio` + `sharp`.
 
@@ -227,27 +345,29 @@ bun run cache:restore -- --all        # Restore from trash
 
 Post-processors run after upload for resource-intensive tasks (images, reviews, CMS pages, etc.).
 
-| Processor          | Description                                      | Dependencies          |
-| ------------------ | ------------------------------------------------ | --------------------- |
-| `cms-home`         | Homepage layout with product listing             | none                  |
-| `cms-text`         | Text elements demo page                          | none                  |
-| `cms-images`       | Image elements demo page                         | none                  |
-| `cms-video`        | Video elements demo page                         | none                  |
-| `cms-text-images`  | Text & Images demo page                          | none                  |
-| `cms-commerce`     | Commerce elements demo page                      | images                |
-| `cms-form`         | Form elements demo page                          | none                  |
-| `cms-footer-pages` | Shared footer and legal pages                    | none                  |
-| `cross-selling`    | Category-based cross-selling via product streams | none                  |
-| `customers`        | Demo customer accounts with B2B group            | none                  |
-| `images`           | Upload pre-generated product/category images     | none                  |
-| `manufacturers`    | Fictional manufacturer creation                  | none                  |
-| `promotions`       | Tiered pricing and promotion codes               | none                  |
-| `reviews`          | Product reviews (0-10 per product)               | none                  |
-| `theme`            | Child theme with brand colors, logo, favicon     | none                  |
-| `variants`         | Variant product creation                         | manufacturers         |
-| `digital-product`  | Digital product (Gift Card)                      | none                  |
-| `media-product`    | Product with 3D models and videos (6.6+)         | none                  |
-| `cms-testing`      | Testing category hierarchy                       | cms-\*, demo products |
+| Processor          | Description                                      | Dependencies                         |
+| ------------------ | ------------------------------------------------ | ------------------------------------ |
+| `cms-home`         | Homepage layout with product listing             | customers, promotions, cross-selling |
+| `cms-text`         | Text elements demo page                          | none                                 |
+| `cms-images`       | Image elements demo page                         | none                                 |
+| `cms-video`        | Video elements demo page                         | none                                 |
+| `cms-text-images`  | Text & Images demo page                          | none                                 |
+| `cms-commerce`     | Commerce elements demo page                      | images                               |
+| `cms-form`         | Form elements demo page                          | none                                 |
+| `cms-footer-pages` | Shared footer and legal pages                    | none                                 |
+| `cross-selling`    | Category-based cross-selling via product streams | none                                 |
+| `customers`        | Demo customer accounts with B2B group            | none                                 |
+| `images`           | Upload pre-generated product/category images     | none                                 |
+| `manufacturers`    | Fictional manufacturer creation                  | none                                 |
+| `promotions`       | Tiered pricing and promotion codes               | none                                 |
+| `reviews`          | Product reviews, spread across languages         | none                                 |
+| `theme`            | Child theme with brand colors, logo, favicon     | none                                 |
+| `variants`         | Variant product creation                         | manufacturers                        |
+| `variant-images`   | Colour images and gallery per colour variant     | variants, images                     |
+| `translations`     | Write cached translations per language (no AI)   | most other processors                |
+| `digital-product`  | Digital product (Gift Card)                      | none                                 |
+| `media-product`    | Product with 3D models and videos (6.6+)         | none                                 |
+| `cms-testing`      | Testing category hierarchy                       | cms-\*, demo products                |
 
 Processors run in parallel when possible, respecting dependency order. See [CONCEPTS.md](CONCEPTS.md#post-processor-system) for the execution diagram.
 

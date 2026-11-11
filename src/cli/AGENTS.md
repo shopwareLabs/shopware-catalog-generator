@@ -98,11 +98,11 @@ bun run blueprint estimate --name=music
 bun run blueprint estimate --name=music --only=cms
 ```
 
-| Flag          | Type   | Default            | Description                                                   |
-| ------------- | ------ | ------------------ | ------------------------------------------------------------- |
-| `--name`      | string | _(required)_       | SalesChannel name (blueprint must exist)                      |
-| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms`, `variants` |
-| `--languages` | string | _(none)_           | Also forecast translation: `de-DE,fr-FR`, `all`, `none`       |
+| Flag          | Type   | Default            | Description                                                                                                           |
+| ------------- | ------ | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `--name`      | string | _(required)_       | SalesChannel name (blueprint must exist)                                                                              |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms`, `variants`, `variant-images`, `prices`, `names` or `manufacturers` |
+| `--languages` | string | _(none)_           | Also forecast translation: `de-DE,fr-FR`, `all`, `none`                                                               |
 
 `blueprint hydrate` prints the same forecast before it starts and the actual token usage at the end.
 
@@ -135,11 +135,11 @@ Phase 2: Fill blueprint with AI-generated content (names, descriptions, properti
 bun run blueprint hydrate --name=music
 ```
 
-| Flag          | Type   | Default            | Description                                                          |
-| ------------- | ------ | ------------------ | -------------------------------------------------------------------- |
-| `--name`      | string | _(required)_       | SalesChannel name                                                    |
-| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms` or `variants`      |
-| `--rehydrate` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names) |
+| Flag          | Type   | Default            | Description                                                                                                           |
+| ------------- | ------ | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `--name`      | string | _(required)_       | SalesChannel name                                                                                                     |
+| `--only`      | string | _(full hydration)_ | Selective mode: `categories`, `properties`, `cms`, `variants`, `variant-images`, `prices`, `names` or `manufacturers` |
+| `--rehydrate` | flag   | `false`            | Force full re-hydration (overwrites existing, changes product names)                                                  |
 
 #### Hydration Modes
 
