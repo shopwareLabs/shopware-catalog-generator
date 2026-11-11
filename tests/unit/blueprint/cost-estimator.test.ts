@@ -60,7 +60,7 @@ describe("estimateHydrationCost", () => {
         expect(products?.calls).toBe(4);
     });
 
-    test("full scope includes categories, brand colors, products, properties and CMS", () => {
+    test("full scope includes categories, brand colors, products, properties, CMS, prices and brands", () => {
         const labels = estimateHydrationCost(createInput()).text.items.map((i) => i.label);
 
         expect(labels).toEqual([
@@ -70,6 +70,7 @@ describe("estimateHydrationCost", () => {
             "Property options",
             "CMS pages",
             "Prices",
+            "Manufacturers",
         ]);
     });
 
@@ -313,6 +314,7 @@ describe("estimateHydrationCost - text items per scope", () => {
             "Property options",
             "CMS pages",
             "Prices",
+            "Manufacturers",
         ]);
     });
 
@@ -328,6 +330,18 @@ describe("estimateHydrationCost - text items per scope", () => {
 
         expect(estimate.text.items).toEqual([
             { label: "Product names", calls: 1, inputTokens: 1800 + 90, outputTokens: 25 },
+        ]);
+        expect(estimate.images.count).toBe(0);
+    });
+
+    test("manufacturers scope makes one call for the whole store", () => {
+        const categories = [createTestCategory({ id: "a" }), createTestCategory({ id: "b" })];
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "manufacturers", blueprint: { categories, products: [] } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            { label: "Manufacturers", calls: 1, inputTokens: 300 + 2 * 60, outputTokens: 2 * 30 },
         ]);
         expect(estimate.images.count).toBe(0);
     });

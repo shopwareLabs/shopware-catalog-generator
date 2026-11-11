@@ -249,6 +249,38 @@ describe("hydrateBlueprint and estimateBlueprintCost", () => {
         expect(after?.products.map((p) => p.price)).toEqual([5, 7]);
     });
 
+    test("--only=manufacturers replaces brands and keeps names", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "a",
+                    name: "Earplugs",
+                    metadata: { manufacturerName: "Artisan Home" },
+                }),
+                createTestProduct({
+                    id: "b",
+                    name: "Headset",
+                    metadata: { manufacturerName: "Artisan Home" },
+                }),
+            ],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        const branches = [{ index: 1, brands: ["Quietline"] }];
+        text.setResponse("Manufacturers", { branches });
+
+        const lines = await hydrateBlueprint("test-store", { only: "manufacturers" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: manufacturers");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["Manufacturers"]);
+        expect(after?.products.map((p) => p.metadata.manufacturerName)).toEqual([
+            "Quietline",
+            "Quietline",
+        ]);
+        expect(after?.products.map((p) => p.name)).toEqual(["Earplugs", "Headset"]);
+    });
+
     test("--only=variant-images does nothing when images are disabled", async () => {
         saveBlueprints(true);
         const lines = await hydrateBlueprint("test-store", { only: "variant-images" }, deps());

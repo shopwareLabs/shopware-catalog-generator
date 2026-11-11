@@ -93,6 +93,7 @@ src/
 │       ├── color-shades.ts   # AI hex + family for unknown shade names (store context)
 │       ├── theme.ts          # AI brand color generation
 │       ├── prices.ts         # Realistic prices (AI price range per product, seeded roll)
+│       ├── manufacturers.ts  # Fictional brands per category branch (one AI call per store)
 │       └── names.ts          # Unique product names, variant values out of parent names
 │
 ├── post-processors/          # Post-processors (parallel execution)
@@ -1278,6 +1279,7 @@ bun run blueprint hydrate --name=music --only=variants --variant-colors=6  # Mor
 bun run blueprint hydrate --name=music --only=variant-images  # Recolour images per colour variant
 bun run blueprint hydrate --name=music --only=prices      # Realistic prices (keeps names)
 bun run blueprint hydrate --name=music --only=names       # Unique names, no variant values in parent names
+bun run blueprint hydrate --name=music --only=manufacturers  # Fictional brands that fit the store
 bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
@@ -1350,7 +1352,7 @@ the largest other group shrinks first (down to 2), then the colours, then other 
 ```bash
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
-  --only=MODE              # Selective: "categories", "properties", "cms", "variants", "variant-images", "prices" or "names"
+  --only=MODE              # Selective: "categories", "properties", "cms", "variants", "variant-images", "prices", "names" or "manufacturers"
   --rehydrate              # Force full re-hydration (changes names, triggers image regen)
 ```
 
@@ -1377,6 +1379,10 @@ Hydration modes:
   name another product already has ("750 ml" and "750ml" count as the same). One AI call per 25
   duplicates; descriptions, properties and images stay (`hydrators/names.ts`). A full hydration
   runs this pass too
+- **--only=manufacturers**: Replace the placeholder brands ("Artisan Home", "Premium Craft", the
+  same in every store) with fictional brands that fit the store. One AI call per store; products
+  that shared a brand keep sharing one, per top-level category (`hydrators/manufacturers.ts`).
+  A full hydration runs this pass too
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
@@ -1386,7 +1392,7 @@ Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prev
 ```bash
 bun run blueprint estimate \
   --name=NAME              # Required: SalesChannel name (blueprint must exist)
-  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images", "prices", "names")
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images", "prices", "names", "manufacturers")
   --languages=LIST         # Optional: also forecast translation ("de-DE,fr-FR", "all", "none")
 ```
 

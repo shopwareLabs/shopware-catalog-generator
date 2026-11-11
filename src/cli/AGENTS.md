@@ -153,6 +153,7 @@ bun run blueprint hydrate --name=music
 | `--only=variant-images`    | Recolour product images per colour variant (OpenAI edits)      |
 | `--only=prices`            | Realistic prices per product (one AI call per 100 products)    |
 | `--only=names`             | Unique product names, no variant values in parent names        |
+| `--only=manufacturers`     | Fictional brands that fit the store (one AI call)              |
 | `--rehydrate`              | Force full re-hydration even if hydrated blueprint exists      |
 
 If a hydrated blueprint already exists, `--only` or `--rehydrate` is required to prevent accidental name changes.

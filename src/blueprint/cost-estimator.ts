@@ -60,6 +60,7 @@ const TOKENS = {
     variantColors: { input: 400, inputPerProduct: 25, outputPerProduct: 45 },
     prices: { input: 250, inputPerProduct: 25, outputPerProduct: 20 },
     names: { input: 1800, inputPerProduct: 90, outputPerProduct: 25 },
+    manufacturers: { input: 300, inputPerBranch: 60, outputPerBranch: 30 },
 } as const;
 
 /** Blueprint shape the estimator needs */
@@ -332,6 +333,10 @@ const TEXT_STEPS: TextStep[] = [
     { scopes: ["full", "prices"], build: (input) => priceItem(input.blueprint.products.length) },
     { scopes: ["names"], build: (input) => nameItem(input.blueprint.products) },
     {
+        scopes: ["full", "manufacturers"],
+        build: (input) => manufacturerItem(input.blueprint.categories.length),
+    },
+    {
         scopes: ["variants"],
         build: (input) =>
             input.variants ? variantColorItem(input.blueprint.products, input.variants) : null,
@@ -362,6 +367,16 @@ function nameItem(products: BlueprintProduct[]): TextCostItem {
         calls,
         inputTokens: calls * TOKENS.names.input + duplicates * TOKENS.names.inputPerProduct,
         outputTokens: duplicates * TOKENS.names.outputPerProduct,
+    };
+}
+
+/** One call for the whole store; each top-level category is one branch */
+function manufacturerItem(branches: number): TextCostItem {
+    return {
+        label: "Manufacturers",
+        calls: branches > 0 ? 1 : 0,
+        inputTokens: TOKENS.manufacturers.input + branches * TOKENS.manufacturers.inputPerBranch,
+        outputTokens: branches * TOKENS.manufacturers.outputPerBranch,
     };
 }
 
@@ -586,16 +601,17 @@ function buildNotes(input: CostEstimateInput): string[] {
     ];
 }
 
+/** Scopes that create or change variants */
+const VARIANT_NOTE_SCOPES = new Set<HydrationScope>([
+    "full",
+    "properties",
+    "variants",
+    "variant-images",
+]);
+
 function variantNotes(input: CostEstimateInput): string[] {
     const { variants, scope } = input;
-    if (
-        !variants ||
-        scope === "categories" ||
-        scope === "cms" ||
-        scope === "prices" ||
-        scope === "names"
-    )
-        return [];
+    if (!variants || !VARIANT_NOTE_SCOPES.has(scope)) return [];
     const variantProducts =
         scope === "full"
             ? Math.round(input.blueprint.products.length * variants.share)

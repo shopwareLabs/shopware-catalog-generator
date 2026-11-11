@@ -109,6 +109,10 @@ Supports selective re-hydration modes:
   `stripVariantValues()` drops variant values from variant parent names (no AI), then every
   product whose name is taken (`productNameKey()`: case, spaces and punctuation ignored) gets a
   new name from the AI (one call per 25). A taken proposal keeps the old name. Full hydration runs it too
+- `manufacturers` — `hydrateManufacturersOnly()` via `hydrateManufacturers()`
+  (`hydrators/manufacturers.ts`): one AI call per store returns fictional brands per top-level
+  category. Each placeholder brand of a branch maps to one new brand, so the grouping stays. A
+  branch with too few unique proposals keeps its brands. Full hydration runs it too
 
 ### Variant colour images
 

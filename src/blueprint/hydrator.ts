@@ -30,6 +30,7 @@ import {
     flattenCategories,
     hydrateBrandColors,
     hydrateCategories,
+    hydrateManufacturers,
     hydratePrices,
     hydrateProductNames,
     ProductHydrator,
@@ -143,9 +144,14 @@ export class BlueprintHydrator {
             { categories, products: hydratedProducts },
             storeContext
         );
-        const { products } = await hydrateProductNames(
+        const { products: named } = await hydrateProductNames(
             this.textProvider,
             { categories, products: priced },
+            storeContext
+        );
+        const { products } = await hydrateManufacturers(
+            this.textProvider,
+            { categories, products: named },
             storeContext
         );
 
@@ -289,6 +295,28 @@ export class BlueprintHydrator {
         if (result.stillDuplicate > 0) {
             logger.warn(`  ${result.stillDuplicate} products still share a name`, { cli: true });
         }
+        return {
+            ...existingBlueprint,
+            products: result.products,
+            hydratedAt: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Replace the placeholder brands with fictional brands that fit the store (one AI
+     * call). Products that shared a brand keep sharing one; names and images stay.
+     */
+    async hydrateManufacturersOnly(
+        existingBlueprint: HydratedBlueprint
+    ): Promise<HydratedBlueprint> {
+        const result = await hydrateManufacturers(this.textProvider, existingBlueprint, {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        });
+        logger.info(
+            `  Manufacturers: ${result.manufacturers.length} brands, ${result.branches} categories updated`,
+            { cli: true }
+        );
         return {
             ...existingBlueprint,
             products: result.products,

@@ -13,7 +13,8 @@ export type HydrationScope =
     | "variants"
     | "variant-images"
     | "prices"
-    | "names";
+    | "names"
+    | "manufacturers";
 
 /** Resolved provider/model selection (what the factory will actually use) */
 export interface ModelSelection {
