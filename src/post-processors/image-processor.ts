@@ -225,13 +225,14 @@ class ImageProcessorImpl implements PostProcessor {
         images: ProductImageUpload[]
     ): Promise<void> {
         const shortName = this.truncateName(productName);
-        if (await this.productHasImages(context, productId)) {
-            logger.info(`      ✓ ${shortName}: reused existing images`, { cli: true });
+        const sanitizedName = productName.replace(/[^a-zA-Z0-9]/g, "-");
+        const linked = await findLinkedProductMedia(context, productId);
+        if (linked.length > 0) {
+            await reuploadMissingFiles(context, linked, images, sanitizedName, shortName);
             return;
         }
 
         const mediaFolderId = await this.getProductMediaFolderId(context);
-        const sanitizedName = productName.replace(/[^a-zA-Z0-9]/g, "-");
         const mediaToLink = await this.resolveMediaToLink(context, sanitizedName, images);
         const newMedia = mediaToLink.filter((m) => m.isNew);
 
@@ -274,47 +275,6 @@ class ImageProcessorImpl implements PostProcessor {
     }
 
     private productMediaFolderId: string | null = null;
-    private productsWithImages: Set<string> = new Set();
-
-    /**
-     * Check if product already has images in Shopware
-     */
-    private async productHasImages(
-        context: PostProcessorContext,
-        productId: string
-    ): Promise<boolean> {
-        // Use cached result if available
-        if (this.productsWithImages.has(productId)) {
-            return true;
-        }
-
-        try {
-            interface ProductMediaResponse {
-                data?: Array<{
-                    id: string;
-                    coverId?: string | null;
-                    media?: Array<{ id: string }>;
-                }>;
-            }
-            const response = await apiPost(context, "search/product", {
-                ids: [productId],
-                associations: { media: {} },
-            });
-
-            if (response.ok) {
-                const data = (await response.json()) as ProductMediaResponse;
-                const product = data.data?.[0];
-                if (product && ((product.media && product.media.length > 0) || product.coverId)) {
-                    this.productsWithImages.add(productId);
-                    return true;
-                }
-            }
-        } catch {
-            // On error, assume no images (will try to upload)
-        }
-
-        return false;
-    }
 
     // Cache for media filename lookups
     private mediaFileNameCache: Map<string, string> = new Map();
@@ -584,6 +544,81 @@ async function uploadCategoryBanner(
         errors.push(`Failed to upload banner for ${category.name}: ${errorMessage(error)}`);
         return false;
     }
+}
+
+/** Media already linked to a product, with whether its file exists */
+interface LinkedProductMedia {
+    mediaId: string;
+    position: number;
+    hasFile: boolean;
+}
+
+interface ProductMediaSearchResponse {
+    data?: Array<{
+        media?: Array<{
+            mediaId?: string;
+            position?: number;
+            media?: { hasFile?: boolean; path?: string | null; fileName?: string | null };
+        }>;
+    }>;
+}
+
+/**
+ * Media linked to the product. A media entity can exist without a file when the
+ * upload failed after it was created (e.g. Shopware ran out of disk space).
+ */
+async function findLinkedProductMedia(
+    context: PostProcessorContext,
+    productId: string
+): Promise<LinkedProductMedia[]> {
+    try {
+        const response = await apiPost(context, "search/product", {
+            ids: [productId],
+            associations: { media: { associations: { media: {} } } },
+        });
+        if (!response.ok) return [];
+        const data = (await response.json()) as ProductMediaSearchResponse;
+        return (data.data?.[0]?.media ?? []).map((pm, index) => ({
+            mediaId: pm.mediaId ?? "",
+            position: pm.position ?? index,
+            // Without the media association the file state is unknown: assume it exists
+            hasFile: pm.media ? (pm.media.hasFile ?? Boolean(pm.media.path)) : true,
+        }));
+    } catch {
+        // On error, assume no images (will try to upload)
+        return [];
+    }
+}
+
+/**
+ * Upload the cached file for linked media that have none. Media are linked in view
+ * order, so the position picks the cached image.
+ */
+async function reuploadMissingFiles(
+    context: PostProcessorContext,
+    linked: LinkedProductMedia[],
+    images: ProductImageUpload[],
+    sanitizedName: string,
+    shortName: string
+): Promise<void> {
+    const missing = linked.flatMap((m) => {
+        const image = images[m.position];
+        if (m.hasFile || !m.mediaId || !image) return [];
+        return [{ ...image, mediaId: m.mediaId, isNew: true }];
+    });
+    if (missing.length === 0) {
+        logger.info(`      ✓ ${shortName}: reused existing images`, { cli: true });
+        return;
+    }
+    const results = await Promise.all(
+        missing.map((img) =>
+            uploadProductMediaFile(context, img, `${sanitizedName}-${img.view}`, shortName)
+        )
+    );
+    const uploaded = results.filter((r) => r !== "error").length;
+    logger.info(`      ✓ ${shortName}: re-uploaded ${uploaded} missing image files`, {
+        cli: true,
+    });
 }
 
 /** Create media entities for images that have no existing media yet */
