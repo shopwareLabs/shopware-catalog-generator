@@ -41,7 +41,7 @@ tests/
 │   ├── shopware/             # src/shopware/ tests
 │   ├── templates/            # src/templates/ tests
 │   ├── utils/                # src/utils/ tests
-│   ├── scripts/              # scripts/ tests (crawler-validation)
+│   ├── scripts/              # scripts/ tests (crawler-validation, image-recompress)
 │   ├── cache.test.ts         # Root-level src/*.ts tests
 │   ├── cache-cli.test.ts
 │   ├── image-cache.test.ts

@@ -45,6 +45,7 @@
         "test:coverage": "bun test --coverage",
         "test:mcp": "bun test tests/integration/mcp-cli.test.ts",
         "test:crawlers": "bun run scripts/validate-crawlers.ts",
+        "images:compress": "bun run scripts/compress-images.ts",
         "test:inspiration": "INSPIRATION_INTEGRATION=1 bun test tests/integration/inspiration-files.test.ts",
         "test:e2e": "./test-e2e.sh",
         "test:verify": "bun run tests/e2e/verify.ts",

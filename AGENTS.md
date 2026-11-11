@@ -245,6 +245,8 @@ scripts/
 ├── lint-no-cast.ts           # Custom lint rule: no type casting
 ├── validate-crawlers.ts      # bun run test:crawlers: crawl known stores, check expectations
 ├── crawler-validation.ts     # Pure parts of validate-crawlers (checks, table output)
+├── compress-images.ts        # bun run images:compress: recompress an existing cache (WebP q80)
+├── image-recompress.ts       # Pure parts of compress-images (recompress + colour image hashes)
 └── reset-templates-history.sh # Squash the history of the templates repo
 
 tests/
@@ -1521,6 +1523,9 @@ bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore item from trash
 bun run cache:restore -- --all        # Restore all items from trash
 bun run cache:empty-trash -- --confirm  # Permanently delete trash
+
+# Recompress images of caches created before compression on save (idempotent)
+bun run images:compress -- ../shopware-catalog-templates/generated --dry-run
 
 # Log management
 bun run logs:clear

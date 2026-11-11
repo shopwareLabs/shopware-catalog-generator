@@ -37,7 +37,7 @@ export const VARIANT_IMAGE_VIEWS_ENV = "VARIANT_IMAGE_VIEWS";
 export type VariantImageViews = "all" | "cover";
 
 /** Separator between the parent view and the shade slug in the cached view name */
-const SHADE_VIEW_SEPARATOR = "--";
+export const SHADE_VIEW_SEPARATOR = "--";
 
 export const NO_EDIT_SUPPORT_WARNING =
     "Colour images need image editing (OpenAI). This image provider cannot recolour an " +
