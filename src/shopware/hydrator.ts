@@ -311,20 +311,7 @@ export class ShopwareHydrator extends ShopwareClient {
         const result = new Map<string, { id: string; options: Map<string, string> }>();
 
         try {
-            const { data: searchData } = await this.getClient().invoke(
-                "searchPropertyGroup post /search/property-group",
-                {
-                    body: {
-                        limit: 100,
-                        associations: {
-                            options: { sort: [{ field: "position", order: "ASC" }] },
-                        },
-                    },
-                }
-            );
-            const searchResult = searchData as SearchResult<Schemas["PropertyGroup"]>;
-
-            for (const group of searchResult.data ?? []) {
+            for (const group of await this.searchAllPropertyGroups()) {
                 const optionMap = new Map<string, string>();
                 for (const opt of group.options ?? []) {
                     optionMap.set(opt.name.toLowerCase(), opt.id);
@@ -636,7 +623,27 @@ export class ShopwareHydrator extends ShopwareClient {
             }
         }
 
+        await this.unlinkRemovedProductOptions(products);
         return created;
+    }
+
+    /**
+     * Delete product_property links that a product no longer has (e.g. the colour of a
+     * variant parent from an older run). Links that do not exist are ignored by Shopware.
+     */
+    private async unlinkRemovedProductOptions(products: DirectProductInput[]): Promise<void> {
+        const links = products.flatMap((p) =>
+            (p.removedOptionIds ?? []).map((optionId) => ({ productId: p.id, optionId }))
+        );
+        if (links.length === 0) return;
+        try {
+            await this.sync([{ entity: "product_property", action: "delete", payload: links }]);
+        } catch (error) {
+            logger.warn(`Could not unlink ${links.length} variant group properties`, {
+                cli: true,
+                data: error,
+            });
+        }
     }
 
     /**
@@ -1129,7 +1136,7 @@ export class ShopwareHydrator extends ShopwareClient {
                 displayNestedProducts: true,
                 type: "page",
                 productAssignmentType: "product",
-                visible: true,
+                visible: item.category.visible ?? true,
                 active: true,
             };
         });
@@ -1504,6 +1511,8 @@ interface DirectProductInput {
     stock: number;
     categoryIds?: string[];
     options?: Array<{ id: string; name: string }>;
+    /** Property options to unlink (left out on purpose, may exist from an older run) */
+    removedOptionIds?: string[];
     hasSalesPrice?: boolean;
     salePercentage?: number;
     hasTieredPricing?: boolean;
@@ -1594,11 +1603,21 @@ function tieredPrices(
     }));
 }
 
+/** Packaging fields cleared, for products without a pack (an earlier run may have set them) */
+const NO_PACKAGING: Partial<ProductSyncPayload> = {
+    unitId: null,
+    purchaseUnit: null,
+    referenceUnit: null,
+    packUnit: null,
+    packUnitPlural: null,
+};
+
 /** Packaging / reference price ("6 pc, 1 pc = $4.99") */
 function packagingFields(
-    packaging: ProductPackaging,
+    packaging: ProductPackaging | undefined,
     unitIds: Map<string, string>
 ): Partial<ProductSyncPayload> {
+    if (!packaging) return NO_PACKAGING;
     const unitId = unitIds.get(packaging.unitShortCode);
     return {
         ...(unitId && { unitId }),
@@ -1645,7 +1664,7 @@ function packagingAndDeliveryFields(
 ): Partial<ProductSyncPayload> {
     const delivery = deliveryTimeId(p, ctx.deliveryTimeIds);
     return {
-        ...(p.packaging && packagingFields(p.packaging, ctx.unitIds)),
+        ...packagingFields(p.packaging, ctx.unitIds),
         // "New" badge: always the upload time, so the badge never ages out on the storefront
         ...(p.isNew && { releaseDate: new Date().toISOString() }),
         ...(delivery && { deliveryTimeId: delivery }),

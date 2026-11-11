@@ -15,10 +15,10 @@ The shopware module handles all API interactions with Shopware 6:
 
 ```
 ShopwareClient (auth, base API)
- └── ShopwareHydrator (create operations, SalesChannels, category trees)
-      └── ShopwareExporter (export/sync existing data)
-           └── ShopwareCleanup (delete operations, SalesChannel-centric)
-                └── DataHydrator (combines all via composition)
+ ├── ShopwareHydrator (create operations, SalesChannels, category trees)
+ │    └── DataHydrator (adds ShopwareCleanup + ShopwareExporter via composition)
+ ├── ShopwareExporter (export/sync existing data)
+ └── ShopwareCleanup (delete operations, SalesChannel-centric)
 ```
 
 ## Official API Client
@@ -83,6 +83,10 @@ const token = await client.getAccessToken();
 
 This ensures generation works even if the default Storefront was renamed or if the Shopware instance uses a different language.
 
+**Property groups:** `searchAllPropertyGroups()` pages through all property groups (100 per
+page, sorted by ID, options sorted by position). A single page missed groups on shops with
+many of them, and an unmatched name then created a duplicate group.
+
 ### ShopwareHydrator
 
 Create entities in Shopware:
@@ -105,6 +109,13 @@ Catalog fields added on top (all optional, old blueprints still upload):
 | `customFields` (`cg_*`)                                                 | `metadata.customFields`                 | none, skipped if set creation fails |
 | `ogTitle`, `ogDescription`                                              | `metaTitle ?? name`, `metaDescription`  | `productOpenGraph` (6.7.10)         |
 
+- Products without `metadata.packaging` are sent with the unit fields set to `null`, so pack
+  units from earlier runs are removed (the price hydration can drop a pack).
+- A variant parent leaves out the properties of its own variant groups (the variants inherit
+  them, so "Color: Navy" would show on every variant). Those `product_property` links from
+  earlier runs are deleted after the upload.
+- A new property group whose products all use the same option is created with
+  `filterable: false` unless the blueprint sets `filterable`. Existing groups keep their setting.
 - `ensureUnits(units)` finds units by short code and creates the missing ones (a fresh shop has
   no unit rows). It returns a short code → ID map. If it fails, products upload without `unitId`.
 - `ensureProductCustomFieldSet(includeInSearch)` finds the `catalog_generator` set by name or
@@ -120,16 +131,24 @@ Catalog fields added on top (all optional, old blueprints still upload):
 
 **Category ordering**: Categories use `afterCategoryId` to preserve blueprint order. The Testing category is always created last so it appears at the end of the navigation.
 
-**Multi-domain SalesChannels**: `createSalesChannel()` automatically creates two domains per SalesChannel:
+**Hidden empty categories:** the upload (`sync.ts`) sends categories without products in or
+below them with `visible: false` (`hideEmptyCategories()` in `utils/category-tree.ts`), so they
+do not show up in the navigation. The number of hidden categories is logged.
 
-| Domain             | Language                     | Currency |
-| ------------------ | ---------------------------- | -------- |
-| `{name}.{host}`    | English (Storefront default) | USD      |
-| `{name}-de.{host}` | German (`de-DE`)             | EUR      |
+**Multi-domain SalesChannels**: `createSalesChannel()` creates the English domain plus one domain
+per extra locale (`DEFAULT_DOMAIN_LOCALES`, currently `de-DE`, plus the requested `locales`):
 
-The German domain is skipped with a warning if `de-DE` language or its snippet set is not installed in Shopware. USD falls back to the Storefront's default currency if not found. All lookups run in parallel with `Promise.all` via `ShopwareClient.getLanguageId()` and `ShopwareClient.getSnippetSetId()`.
+| Domain                   | Language                     | Currency                             |
+| ------------------------ | ---------------------------- | ------------------------------------ |
+| `{name}.{host}`          | English (Storefront default) | USD                                  |
+| `{name}-{suffix}.{host}` | Extra locale (e.g. `de-DE`)  | From `fixtures/locale-currencies.ts` |
 
-**Imperial English domain:** with `imperialEnglishDomain: true` (callers pass `supports("measurementUnits")`, 6.7.1+) the English domain gets `measurementUnits: { system: "imperial", units: { length: "in", weight: "lb" } }`. The German domain stays metric.
+A locale domain is skipped with a warning if its language or snippet set is not installed in
+Shopware. USD and the locale currencies fall back to the Storefront's default currency if not
+found. The lookups per locale run in parallel via `getLanguageId()`, `getSnippetSetId()` and
+`getCurrencyId()`.
+
+**Imperial English domain:** with `imperialEnglishDomain: true` (callers pass `supports("measurementUnits")`, 6.7.1+) the English domain gets `measurementUnits: { system: "imperial", units: { length: "in", weight: "lb" } }`. The other domains stay metric.
 
 ### ShopwareCleanup
 

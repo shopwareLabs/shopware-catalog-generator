@@ -60,7 +60,7 @@ describe("estimateHydrationCost", () => {
         expect(products?.calls).toBe(4);
     });
 
-    test("full scope includes categories, brand colors, products, properties and CMS", () => {
+    test("full scope includes categories, brand colors, products, properties, CMS, prices and brands", () => {
         const labels = estimateHydrationCost(createInput()).text.items.map((i) => i.label);
 
         expect(labels).toEqual([
@@ -69,6 +69,8 @@ describe("estimateHydrationCost", () => {
             "Products",
             "Property options",
             "CMS pages",
+            "Prices",
+            "Manufacturers",
         ]);
     });
 
@@ -311,7 +313,55 @@ describe("estimateHydrationCost - text items per scope", () => {
             "Products",
             "Property options",
             "CMS pages",
+            "Prices",
+            "Manufacturers",
         ]);
+    });
+
+    test("names scope makes one call per 25 duplicate names", () => {
+        const products = [
+            createTestProduct({ id: "a", name: "Cleaner - 750 ml" }),
+            createTestProduct({ id: "b", name: "Cleaner - 750ml" }),
+            createTestProduct({ id: "c", name: "Sponge" }),
+        ];
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "names", blueprint: { categories: [], products } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            { label: "Product names", calls: 1, inputTokens: 1800 + 90, outputTokens: 25 },
+        ]);
+        expect(estimate.images.count).toBe(0);
+    });
+
+    test("manufacturers scope makes one call for the whole store", () => {
+        const categories = [createTestCategory({ id: "a" }), createTestCategory({ id: "b" })];
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "manufacturers", blueprint: { categories, products: [] } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            { label: "Manufacturers", calls: 1, inputTokens: 300 + 2 * 60, outputTokens: 2 * 30 },
+        ]);
+        expect(estimate.images.count).toBe(0);
+    });
+
+    test("prices scope makes one call per 100 products and no images", () => {
+        const products = Array.from({ length: 101 }, (_, i) => createTestProduct({ id: `p-${i}` }));
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "prices", blueprint: { categories: [], products } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            {
+                label: "Prices",
+                calls: 2,
+                inputTokens: 250 + 101 * 25,
+                outputTokens: 101 * 20,
+            },
+        ]);
+        expect(estimate.images.count).toBe(0);
+        expect(estimate.notes.some((n) => n.startsWith("Variants:"))).toBe(false);
     });
 
     test("variant-images scope has no text calls", () => {

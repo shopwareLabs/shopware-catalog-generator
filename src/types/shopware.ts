@@ -216,11 +216,11 @@ export interface ProductSyncPayload {
     properties?: Array<{ id: string }>;
     prices?: TieredPricePayload[];
     /** Unit for content display / reference price (created on demand) */
-    unitId?: string;
-    purchaseUnit?: number;
-    referenceUnit?: number;
-    packUnit?: string;
-    packUnitPlural?: string;
+    unitId?: string | null;
+    purchaseUnit?: number | null;
+    referenceUnit?: number | null;
+    packUnit?: string | null;
+    packUnitPlural?: string | null;
     /** Values for the `catalog_generator` custom field set */
     customFields?: ProductCustomFieldValues;
     /** Social sharing fields (Shopware 6.7.10+) */
@@ -322,6 +322,8 @@ export interface CategoryNode {
     productCount: number;
     /** Whether this category should have an image */
     hasImage: boolean;
+    /** Shown in the navigation (default: true). Empty categories are hidden */
+    visible?: boolean;
     /** Image data (populated after generation) */
     image?: ProductImage;
 }

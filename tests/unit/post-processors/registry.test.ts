@@ -200,6 +200,34 @@ describe("runProcessors", () => {
         logger.setMcpMode(false);
     });
 
+    test("clears the shop cache once after all processors", async () => {
+        logger.setMcpMode(true);
+        const context = createMockContext();
+
+        await runProcessors(context, []);
+
+        const api = context.api as MockApiHelpers;
+        expect(api.getCallsByMethod("httpDelete").map((c) => c.endpoint)).toEqual([
+            "_action/cache",
+        ]);
+        logger.setMcpMode(false);
+    });
+
+    test("keeps the shop cache on a dry run and survives a failed clear", async () => {
+        logger.setMcpMode(true);
+        const dryRun = createMockContext();
+        dryRun.options.dryRun = true;
+        await runProcessors(dryRun, []);
+        expect((dryRun.api as MockApiHelpers).getCallsByMethod("httpDelete")).toEqual([]);
+
+        const failing = createMockContext();
+        failing.api.httpDelete = async () => {
+            throw new Error("403");
+        };
+        await expect(runProcessors(failing, [])).resolves.toEqual([]);
+        logger.setMcpMode(false);
+    });
+
     test("catches processor errors and returns error result", async () => {
         logger.setMcpMode(true);
         const context = createMockContext();

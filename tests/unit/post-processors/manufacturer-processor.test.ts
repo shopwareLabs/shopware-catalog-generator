@@ -366,6 +366,24 @@ describe("ManufacturerProcessor sync errors", () => {
         expect(result.skipped).toBe(2);
     });
 
+    test("retries an assignment that hits a deadlock", async () => {
+        const { context, mockApi } = setup(
+            [
+                { id: "shop-existing", name: "Existing Corp" },
+                { id: "shop-new", name: "New Corp" },
+            ],
+            false
+        );
+        mockApi.mockPostFailure(
+            "_action/sync",
+            new Error("SQLSTATE[40001]: Serialization failure: 1213 Deadlock found")
+        );
+        const result = await ManufacturerProcessor.process(context);
+
+        expect(result.errors[0]).toContain("Failed to assign manufacturers");
+        expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(3);
+    });
+
     test("assigns each product its manufacturer ID", async () => {
         const { context, mockApi } = setup(
             [

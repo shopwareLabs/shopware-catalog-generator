@@ -113,6 +113,34 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - prices", () => {
     });
 });
 
+describe("ShopwareHydrator.hydrateEnvWithProductsDirect - removed options", () => {
+    test("unlinks removed options after the upsert", async () => {
+        const { hydrator, syncOps } = createMockShop();
+        const product = baseProduct();
+
+        await hydrator.hydrateEnvWithProductsDirect(
+            [{ ...product, removedOptionIds: ["opt-navy"] }],
+            "sc-1",
+            "nav-1"
+        );
+
+        const unlink = syncOps.find((o) => o.entity === "product_property");
+        expect(unlink?.action).toBe("delete");
+        expect(unlink?.payload).toEqual([{ productId: product.id, optionId: "opt-navy" }]);
+        expect(syncOps.indexOf(unlink as SyncOp)).toBeGreaterThan(
+            syncOps.findIndex((o) => o.entity === "product")
+        );
+    });
+
+    test("sends no delete when nothing was removed", async () => {
+        const { hydrator, syncOps } = createMockShop();
+
+        await hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-1", "nav-1");
+
+        expect(syncOps.some((o) => o.entity === "product_property")).toBe(false);
+    });
+});
+
 describe("ShopwareHydrator.hydrateEnvWithProductsDirect - packaging", () => {
     const packaging = {
         unitShortCode: "pc",
@@ -163,13 +191,19 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - packaging", () => {
         ]);
     });
 
-    test("does not look up units when no product has packaging", async () => {
+    test("clears the pack fields without a unit lookup when no product has packaging", async () => {
         const { hydrator, searches, syncOps } = createMockShop();
 
         await hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-1", "nav-1");
 
         expect(searches.some((s) => s.includes("search/unit"))).toBe(false);
-        expect(productPayloads(syncOps)[0]?.unitId).toBeUndefined();
+        expect(productPayloads(syncOps)[0]).toMatchObject({
+            unitId: null,
+            purchaseUnit: null,
+            referenceUnit: null,
+            packUnit: null,
+            packUnitPlural: null,
+        });
     });
 });
 
@@ -282,6 +316,11 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - full payload", () => {
             metaTitle: "Meta title",
             metaDescription: "Meta description",
             properties: [{ id: "opt-1" }],
+            unitId: null,
+            purchaseUnit: null,
+            referenceUnit: null,
+            packUnit: null,
+            packUnitPlural: null,
             prices: [
                 {
                     id: `${id.slice(0, -1)}0`,
@@ -363,11 +402,11 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - full payload", () => {
             "metaTitle",
             "metaDescription",
             "releaseDate",
-            "unitId",
             "type",
         ]) {
             expect(product).not.toHaveProperty(key);
         }
+        expect(product?.unitId).toBeNull();
     });
 
     test("an explicit purchase step wins over the minimum purchase", async () => {

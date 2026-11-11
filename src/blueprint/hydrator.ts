@@ -30,6 +30,9 @@ import {
     flattenCategories,
     hydrateBrandColors,
     hydrateCategories,
+    hydrateManufacturers,
+    hydratePrices,
+    hydrateProductNames,
     ProductHydrator,
 } from "./hydrators/index.js";
 import { groupProductsByBranch, productColorPreferences } from "./hydrators/product.js";
@@ -132,14 +135,34 @@ export class BlueprintHydrator {
         );
         logger.info("Products hydrated", { data: { count: hydratedProducts.length } });
 
+        const categories = applyCategoryHydration(
+            blueprint.categories,
+            hydratedCategories.categories
+        );
+        const { products: priced } = await hydratePrices(
+            this.textProvider,
+            { categories, products: hydratedProducts },
+            storeContext
+        );
+        const { products: named } = await hydrateProductNames(
+            this.textProvider,
+            { categories, products: priced },
+            storeContext
+        );
+        const { products } = await hydrateManufacturers(
+            this.textProvider,
+            { categories, products: named },
+            storeContext
+        );
+
         const hydrated: HydratedBlueprint = {
             ...blueprint,
             salesChannel: {
                 ...blueprint.salesChannel,
                 description: hydratedCategories.salesChannelDescription,
             },
-            categories: applyCategoryHydration(blueprint.categories, hydratedCategories.categories),
-            products: hydratedProducts,
+            categories,
+            products,
             propertyGroups: [],
             hydratedAt: new Date().toISOString(),
             brandColors,
@@ -241,6 +264,71 @@ export class BlueprintHydrator {
         logger.info("  Properties hydrated successfully (names preserved)", { cli: true });
         logger.info("Properties-only hydration complete");
         return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
+    }
+
+    /**
+     * Re-price the products of an existing hydrated blueprint (one AI call per 100
+     * products). Names, properties and images stay untouched.
+     */
+    async hydratePricesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
+        const { products, priced, repacked } = await hydratePrices(
+            this.textProvider,
+            existingBlueprint,
+            {
+                name: existingBlueprint.salesChannel.name,
+                description: existingBlueprint.salesChannel.description,
+            }
+        );
+        logger.info(
+            `  Prices updated for ${priced}/${products.length} products, ${repacked} packs changed`,
+            { cli: true }
+        );
+        return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
+    }
+
+    /**
+     * Remove variant values from variant parent names and rename products whose name is
+     * taken (one AI call per 25 duplicates). Descriptions, properties and images stay.
+     */
+    async hydrateNamesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
+        const result = await hydrateProductNames(this.textProvider, existingBlueprint, {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        });
+        logger.info(
+            `  Names: ${result.cleaned} variant parents cleaned, ${result.renamed} duplicates renamed`,
+            { cli: true }
+        );
+        if (result.stillDuplicate > 0) {
+            logger.warn(`  ${result.stillDuplicate} products still share a name`, { cli: true });
+        }
+        return {
+            ...existingBlueprint,
+            products: result.products,
+            hydratedAt: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Replace the placeholder brands with fictional brands that fit the store (one AI
+     * call). Products that shared a brand keep sharing one; names and images stay.
+     */
+    async hydrateManufacturersOnly(
+        existingBlueprint: HydratedBlueprint
+    ): Promise<HydratedBlueprint> {
+        const result = await hydrateManufacturers(this.textProvider, existingBlueprint, {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        });
+        logger.info(
+            `  Manufacturers: ${result.manufacturers.length} brands, ${result.branches} categories updated`,
+            { cli: true }
+        );
+        return {
+            ...existingBlueprint,
+            products: result.products,
+            hydratedAt: new Date().toISOString(),
+        };
     }
 
     /**

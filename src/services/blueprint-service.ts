@@ -123,12 +123,21 @@ export const HYDRATE_ONLY_MODES = [
     "cms",
     "variants",
     "variant-images",
+    "prices",
+    "names",
+    "manufacturers",
 ] as const;
 
 export type HydrateOnly = (typeof HYDRATE_ONLY_MODES)[number];
 
 /** Modes that only work on an existing hydrated blueprint (no fallback to a full run) */
-const NEEDS_HYDRATED: readonly HydrateOnly[] = ["variants", "variant-images"];
+const NEEDS_HYDRATED: readonly HydrateOnly[] = [
+    "variants",
+    "variant-images",
+    "prices",
+    "names",
+    "manufacturers",
+];
 
 /** Options shared by hydrate and estimate */
 interface HydrateRunOptions {
@@ -406,7 +415,7 @@ export async function hydrateBlueprint(
         return [
             `Error: Hydrated blueprint already exists for "${salesChannelName}". ` +
                 `Re-hydrating will change product names and trigger image regeneration. ` +
-                `Use --only=categories, --only=properties, --only=variants, or --rehydrate.`,
+                `Use --only=categories, --only=properties, --only=variants, --only=prices, --only=names, --only=manufacturers, or --rehydrate.`,
         ];
     }
     const plan = planHydration(salesChannelName, options, cache);
@@ -508,6 +517,45 @@ async function hydrateCmsOnly(
     ];
 }
 
+/** Re-pick variant options and keep blueprint.json in step for a later full re-hydration */
+async function hydrateVariantsPass(
+    plan: HydrationPlan,
+    hydrator: BlueprintHydrator,
+    hydrated: HydratedBlueprint
+): Promise<HydratedBlueprint> {
+    const result = await hydrator.hydrateVariantsOnly(hydrated, plan.variantSettings);
+    plan.cache.saveBlueprint(plan.salesChannelName, {
+        ...plan.blueprint,
+        variants: { ...plan.variantSettings },
+    });
+    return result;
+}
+
+/** Selective pass on the existing hydrated blueprint; null when the mode has none */
+function hydrateSelectivePass(
+    plan: HydrationPlan,
+    hydrator: BlueprintHydrator,
+    hydrated: HydratedBlueprint,
+    existingProperties: ExistingProperty[]
+): Promise<HydratedBlueprint> | null {
+    switch (plan.only) {
+        case "categories":
+            return hydrator.hydrateCategoriesOnly(hydrated);
+        case "prices":
+            return hydrator.hydratePricesOnly(hydrated);
+        case "names":
+            return hydrator.hydrateNamesOnly(hydrated);
+        case "manufacturers":
+            return hydrator.hydrateManufacturersOnly(hydrated);
+        case "properties":
+            return hydrator.hydratePropertiesOnly(hydrated, existingProperties);
+        case "variants":
+            return hydrateVariantsPass(plan, hydrator, hydrated);
+        default:
+            return null;
+    }
+}
+
 /**
  * Catalog texts for the run: a selective pass on the existing hydrated blueprint, or a
  * full hydration. --only=categories/properties fall back to full without one.
@@ -517,23 +565,13 @@ async function hydrateCatalogText(
     textProvider: TextProvider,
     existingProperties: ExistingProperty[]
 ): Promise<HydratedBlueprint> {
-    const { cache, salesChannelName, blueprint, hydrated, only } = plan;
+    const { cache, salesChannelName, blueprint, hydrated } = plan;
     // Property cache next to the run cache (CACHE_DIR), not always ./generated
     const hydrator = new BlueprintHydrator(textProvider, cache.getCacheDir());
 
-    if (hydrated && only === "categories") return hydrator.hydrateCategoriesOnly(hydrated);
-    if (hydrated && only === "properties") {
-        return hydrator.hydratePropertiesOnly(hydrated, existingProperties);
-    }
-    if (hydrated && only === "variants") {
-        const result = await hydrator.hydrateVariantsOnly(hydrated, plan.variantSettings);
-        // Keep blueprint.json in step, so a later full re-hydration uses the same settings
-        cache.saveBlueprint(salesChannelName, {
-            ...blueprint,
-            variants: { ...plan.variantSettings },
-        });
-        return result;
-    }
+    const selective =
+        hydrated && hydrateSelectivePass(plan, hydrator, hydrated, existingProperties);
+    if (selective) return selective;
 
     const inspiration = cache.loadInspiration(salesChannelName) ?? undefined;
     if (inspiration) {

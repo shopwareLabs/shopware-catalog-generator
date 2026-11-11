@@ -42,7 +42,7 @@ interface PostProcessorContext {
     cache: DataCacheApi; // Cache API interface (not the full DataCache class)
     textProvider?: TextProvider;
     imageProvider?: ImageProvider;
-    api: ShopwareApiHelpers; // Required — always use this for API calls
+    api: ShopwareApi; // Required — always use this for API calls
     shopware: ShopwareCapabilities; // Detected version + flags, use shopware.supports(feature)
     options: PostProcessorOptions;
 }
@@ -75,6 +75,9 @@ const results = await runProcessors(context, ["images", "reviews"]);
 const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 ```
 
+After all batches, `runProcessors()` clears the shop HTTP cache once (`DELETE _action/cache`,
+skipped in dry runs) so the storefront shows the new data. A failure is only a warning.
+
 ## Available Processors
 
 | Processor        | Name               | Dependencies                                                                                                         | Has Cleanup | Notes                                                                                                                                                                                                                                                                                                                                            |
@@ -91,9 +94,9 @@ const cleanupResults = await cleanupProcessors(context, ["images", "reviews"]);
 | Cross-Selling    | `cross-selling`    | none                                                                                                                 | Yes         |
 | Customers        | `customers`        | none                                                                                                                 | Yes         | B2B demo accounts are business accounts (`accountType`, `company`, `vatIds`, address company). Existing private demo accounts are upgraded                                                                                                                                                                                                       |
 | Digital Product  | `digital-product`  | none                                                                                                                 | Yes         |
-| Images           | `images`           | none                                                                                                                 | Yes         | Product media get `alt`/`title`; cover becomes `openGraphMediaId` when `productOpenGraph` is supported (6.7.10)                                                                                                                                                                                                                                  |
+| Images           | `images`           | none                                                                                                                 | Yes         | Product media get `alt`/`title`; cover becomes `openGraphMediaId` when `productOpenGraph` is supported (6.7.10). Linked media without a file (failed upload) get their file re-uploaded on the next run                                                                                                                                          |
 | Media Product    | `media-product`    | none                                                                                                                 | Yes         | Shared "Media Showcase" product (deterministic IDs) with GLB models (`spatialMedia`, 6.6.0) and MP4 videos (`productVideo`, 6.6.1) from `src/fixtures/media/`. Skipped before 6.6. Cleanup removes only the visibility                                                                                                                           |
-| Manufacturers    | `manufacturers`    | none                                                                                                                 | Yes         | Shopware is the source of truth: existing manufacturers are matched by name, the cache is rewritten with their IDs (cached IDs can be stale)                                                                                                                                                                                                     |
+| Manufacturers    | `manufacturers`    | none                                                                                                                 | Yes         | Shopware is the source of truth: existing manufacturers are matched by name, the cache is rewritten with their IDs (cached IDs can be stale). The product assignment sync retries deadlocks (`syncWithRetry`)                                                                                                                                    |
 | Promotions       | `promotions`       | none                                                                                                                 | Yes         |
 | Reviews          | `reviews`          | none                                                                                                                 | Yes         | Review _i_ goes to SalesChannel language _i % n_ (translated text when cached). Stable IDs, so re-runs upsert; products with legacy random-ID reviews are skipped with a cleanup hint                                                                                                                                                            |
 | Translations     | `translations`     | `manufacturers`, `variants`, `cms-testing`, `cms-home`, `cms-footer-pages`, `images`, `variant-images`, `promotions` | No          | Writes `translations/{locale}.json` as entity translations (products, categories, properties, manufacturers, CMS + home slots, promotions, units, footer categories, media alt texts). No AI                                                                                                                                                     |
@@ -206,12 +209,18 @@ const currencyId = await context.api.getDefaultCurrencyId();
 
 Used by `variant-processor` and `digital-product-processor`.
 
-### Direct API helpers (theme processor)
+### Request helpers (`apiPost`, `apiPatch`)
 
-Most processors use `context.api` exclusively. The `theme` processor is an exception — it
-calls `apiPost`/`apiPatch` from `utils/shopware-request.ts` directly for theme-specific
-endpoints that are not exposed by `ShopwareApiHelpers`. This is intentional and limited to
-that processor.
+`apiPost`/`apiPatch` from `utils/shopware-request.ts` wrap `context.api.post`/`patch` and
+return a `Response`. Many processors use them (images, theme, CMS, reviews, variants, ...).
+They still go through `context.api`.
+
+### Sync with deadlock retry (`processor-utils.ts`)
+
+Parallel processors write the same tables, so MySQL deadlocks happen. `syncWithRetry(context,
+label, operations)` posts `_action/sync` and retries transient errors (deadlock, SQLSTATE 40001,
+savepoint, lock wait timeout) with backoff (3 attempts, 500 ms doubled per retry). It never throws and returns `{ ok, status,
+errorText }`. Used by the image, manufacturer and variant processors.
 
 ## Using API Helpers
 

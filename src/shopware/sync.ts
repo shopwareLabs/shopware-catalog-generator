@@ -11,6 +11,7 @@ import path from "node:path";
 import type {
     BlueprintPropertyGroup,
     BlueprintPropertyOption,
+    CategoryNode,
     HydratedBlueprint,
     ProductCustomFieldValues,
     ProductPackaging,
@@ -24,10 +25,12 @@ import type { ExistingProperty } from "../utils/index.js";
 import type { DataHydrator } from "./index.js";
 import type { ShopwareCapabilities } from "./version.js";
 
+import { singleOptionGroupNames } from "../blueprint/property-synonyms.js";
 import {
     buildCategoryPath,
     convertBlueprintCategories,
     findCategoryPathById,
+    hideEmptyCategories,
     logger,
 } from "../utils/index.js";
 
@@ -71,7 +74,7 @@ export async function syncCategories(
     // New SalesChannel: create all categories
     if (isNew) {
         const categoryIdMap = await dataHydrator.createCategoryTree(
-            categoryNodes,
+            categoryTreeForUpload(blueprint),
             salesChannel.navigationCategoryId,
             salesChannel.id
         );
@@ -126,12 +129,35 @@ export async function syncCategories(
 
     // Create/update categories (upsert)
     const categoryIdMap = await dataHydrator.createCategoryTree(
-        convertBlueprintCategories(blueprint.categories),
+        categoryTreeForUpload(blueprint),
         salesChannel.navigationCategoryId,
         salesChannel.id
     );
     logger.info(`  Synced ${categoryIdMap.size} categories`, { cli: true });
     return categoryIdMap;
+}
+
+/** Category nodes for the upload, empty categories hidden from the navigation */
+function categoryTreeForUpload(blueprint: HydratedBlueprint): CategoryNode[] {
+    const productCategoryIds = new Set(blueprint.products.flatMap((p) => p.categoryIds));
+    const nodes = hideEmptyCategories(
+        convertBlueprintCategories(blueprint.categories),
+        productCategoryIds
+    );
+    const hidden = countHidden(nodes);
+    if (hidden > 0) {
+        logger.info(`  ${hidden} categories without products are hidden from the navigation`, {
+            cli: true,
+        });
+    }
+    return nodes;
+}
+
+function countHidden(nodes: CategoryNode[]): number {
+    return nodes.reduce(
+        (sum, n) => sum + (n.visible === false ? 1 : 0) + countHidden(n.children),
+        0
+    );
 }
 
 // =============================================================================
@@ -159,11 +185,13 @@ export async function syncPropertyGroups(
 
     const counts = { created: 0, updated: 0, skipped: 0 };
     const propertyGroupsToSync: PropertyGroup[] = [];
+    const singleOption = singleOptionGroupNames(blueprint);
 
     for (const blueprintGroup of blueprint.propertyGroups) {
         const existing = existingByName.get(blueprintGroup.name.toLowerCase());
         if (!existing) {
-            propertyGroupsToSync.push(newPropertyGroupPayload(blueprintGroup));
+            const isSingle = singleOption.has(blueprintGroup.name.toLowerCase());
+            propertyGroupsToSync.push(newPropertyGroupPayload(blueprintGroup, isSingle));
             counts.created++;
             continue;
         }
@@ -199,15 +227,22 @@ interface PropertyGroupDiff {
     needsFilterableUpdate: boolean;
 }
 
-/** Payload for a group that does not exist in Shopware yet (blueprint IDs) */
-function newPropertyGroupPayload(group: BlueprintPropertyGroup): PropertyGroup {
+/**
+ * Payload for a group that does not exist in Shopware yet (blueprint IDs). A group whose
+ * products use one option only is kept out of the listing filter, unless the blueprint
+ * says otherwise. Existing groups keep their setting: other stores may use more options.
+ */
+function newPropertyGroupPayload(
+    group: BlueprintPropertyGroup,
+    hasSingleOption: boolean
+): PropertyGroup {
     const isColorType = group.displayType === "color";
     return {
         id: group.id,
         name: group.name,
         description: `Properties for ${group.name}`,
         displayType: group.displayType,
-        filterable: group.filterable,
+        filterable: group.filterable ?? (hasSingleOption ? false : undefined),
         options: group.options.map((o) => optionPayload(o, isColorType)),
     };
 }
@@ -505,6 +540,8 @@ interface ProductToCreate {
     price: number;
     stock: number;
     options?: Array<{ id: string; name: string }>;
+    /** Options left out because they belong to the product's own variant groups */
+    removedOptionIds?: string[];
     categoryIds?: string[];
     hasSalesPrice?: boolean;
     salePercentage?: number;
@@ -547,7 +584,7 @@ interface ProductLookups {
 }
 
 function toProductToCreate(p: HydratedProduct, lookups: ProductLookups): ProductToCreate {
-    const options = resolveProductOptions(p, lookups.propertyOptionMap);
+    const { options, removedOptionIds } = resolveProductOptions(p, lookups.propertyOptionMap);
     const resolvedCategoryIds = resolveCategoryIds(p, lookups);
     const { metadata } = p;
 
@@ -560,6 +597,7 @@ function toProductToCreate(p: HydratedProduct, lookups: ProductLookups): Product
         // Fall back to the blueprint IDs when no category path resolves
         categoryIds: resolvedCategoryIds.length > 0 ? resolvedCategoryIds : p.categoryIds,
         ...(options.length > 0 && { options }),
+        ...(removedOptionIds.length > 0 && { removedOptionIds }),
         hasSalesPrice: metadata.hasSalesPrice,
         salePercentage: metadata.salePercentage,
         hasTieredPricing: metadata.hasTieredPricing,
@@ -577,16 +615,37 @@ function toProductToCreate(p: HydratedProduct, lookups: ProductLookups): Product
     };
 }
 
-/** Product properties mapped to Shopware option IDs ("group::value", lowercase); unknown ones are dropped */
+/** Lowercase names of the groups a variant product's variants differ in */
+function variantGroupNames(p: HydratedProduct): Set<string> {
+    if (!p.metadata.isVariant) return new Set();
+    return new Set((p.metadata.variantConfigs ?? []).map((c) => c.group.toLowerCase()));
+}
+
+/**
+ * Product properties mapped to Shopware option IDs ("group::value", lowercase); unknown
+ * ones are dropped. A variant parent leaves out its own variant groups: the variants
+ * inherit the parent's properties, so "Color: Navy" would show on the Black variant.
+ */
 function resolveProductOptions(
     p: HydratedProduct,
     propertyOptionMap: Map<string, { id: string; name: string }>
-): Array<{ id: string; name: string }> {
-    return p.metadata.properties
-        .map((prop) =>
-            propertyOptionMap.get(`${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`)
-        )
-        .filter((opt): opt is { id: string; name: string } => opt !== undefined);
+): { options: Array<{ id: string; name: string }>; removedOptionIds: string[] } {
+    const variantGroups = variantGroupNames(p);
+    const resolved = p.metadata.properties
+        .map((prop) => ({
+            isVariantGroup: variantGroups.has(prop.group.toLowerCase()),
+            option: propertyOptionMap.get(
+                `${prop.group.toLowerCase()}::${prop.value.toLowerCase()}`
+            ),
+        }))
+        .filter(
+            (r): r is { isVariantGroup: boolean; option: { id: string; name: string } } =>
+                r.option !== undefined
+        );
+    return {
+        options: resolved.filter((r) => !r.isVariantGroup).map((r) => r.option),
+        removedOptionIds: resolved.filter((r) => r.isVariantGroup).map((r) => r.option.id),
+    };
 }
 
 /** Blueprint category IDs mapped to Shopware category IDs via their paths */

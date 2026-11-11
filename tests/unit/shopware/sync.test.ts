@@ -7,6 +7,7 @@ import { describe, expect, mock, test } from "bun:test";
 import type { DataHydrator } from "../../../src/shopware/index.js";
 import type {
     BlueprintPropertyGroup,
+    CategoryNode,
     HydratedBlueprint,
     PropertyGroup,
     SalesChannelFull,
@@ -21,7 +22,11 @@ import {
 } from "../../../src/shopware/sync.js";
 import { ShopwareCapabilities } from "../../../src/shopware/version.js";
 import { logger } from "../../../src/utils/index.js";
-import { createTestBlueprint, createTestProduct } from "../../helpers/blueprint-factory.js";
+import {
+    createTestBlueprint,
+    createTestCategory,
+    createTestProduct,
+} from "../../helpers/blueprint-factory.js";
 
 const SHOPWARE_67 = ShopwareCapabilities.fromVersion("6.7.16.0");
 
@@ -335,6 +340,29 @@ describe("syncCategories", () => {
         logger.setMcpMode(false);
     });
 
+    test("hides categories without products from the navigation", async () => {
+        logger.setMcpMode(true);
+        const dataHydrator = createMockDataHydrator();
+        const blueprint: HydratedBlueprint = {
+            ...createTestBlueprint(),
+            categories: [
+                createTestCategory({ id: "cat-full", name: "Full" }),
+                createTestCategory({ id: "cat-empty", name: "Empty" }),
+            ],
+            products: [createTestProduct({ categoryIds: ["cat-full"] })],
+        };
+
+        await syncCategories(dataHydrator, blueprint, createMockSalesChannel(), true);
+
+        const tree = (dataHydrator.createCategoryTree as ReturnType<typeof mock>).mock
+            .calls[0]?.[0] as CategoryNode[];
+        expect(tree.map((c) => [c.name, c.visible])).toEqual([
+            ["Full", true],
+            ["Empty", false],
+        ]);
+        logger.setMcpMode(false);
+    });
+
     test("syncs existing categories for existing SalesChannel", async () => {
         logger.setMcpMode(true);
 
@@ -598,6 +626,45 @@ describe("syncPropertyGroups", () => {
             logger.setMcpMode(false);
         });
 
+        test("hides a new group from the filter when its products use one option", async () => {
+            logger.setMcpMode(true);
+            const dataHydrator = createMockDataHydrator();
+            const blueprint = blueprintWithShades();
+            const material = { group: "Material", value: "Wood" };
+            blueprint.propertyGroups = [
+                {
+                    id: "pg-mat",
+                    name: "Material",
+                    displayType: "text",
+                    options: [{ id: "opt-wood", name: "Wood" }],
+                },
+                {
+                    id: "pg-use",
+                    name: "Use",
+                    displayType: "text",
+                    options: [
+                        { id: "opt-a", name: "Indoor" },
+                        { id: "opt-b", name: "Outdoor" },
+                    ],
+                },
+            ];
+            blueprint.products = [
+                createTestProduct({
+                    metadata: { properties: [material, { group: "Use", value: "Indoor" }] },
+                }),
+                createTestProduct({
+                    metadata: { properties: [material, { group: "Use", value: "Outdoor" }] },
+                }),
+            ];
+
+            await syncPropertyGroups(dataHydrator, blueprint);
+
+            const [mat, use] = syncedGroups(dataHydrator);
+            expect(mat?.filterable).toBe(false);
+            expect(use?.filterable).toBeUndefined();
+            logger.setMcpMode(false);
+        });
+
         test("skips an existing group when filterable already matches", async () => {
             logger.setMcpMode(true);
             const dataHydrator = createMockDataHydrator();
@@ -685,6 +752,81 @@ describe("syncProducts", () => {
 
         expect(dataHydrator.hydrateEnvWithProductsDirect).toHaveBeenCalled();
 
+        logger.setMcpMode(false);
+    });
+
+    test("leaves out the variant groups of a variant parent and reports them", async () => {
+        logger.setMcpMode(true);
+        const dataHydrator = createMockDataHydrator();
+        const blueprint: HydratedBlueprint = {
+            version: "1.0",
+            createdAt: "2024-01-01",
+            hydratedAt: "2024-01-01",
+            salesChannel: { name: "test", description: "Test" },
+            categories: [],
+            products: [
+                {
+                    id: "prod-1",
+                    name: "Shirt",
+                    description: "A shirt",
+                    price: 19.99,
+                    stock: 10,
+                    primaryCategoryId: "cat-1",
+                    categoryIds: [],
+                    metadata: {
+                        imageCount: 1,
+                        imageDescriptions: [],
+                        isVariant: true,
+                        variantConfigs: [
+                            {
+                                group: "Color",
+                                selectedOptions: ["Navy", "Black"],
+                                priceModifiers: {},
+                            },
+                        ],
+                        properties: [
+                            { group: "Color", value: "Navy" },
+                            { group: "Color family", value: "Blue" },
+                            { group: "Material", value: "Cotton" },
+                        ],
+                        reviewCount: 0,
+                        hasSalesPrice: false,
+                        hasTieredPricing: false,
+                        isTopseller: false,
+                        isNew: false,
+                        isShippingFree: false,
+                        weight: 1,
+                        width: 1,
+                        height: 1,
+                        length: 1,
+                        ean: "1234567890128",
+                        manufacturerNumber: "MPN-1",
+                    },
+                },
+            ],
+            propertyGroups: [],
+        };
+        const propertyOptionMap = new Map([
+            ["color::navy", { id: "opt-navy", name: "Navy" }],
+            ["color family::blue", { id: "opt-blue", name: "Blue" }],
+            ["material::cotton", { id: "opt-cotton", name: "Cotton" }],
+        ]);
+
+        await syncProducts(
+            dataHydrator,
+            blueprint,
+            createMockSalesChannel(),
+            new Map(),
+            propertyOptionMap,
+            SHOPWARE_67
+        );
+
+        const mockFn = dataHydrator.hydrateEnvWithProductsDirect as ReturnType<typeof mock>;
+        const [products] = mockFn.mock.calls[0] as [
+            Array<{ options?: Array<{ id: string }>; removedOptionIds?: string[] }>,
+        ];
+        expect(products[0]?.options?.map((o) => o.id)).toEqual(["opt-blue", "opt-cotton"]);
+        expect(products[0]?.removedOptionIds).toEqual(["opt-navy"]);
         logger.setMcpMode(false);
     });
 

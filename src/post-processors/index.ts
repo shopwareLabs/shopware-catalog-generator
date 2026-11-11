@@ -366,7 +366,27 @@ export async function runProcessors(
         allResults.push(...(await runBatch(batch, label, contextWithActive)));
     }
 
+    await clearShopHttpCache(context);
     return allResults;
+}
+
+/**
+ * Cached storefront pages still show the old data (prices, images, hidden categories),
+ * so the shop cache is cleared once after all processors. A failure is only a warning.
+ */
+async function clearShopHttpCache(context: PostProcessorContext): Promise<void> {
+    if (context.options.dryRun) return;
+    try {
+        await context.api.httpDelete("_action/cache");
+        logger.info("✓ Cleared shop cache", { cli: true });
+    } catch (error) {
+        logger.warn(
+            `Could not clear shop cache, run bin/console cache:clear: ${errorMessage(error)}`,
+            {
+                cli: true,
+            }
+        );
+    }
 }
 
 type CleanupFn = NonNullable<PostProcessor["cleanup"]>;

@@ -15,6 +15,7 @@ import {
     flattenCategoryTree,
     flattenCategoryTreeWithPath,
     getLeafCategories,
+    hideEmptyCategories,
     getLeafCategoriesWithProducts,
     getTreeDepth,
     redistributeProductsToTree,
@@ -838,5 +839,33 @@ describe("blueprint category utilities", () => {
             expect(pathMap.get(`Living Room${CATEGORY_PATH_SEPARATOR}Sofas`)).toBe("lr-sofas");
             expect(pathMap.get(`Office${CATEGORY_PATH_SEPARATOR}Sofas`)).toBe("off-sofas");
         });
+    });
+});
+
+describe("hideEmptyCategories", () => {
+    const node = (id: string, children: CategoryNode[] = []): CategoryNode => ({
+        id,
+        name: id,
+        description: "",
+        children,
+        productCount: 0,
+        hasImage: false,
+    });
+
+    test("hides categories without products in or below them", () => {
+        const tree = [node("top", [node("full"), node("empty")]), node("bare")];
+
+        const result = hideEmptyCategories(tree, new Set(["full"]));
+
+        expect(result[0]?.visible).toBe(true);
+        expect(result[0]?.children.map((c) => c.visible)).toEqual([true, false]);
+        expect(result[1]?.visible).toBe(false);
+    });
+
+    test("keeps a parent with own products visible", () => {
+        const result = hideEmptyCategories([node("top", [node("child")])], new Set(["top"]));
+
+        expect(result[0]?.visible).toBe(true);
+        expect(result[0]?.children[0]?.visible).toBe(false);
     });
 });

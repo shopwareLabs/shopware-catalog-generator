@@ -8,7 +8,7 @@ Internal documentation for AI agents working on tests in this codebase.
 
 ```
 src/utils/logger.ts             →  tests/unit/utils/logger.test.ts
-src/providers/openai.ts         →  tests/unit/providers/openai.test.ts
+src/providers/openai-provider.ts →  tests/unit/providers/openai-provider.test.ts
 src/blueprint/generator.ts      →  tests/unit/blueprint/generator.test.ts
 src/blueprint/hydrator.ts       →  tests/unit/blueprint/hydrator.test.ts
 src/blueprint/hydrators/cms.ts  →  tests/unit/blueprint/hydrators/cms.test.ts
@@ -31,6 +31,8 @@ tests/
 │   ├── blueprint/            # src/blueprint/ tests
 │   ├── cli/                  # src/cli/ tests + src/main.ts arg parser
 │   ├── crawlers/             # src/crawlers/ tests (classifier, extractors, site-crawler)
+│   ├── e2e/                  # tests/e2e/checks/ unit tests (feature-checks.test.ts)
+│   ├── fixtures/             # src/fixtures/ tests
 │   ├── mcp/                  # src/mcp/ tests
 │   ├── post-processors/      # src/post-processors/ tests
 │   ├── providers/            # src/providers/ tests
@@ -39,11 +41,18 @@ tests/
 │   ├── shopware/             # src/shopware/ tests
 │   ├── templates/            # src/templates/ tests
 │   ├── utils/                # src/utils/ tests
+│   ├── scripts/              # scripts/ tests (crawler-validation)
 │   ├── cache.test.ts         # Root-level src/*.ts tests
+│   ├── cache-cli.test.ts
+│   ├── image-cache.test.ts
+│   ├── migrate-variants.test.ts
 │   ├── property-cache.test.ts
 │   └── saleschannel-cache.test.ts
 ├── integration/              # Integration tests
-│   └── blueprint.test.ts
+│   ├── blueprint.test.ts
+│   ├── inspiration-files.test.ts
+│   ├── mcp-cli.test.ts
+│   └── mcp-smoke.test.ts
 ├── e2e/                      # End-to-end tests
 │   ├── verify.ts             # API verification script
 │   ├── checks/               # Feature checks (one per feature, gated by Shopware version)
@@ -55,14 +64,17 @@ tests/
 │   └── browser-checks.md     # Browser verification guide
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
-│   └── post-processor-context.ts  # createTestContext — PostProcessorContext with mock API + cache
+│   ├── fetch-mock.ts         # mockFetch (stubs globalThis.fetch)
+│   ├── post-processor-context.ts  # createTestContext — PostProcessorContext with mock API + cache
+│   ├── recording-services.ts # recordingServices: command services that record calls (parity tests)
+│   └── translation-factory.ts # Languages + createTranslationFile for translation upload tests
 └── mocks/                    # Shared test mocks
     ├── index.ts              # Re-exports + createMockProductMetadata
     ├── admin-client.mock.ts  # createMockAdminClient, createMockAdminClientWithInvoke
     ├── api-helpers.mock.ts   # createMockApiHelpers, MockApiHelpers
     ├── data-cache.mock.ts    # MockDataCache, MockImageCache, createMockDataCache
     ├── text-provider.mock.ts # MockTextProvider, createMockTextProviderWithProducts
-    └── image-provider.mock.js # MockImageProvider, EditingImageProvider, FailingImageProvider, SlowImageProvider
+    └── image-provider.mock.ts # MockImageProvider, EditingImageProvider, FailingImageProvider, SlowImageProvider
 ```
 
 ## Running Tests
@@ -332,7 +344,8 @@ const { context, mockApi, mockCache } = createTestContext({
 ```
 
 `TestContextOptions` fields: `dryRun`, `salesChannelId`, `salesChannelName`, `blueprint`,
-`metadataMap`, `cachedImages`, `staleImages`, `imageProvider`, `activeProcessors`, `options`, `mockApi`.
+`metadataMap`, `cachedImages`, `staleImages`, `imageProvider`, `activeProcessors`, `options`, `mockApi`,
+`shopware` (default: Shopware 6.7.16.0, no feature flags).
 
 ## Mock Providers and Test Utilities
 

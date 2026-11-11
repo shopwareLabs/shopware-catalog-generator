@@ -29,6 +29,8 @@ import type {
 
 import { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "../fixtures/index.js";
 import { countCategories } from "../utils/index.js";
+import { findDuplicateNameProducts, NAME_BATCH_SIZE } from "./hydrators/names.js";
+import { PRICE_BATCH_SIZE } from "./hydrators/prices.js";
 import { VARIANT_COLOR_BATCH_SIZE } from "./hydrators/product.js";
 import {
     collectTerms,
@@ -56,6 +58,9 @@ const TOKENS = {
     propertyOptions: { input: 300, output: 100 },
     cmsPage: { input: 350, inputPerSlot: 60, outputPerSlot: 65 },
     variantColors: { input: 400, inputPerProduct: 25, outputPerProduct: 45 },
+    prices: { input: 250, inputPerProduct: 25, outputPerProduct: 20 },
+    names: { input: 1800, inputPerProduct: 90, outputPerProduct: 25 },
+    manufacturers: { input: 300, inputPerBranch: 60, outputPerBranch: 30 },
 } as const;
 
 /** Blueprint shape the estimator needs */
@@ -325,6 +330,12 @@ const TEXT_STEPS: TextStep[] = [
         build: (input) => propertyOptionsItem(input.blueprint.products.length),
     },
     { scopes: ["full", "cms"], build: (input) => cmsItem(input.cms) },
+    { scopes: ["full", "prices"], build: (input) => priceItem(input.blueprint.products.length) },
+    { scopes: ["names"], build: (input) => nameItem(input.blueprint.products) },
+    {
+        scopes: ["full", "manufacturers"],
+        build: (input) => manufacturerItem(input.blueprint.categories.length),
+    },
     {
         scopes: ["variants"],
         build: (input) =>
@@ -336,6 +347,37 @@ function buildTextItems(input: CostEstimateInput): TextCostItem[] {
     return TEXT_STEPS.filter((step) => step.scopes.includes(input.scope))
         .map((step) => step.build(input))
         .filter((item): item is TextCostItem => item !== null && item.calls > 0);
+}
+
+function priceItem(productCount: number): TextCostItem {
+    return {
+        label: "Prices",
+        calls: Math.ceil(productCount / PRICE_BATCH_SIZE),
+        inputTokens: TOKENS.prices.input + productCount * TOKENS.prices.inputPerProduct,
+        outputTokens: productCount * TOKENS.prices.outputPerProduct,
+    };
+}
+
+/** Duplicates in the blueprint; a full run's duplicates are unknown before it, so none */
+function nameItem(products: BlueprintProduct[]): TextCostItem {
+    const duplicates = findDuplicateNameProducts(products).length;
+    const calls = Math.ceil(duplicates / NAME_BATCH_SIZE);
+    return {
+        label: "Product names",
+        calls,
+        inputTokens: calls * TOKENS.names.input + duplicates * TOKENS.names.inputPerProduct,
+        outputTokens: duplicates * TOKENS.names.outputPerProduct,
+    };
+}
+
+/** One call for the whole store; each top-level category is one branch */
+function manufacturerItem(branches: number): TextCostItem {
+    return {
+        label: "Manufacturers",
+        calls: branches > 0 ? 1 : 0,
+        inputTokens: TOKENS.manufacturers.input + branches * TOKENS.manufacturers.inputPerBranch,
+        outputTokens: branches * TOKENS.manufacturers.outputPerBranch,
+    };
 }
 
 function categoryItem(categories: BlueprintCategory[]): TextCostItem {
@@ -559,9 +601,17 @@ function buildNotes(input: CostEstimateInput): string[] {
     ];
 }
 
+/** Scopes that create or change variants */
+const VARIANT_NOTE_SCOPES = new Set<HydrationScope>([
+    "full",
+    "properties",
+    "variants",
+    "variant-images",
+]);
+
 function variantNotes(input: CostEstimateInput): string[] {
     const { variants, scope } = input;
-    if (!variants || scope === "categories" || scope === "cms") return [];
+    if (!variants || !VARIANT_NOTE_SCOPES.has(scope)) return [];
     const variantProducts =
         scope === "full"
             ? Math.round(input.blueprint.products.length * variants.share)

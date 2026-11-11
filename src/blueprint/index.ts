@@ -1,6 +1,12 @@
 export { BlueprintGenerator } from "./generator.js";
 export { BlueprintHydrator } from "./hydrator.js";
 export {
+    mergeSynonymPropertyGroups,
+    propertyGroupKey,
+    singleOptionGroupNames,
+} from "./property-synonyms.js";
+export type { PropertyGroupMerge } from "./property-synonyms.js";
+export {
     applyColorSystem,
     collectShadeNames,
     isFamilyGroupName,

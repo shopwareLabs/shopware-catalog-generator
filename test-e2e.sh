@@ -16,6 +16,7 @@
 #   ./test-e2e.sh --cleanup=<name>                                   # Only cleanup specific SalesChannel
 #   ./test-e2e.sh --sw-dev=67 --reuse=<name> --skip-hydrate          # Run against a local sw-dev lane
 #   ./test-e2e.sh --reuse=<name> --languages=none                    # English only (default: de-DE)
+#   ./test-e2e.sh --sw-dev=67 --template=<name>                      # Published template, like an external user
 #
 #   ./test-e2e-lanes.sh --lanes=sw65,sw66,sw67,sw68,trunk           # Same content on several lanes (see that script)
 #
@@ -45,6 +46,11 @@
 # - Theme: theme (child theme with brand colors + media)
 # - Translations: translations (cached translations per SalesChannel language, runs last)
 #
+# --template=<name> tests the published template as an external user would use it:
+# - Empty CACHE_DIR and TEMPLATE_CACHE_DIR (temporary unless set), default TEMPLATE_REPO_URL
+# - AI_API_KEY is replaced by an invalid key, so any AI call fails the run
+# - `generate` must report that it used the template; blueprint, hydrate and translate are skipped
+#
 # Verify then checks every feature (tests/e2e/checks/). Checks for a feature the connected
 # Shopware version does not support are skipped, using src/fixtures/shopware-features.ts.
 
@@ -68,6 +74,7 @@ INSPIRE_URL=""
 CUSTOM_NAME=""
 CUSTOM_DESCRIPTION=""
 SW_DEV_LANE=""
+TEMPLATE_NAME=""
 LANGUAGES="${E2E_LANGUAGES:-de-DE}"
 
 for arg in "$@"; do
@@ -102,8 +109,25 @@ for arg in "$@"; do
         --languages=*)
             LANGUAGES="${arg#*=}"
             ;;
+        --template=*)
+            TEMPLATE_NAME="${arg#*=}"
+            ;;
     esac
 done
+
+# Template mode: start like a fresh checkout without AI credentials
+if [ -n "$TEMPLATE_NAME" ]; then
+    export CACHE_DIR="${CACHE_DIR:-$(mktemp -d -t e2e-template-cache)}"
+    export TEMPLATE_CACHE_DIR="${TEMPLATE_CACHE_DIR:-$(mktemp -d -t e2e-template-repo)/repo}"
+    unset TEMPLATE_REPO_URL IMAGE_API_KEY AI_MODEL IMAGE_MODEL
+    export AI_PROVIDER=openai AI_API_KEY=e2e-template-run-must-not-call-ai IMAGE_PROVIDER=none
+    if [ -e "$CACHE_DIR/sales-channels/$TEMPLATE_NAME" ]; then
+        echo "ERROR: $CACHE_DIR/sales-channels/$TEMPLATE_NAME exists; --template needs an empty CACHE_DIR"
+        exit 1
+    fi
+    REUSE_NAME="$TEMPLATE_NAME"
+    SKIP_HYDRATE=true
+fi
 
 CACHE_ROOT="${CACHE_DIR:-./generated}"
 CURRENT_STEP=""
@@ -123,6 +147,17 @@ run_step() {
     "$@"
     record_step "$step" pass
     CURRENT_STEP=""
+}
+
+# Template mode: generate must use the downloaded template, never generate from scratch
+upload_template() {
+    local log="$CACHE_DIR/generate.log"
+    bun run generate --name="$TEST_SALESCHANNEL" 2>&1 | tee "$log"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || return 1
+    if ! grep -q "Using pre-generated template" "$log"; then
+        echo "ERROR: generate did not use the template \"$TEST_SALESCHANNEL\""
+        return 1
+    fi
 }
 
 # Temporary integration for --sw-dev runs (local only, removed on exit)
@@ -338,7 +373,9 @@ if [ -n "$INSPIRE_URL" ] && [ "$SKIP_CREATE" = false ]; then
 fi
 
 # Phase 1: Create blueprint
-if [ "$SKIP_CREATE" = true ]; then
+if [ -n "$TEMPLATE_NAME" ]; then
+    echo "[1/5] Skipping blueprint creation (generate downloads template \"$TEMPLATE_NAME\")"
+elif [ "$SKIP_CREATE" = true ]; then
     echo "[1/5] Skipping blueprint creation (--skip-create or --reuse)"
     if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json" ]; then
         echo "ERROR: No blueprint found at $CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/blueprint.json"
@@ -357,7 +394,9 @@ fi
 echo ""
 
 # Phase 2: Hydrate with AI (products + categories + CMS text)
-if [ "$SKIP_HYDRATE" = true ]; then
+if [ -n "$TEMPLATE_NAME" ]; then
+    echo "[2/5] Skipping AI hydration (template)"
+elif [ "$SKIP_HYDRATE" = true ]; then
     echo "[2/5] Skipping AI hydration (--skip-hydrate)"
     if [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
         echo "WARNING: No hydrated blueprint found. Upload may fail."
@@ -397,6 +436,10 @@ echo ""
 # Phase 3: Generate (upload to Shopware)
 if [ "$SKIP_UPLOAD" = true ]; then
     echo "[3/5] Skipping Shopware upload"
+elif [ -n "$TEMPLATE_NAME" ]; then
+    echo "[3/5] Uploading template to Shopware..."
+    run_step upload upload_template
+    echo "✓ Uploaded template to Shopware"
 elif [ ! -f "$CACHE_ROOT/sales-channels/$TEST_SALESCHANNEL/hydrated-blueprint.json" ]; then
     echo "[3/5] Skipping upload (no hydrated blueprint)"
 else

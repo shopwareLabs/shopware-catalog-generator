@@ -8,6 +8,9 @@ import {
 } from "../utils/index.js";
 import { createShopwareAdminClient } from "./admin-client.js";
 
+/** Property groups per search page (options are loaded with each group) */
+const PROPERTY_GROUP_PAGE_SIZE = 100;
+
 /** Sales channel settings that a new SalesChannel copies (missing fields are empty strings) */
 export interface SalesChannelCloneSource {
     id: string;
@@ -247,6 +250,33 @@ export class ShopwareClient {
         );
         const response = data as SearchResult<Schemas["SnippetSet"]>;
         return response.data?.[0]?.id ?? null;
+    }
+
+    /**
+     * All property groups with their options (sorted by position), page by page.
+     * A single page misses groups on shops with many of them, and an unmatched group
+     * name then creates a duplicate group (e.g. a second "Color").
+     */
+    async searchAllPropertyGroups(): Promise<Schemas["PropertyGroup"][]> {
+        const groups: Schemas["PropertyGroup"][] = [];
+        for (let page = 1; ; page++) {
+            const { data } = await this.getClient().invoke(
+                "searchPropertyGroup post /search/property-group",
+                {
+                    body: {
+                        limit: PROPERTY_GROUP_PAGE_SIZE,
+                        page,
+                        sort: [{ field: "id", order: "ASC" }],
+                        associations: {
+                            options: { sort: [{ field: "position", order: "ASC" }] },
+                        },
+                    },
+                }
+            );
+            const pageItems = (data as SearchResult<Schemas["PropertyGroup"]>).data ?? [];
+            groups.push(...pageItems);
+            if (pageItems.length < PROPERTY_GROUP_PAGE_SIZE) return groups;
+        }
     }
 
     /** Get standard tax ID */

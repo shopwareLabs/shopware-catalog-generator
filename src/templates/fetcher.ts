@@ -13,8 +13,8 @@ import type { DataCache } from "../cache.js";
 
 import { logger } from "../utils/index.js";
 
-/** Default template repository URL */
-const DEFAULT_TEMPLATE_REPO_URL = "git@github.com:shopwareLabs/shopware-catalog-templates.git";
+/** Default template repository URL (public, HTTPS works without a GitHub account or SSH key) */
+const DEFAULT_TEMPLATE_REPO_URL = "https://github.com/shopwareLabs/shopware-catalog-templates.git";
 
 /** Default directory for cloning the template repository */
 const DEFAULT_TEMPLATE_CACHE_DIR = ".shopware-catalog-templates";

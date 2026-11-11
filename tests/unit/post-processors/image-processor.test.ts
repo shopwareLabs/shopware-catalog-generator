@@ -221,6 +221,50 @@ describe("ImageProcessor", () => {
             expect(mockApi.deleteEntitiesMock).not.toHaveBeenCalled();
         });
 
+        test("re-uploads the file of linked media that have none", async () => {
+            const views = [
+                { view: "front" as const, prompt: "a" },
+                { view: "lifestyle" as const, prompt: "b" },
+            ];
+            const blueprint = createTestBlueprint({
+                products: [
+                    createTestProduct({
+                        id: "p-broken",
+                        name: "Desk Lamp",
+                        metadata: createMockProductMetadata({ imageDescriptions: views }),
+                    }),
+                ],
+            });
+            const { context, mockApi } = createTestContext({
+                blueprint,
+                metadataMap: new Map([["p-broken", { imageDescriptions: views }]]),
+                cachedImages: new Set(["p-broken-front", "p-broken-lifestyle"]),
+                dryRun: false,
+                imageProvider: new MockImageProvider(),
+            });
+            mockApi.mockPostResponse("search/product", {
+                data: [
+                    {
+                        id: "p-broken",
+                        media: [
+                            { mediaId: "m-ok", position: 0, media: { hasFile: true } },
+                            { mediaId: "m-empty", position: 1, media: { hasFile: false } },
+                        ],
+                    },
+                ],
+            });
+
+            const result = await ImageProcessor.process(context);
+
+            expect(result.errors).toHaveLength(0);
+            const uploads = mockApi.getCallsByEndpoint("_action/media/");
+            expect(uploads.map((c) => c.endpoint)).toEqual([
+                expect.stringContaining("_action/media/m-empty/upload"),
+            ]);
+            expect(uploads[0]?.endpoint).toContain("fileName=Desk-Lamp-lifestyle");
+            expect(mockApi.getCallsByEndpoint("_action/sync")).toHaveLength(0);
+        });
+
         test("uploads new media for products without existing Shopware images", async () => {
             const blueprint = createTestBlueprint({
                 products: [

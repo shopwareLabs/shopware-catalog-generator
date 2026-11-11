@@ -83,7 +83,7 @@ which is the case for `IMAGE_PROVIDER=none`.
 before creating providers, and appends the actual token usage and cost to its output lines. Actual usage is
 only available for providers that implement `TextProvider.getUsage()` (currently OpenAI).
 
-`hydrateBlueprint` supports five selective modes via the `only` option (`HYDRATE_ONLY_MODES`):
+`hydrateBlueprint` supports eight selective modes via the `only` option (`HYDRATE_ONLY_MODES`):
 
 - `"categories"` — re-hydrate category names/descriptions only
 - `"properties"` — re-hydrate product properties only (preserves product names)
@@ -91,6 +91,12 @@ only available for providers that implement `TextProvider.getUsage()` (currently
 - `"variants"` — re-pick variant options with `options.variants` overrides and save them to `blueprint.json`
 - `"variant-images"` — recolour product images per colour variant (needs an image provider with
   `editImage`, otherwise returns a "Skipped" line). Records `hydrate:variant-images` in `generation.json`
+- `"prices"` — re-price products with AI price ranges and fix or drop their random pack units,
+  keeps names. Records `hydrate:prices`
+- `"names"` — drop variant values from variant parent names and rename duplicate product names.
+  Records `hydrate:names`
+- `"manufacturers"` — replace the placeholder brands with fictional brands for the store (one AI
+  call). Records `hydrate:manufacturers`
 
 Variant overrides (`VariantSettingOverrides`, raw flag strings or MCP numbers) are passed to
 `createBlueprint`, `estimateBlueprintCost`, `hydrateBlueprint` and `generate`. Invalid values,
@@ -134,6 +140,10 @@ const lines = await runProcessorsForSalesChannel("music", ["images", "reviews"],
 | `inspirationUrl` | `string`                  | -                 | Crawl this store before the blueprint (server)                |
 | `skipProcessors` | `boolean`                 | `false`           | Upload only, no post-processors (server)                      |
 | `hooks`          | `GenerateHooks`           | -                 | `onLine` / `onProgress` for live output (server process logs) |
+
+Before the property groups are uploaded, `runGenerate` merges synonym property groups
+(`mergeSynonymPropertyGroups()` in `blueprint/property-synonyms.ts`, e.g. "Outlets" into
+"Outlet") and logs each merge.
 
 `runGenerate` returns `{ lines, summary? }`. `summary` (SalesChannel ID, counts, processor
 results) is only set when the upload ran; a run that stopped early ends with an `Error:` line.

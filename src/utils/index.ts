@@ -30,6 +30,7 @@ export {
     CATEGORY_PATH_SEPARATOR,
     collectCategoryIdsByPath,
     convertBlueprintCategories,
+    hideEmptyCategories,
     countCategories,
     countProducts,
     findCategoryByName,

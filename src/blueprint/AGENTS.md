@@ -20,6 +20,7 @@ blueprint/
 ├── variant-settings.ts   # Variant settings (resolve, assign, pick, cap, re-pick) - no AI
 ├── cost-estimator.ts     # Hydration + translation cost forecast (no AI): tokens, images, USD
 ├── color-system.ts       # Colour system (no AI): normalise shades, "Color" + "Color family" groups
+├── property-synonyms.ts  # Merge synonym property groups before upload, find single-option groups (no AI)
 ├── index.ts              # Re-exports
 └── hydrators/            # Specialized hydration modules
     ├── category.ts       # Category names/descriptions via AI
@@ -30,6 +31,9 @@ blueprint/
     ├── theme.ts          # AI brand color generation (primary + secondary)
     ├── color-shades.ts   # hydrateColorShades: AI hex + family for unknown shade names (store context)
     ├── translation.ts    # translateCatalog: native-sounding translation per locale, reuses unchanged entries by source hash
+    ├── prices.ts         # hydratePrices: AI price range per product, seeded roll, fixes random pack units
+    ├── names.ts          # hydrateProductNames: variant values out of parent names, unique names
+    ├── manufacturers.ts  # hydrateManufacturers: fictional brands per top-level category (one AI call)
     └── index.ts          # Re-exports
 ```
 
@@ -102,6 +106,18 @@ Supports selective re-hydration modes:
 - `cms` — Only hydrate CMS text blueprint
 - `variants` — `hydrateVariantsOnly(blueprint, settings)`: re-pick variant options with new settings
 - `variant-images` — `hydrateVariantImages()`: recolour the parent images per colour variant
+- `prices` — `hydratePricesOnly()`: realistic prices via `hydratePrices()` (`hydrators/prices.ts`).
+  The AI gives a price range per product (one call per 100 products), `rollPrice()` picks a shop
+  price inside it (log-uniform, seeded by product ID, x.99 endings). The same call swaps or drops
+  the random pack unit of packed products (`resolvePackaging()`, null = sold one by one). Full hydration runs it too
+- `names` — `hydrateNamesOnly()` via `hydrateProductNames()` (`hydrators/names.ts`):
+  `stripVariantValues()` drops variant values from variant parent names (no AI), then every
+  product whose name is taken (`productNameKey()`: case, spaces and punctuation ignored) gets a
+  new name from the AI (one call per 25). A taken proposal keeps the old name. Full hydration runs it too
+- `manufacturers` — `hydrateManufacturersOnly()` via `hydrateManufacturers()`
+  (`hydrators/manufacturers.ts`): one AI call per store returns fictional brands per top-level
+  category. Each placeholder brand of a branch maps to one new brand, so the grouping stays. A
+  branch with too few unique proposals keeps its brands. Full hydration runs it too
 
 ### Variant colour images
 

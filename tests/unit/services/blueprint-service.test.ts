@@ -199,6 +199,88 @@ describe("hydrateBlueprint and estimateBlueprintCost", () => {
         expect(lines[0]).toStartWith("Error: --variant-share can only be set at blueprint create");
     });
 
+    test("--only=prices needs a hydrated blueprint", async () => {
+        saveBlueprints(false);
+        const lines = await hydrateBlueprint("test-store", { only: "prices" }, deps());
+
+        expect(lines[0]).toStartWith("Error: --only=prices needs a hydrated blueprint");
+        expect(text.callCount).toBe(0);
+    });
+
+    test("--only=prices re-prices products and keeps names", async () => {
+        const blueprint = createTestBlueprint({
+            products: [createTestProduct({ name: "Foam Earplugs", price: 243 })],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        const before = cache.loadHydratedBlueprint("test-store");
+        text.setResponse("PriceRanges", { prices: [{ index: 1, min: 2, max: 4 }] });
+
+        const lines = await hydrateBlueprint("test-store", { only: "prices" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: prices");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["PriceRanges"]);
+        expect(after?.products[0]?.name).toBe(before?.products[0]?.name);
+        expect(after?.products[0]?.price).toBeLessThanOrEqual(3.99);
+        expect(cache.loadGenerationLog("test-store")?.steps["hydrate:prices"]).toBeDefined();
+    });
+
+    test("--only=names renames duplicates and keeps prices", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "a", name: "Foam Earplugs", price: 5 }),
+                createTestProduct({ id: "b", name: "Foam Earplugs", price: 7 }),
+            ],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        text.setResponse("ProductNames", { names: [{ index: 1, name: "Foam Earplugs - Travel" }] });
+
+        const lines = await hydrateBlueprint("test-store", { only: "names" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: names");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["ProductNames"]);
+        expect(after?.products.map((p) => p.name)).toEqual([
+            "Foam Earplugs",
+            "Foam Earplugs - Travel",
+        ]);
+        expect(after?.products.map((p) => p.price)).toEqual([5, 7]);
+    });
+
+    test("--only=manufacturers replaces brands and keeps names", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({
+                    id: "a",
+                    name: "Earplugs",
+                    metadata: { manufacturerName: "Artisan Home" },
+                }),
+                createTestProduct({
+                    id: "b",
+                    name: "Headset",
+                    metadata: { manufacturerName: "Artisan Home" },
+                }),
+            ],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        const branches = [{ index: 1, brands: ["Quietline"] }];
+        text.setResponse("Manufacturers", { branches });
+
+        const lines = await hydrateBlueprint("test-store", { only: "manufacturers" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: manufacturers");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["Manufacturers"]);
+        expect(after?.products.map((p) => p.metadata.manufacturerName)).toEqual([
+            "Quietline",
+            "Quietline",
+        ]);
+        expect(after?.products.map((p) => p.name)).toEqual(["Earplugs", "Headset"]);
+    });
+
     test("--only=variant-images does nothing when images are disabled", async () => {
         saveBlueprints(true);
         const lines = await hydrateBlueprint("test-store", { only: "variant-images" }, deps());

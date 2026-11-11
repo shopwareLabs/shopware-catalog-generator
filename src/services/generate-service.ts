@@ -18,7 +18,11 @@ import type {
 import type { BlueprintValidationResult } from "../utils/index.js";
 import type { ShopwareConnection } from "./shopware-context.js";
 
-import { applyColorSystem, hasVariantOverrides } from "../blueprint/index.js";
+import {
+    applyColorSystem,
+    hasVariantOverrides,
+    mergeSynonymPropertyGroups,
+} from "../blueprint/index.js";
 import { createCacheFromEnv } from "../cache.js";
 import { DEFAULT_PROCESSOR_OPTIONS, registry, runProcessors } from "../post-processors/index.js";
 import {
@@ -337,6 +341,9 @@ async function uploadCatalog(
     out.push(`  Synced ${categoryIdMap.size} categories`);
     progress("upload", 2, 4);
 
+    for (const merge of mergeSynonymPropertyGroups(blueprint)) {
+        out.push(`  Merged property group "${merge.from}" into "${merge.to}"`);
+    }
     await syncPropertyGroups(dataHydrator, blueprint);
     out.push(`  Synced ${blueprint.propertyGroups.length} property groups`);
     progress("upload", 3, 4);

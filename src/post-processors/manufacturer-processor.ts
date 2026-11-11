@@ -19,6 +19,7 @@ import type {
 import { localizedFixtureText } from "../fixtures/index.js";
 import { searchAllByFilter } from "../shopware/api-helpers.js";
 import { apiPost, generateUUID, logger, toKebabCase } from "../utils/index.js";
+import { syncWithRetry } from "./processor-utils.js";
 
 /** Default fields of a manufacturer this generator creates */
 function newManufacturer(name: string): Manufacturer {
@@ -221,21 +222,17 @@ class ManufacturerProcessorImpl implements PostProcessor {
         }
         if (productUpdates.length === 0) return null;
 
-        try {
-            await context.api.post("_action/sync", {
-                updateProductManufacturers: {
-                    entity: "product",
-                    action: "upsert",
-                    payload: productUpdates,
-                },
-            });
-            logger.debug("Product manufacturers assigned", {
-                data: { count: productUpdates.length },
-            });
-            return null;
-        } catch (error) {
-            return `Failed to assign manufacturers: ${errorMessage(error)}`;
-        }
+        const result = await syncWithRetry(context, "manufacturer assignment", {
+            updateProductManufacturers: {
+                entity: "product",
+                action: "upsert",
+                payload: productUpdates,
+            },
+        });
+        if (!result.ok)
+            return `Failed to assign manufacturers: ${result.errorText ?? result.status}`;
+        logger.debug("Product manufacturers assigned", { data: { count: productUpdates.length } });
+        return null;
     }
 
     /**

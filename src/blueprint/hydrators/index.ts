@@ -14,7 +14,25 @@ export type {
     ProductImageHydrationResult,
     ThemeMediaHydrationResult,
 } from "./image.js";
+export { hydrateManufacturers } from "./manufacturers.js";
+export type { ManufacturerHydrationResult } from "./manufacturers.js";
+export {
+    findDuplicateNameProducts,
+    hydrateProductNames,
+    NAME_BATCH_SIZE,
+    productNameKey,
+    stripVariantValues,
+} from "./names.js";
+export type { NameHydrationResult } from "./names.js";
 export { ProductHydrator } from "./product.js";
+export {
+    hydratePrices,
+    normalizePriceRange,
+    PRICE_BATCH_SIZE,
+    rollPrice,
+    toShopPrice,
+} from "./prices.js";
+export type { PriceHydrationResult, PriceRange } from "./prices.js";
 export {
     buildRecolorPrompt,
     collectVariantImageTasks,

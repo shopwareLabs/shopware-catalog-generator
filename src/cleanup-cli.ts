@@ -6,7 +6,7 @@
  *   bun run cleanup -- --salesChannel="furniture"           - Delete products and categories
  *   bun run cleanup -- --salesChannel="furniture" --delete  - Also delete the SalesChannel itself
  *   bun run cleanup -- --salesChannel="furniture" --props   - Also delete property groups
- *   bun run cleanup -- --salesChannel="music" --processors=cms  - Cleanup specific processor entities
+ *   bun run cleanup -- --salesChannel="music" --processors=customers  - Cleanup specific processor entities
  *   bun run cleanup:media                                   - Delete unused product media
  *
  * Every mode runs the same spec as its MCP tool (src/services/commands.ts).
@@ -147,7 +147,7 @@ Usage:
   bun run cleanup -- --salesChannel="name" --delete          Also delete the SalesChannel itself
   bun run cleanup -- --salesChannel="name" --props           Also delete property groups
   bun run cleanup -- --salesChannel="name" --manufacturers   Delete the store's manufacturers (processor)
-  bun run cleanup -- --salesChannel="name" --processors=cms  Cleanup specific processor entities
+  bun run cleanup -- --salesChannel="name" --processors=customers  Cleanup specific processor entities
   bun run cleanup -- --salesChannel="name" --processors=all  Cleanup ALL processor entities
   bun run cleanup -- --salesChannel="name" --full            Complete cleanup (processors + core)
   bun run cleanup -- --salesChannel="name" --full --delete   ... and delete the SalesChannel

@@ -1,5 +1,7 @@
 import type { z } from "zod";
 
+import { zodResponseFormat } from "openai/helpers/zod";
+
 import type { ChatMessage, TextProvider } from "../../src/types/providers.js";
 
 type DynamicResponseFn = (messages: ChatMessage[]) => unknown;
@@ -67,10 +69,13 @@ export class MockTextProvider implements TextProvider {
 
     async generateCompletion(
         messages: ChatMessage[],
-        _schema?: z.ZodTypeAny,
+        schema?: z.ZodTypeAny,
         schemaName?: string
     ): Promise<string> {
         this.callLog.push({ messages, schemaName });
+        // Same conversion as the OpenAI provider: a schema that OpenAI structured outputs
+        // reject (e.g. an optional field without nullable) throws here, as it would live
+        if (schema) zodResponseFormat(schema, schemaName ?? "response");
 
         const key = schemaName || "default";
 

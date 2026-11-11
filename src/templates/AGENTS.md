@@ -10,7 +10,7 @@ The templates module provides pre-generated catalog data from a GitHub repositor
 
 ## Template Repository
 
-Templates are stored in a private GitHub repository:
+Templates are stored in a public GitHub repository:
 
 - **Repository:** `github.com/shopwareLabs/shopware-catalog-templates`
 - **Structure:** Same as `generated/` folder
@@ -112,8 +112,8 @@ class TemplateFetcher {
 ## Environment Variables
 
 ```env
-# Repository URL (SSH or HTTPS)
-TEMPLATE_REPO_URL=git@github.com:shopwareLabs/shopware-catalog-templates.git
+# Repository URL (SSH or HTTPS, default: anonymous HTTPS)
+TEMPLATE_REPO_URL=https://github.com/shopwareLabs/shopware-catalog-templates.git
 
 # Local directory for cloning (relative to project root)
 TEMPLATE_CACHE_DIR=.shopware-catalog-templates
@@ -184,7 +184,8 @@ The fetcher uses Git's sparse checkout feature to minimize download size:
       remote (`git fetch --depth 1` + `git reset --hard FETCH_HEAD`) and old objects are
       pruned. The clone is only a cache, so nothing is lost.
 
-Authentication uses existing git credentials (SSH keys or credential helper).
+The default URL is anonymous HTTPS, so no GitHub account or SSH key is needed. A custom
+`TEMPLATE_REPO_URL` (for example a private fork over SSH) uses the existing git credentials.
 
 ## Error Handling
 

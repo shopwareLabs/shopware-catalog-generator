@@ -183,3 +183,37 @@ describe("ShopwareClient.getStandardSalesChannel", () => {
         );
     });
 });
+
+describe("ShopwareClient.searchAllPropertyGroups", () => {
+    test("loads every page, so groups after the first 100 are found", async () => {
+        const all = Array.from({ length: 119 }, (_, i) => ({ id: `g-${i}`, name: `Group ${i}` }));
+        const bodies: Array<{ limit: number; page: number }> = [];
+        const client = new ShopwareClient(
+            createMockAdminClientWithInvoke(async (_op, params) => {
+                const body = params.body as { limit: number; page: number };
+                bodies.push(body);
+                const start = (body.page - 1) * body.limit;
+                return { data: { data: all.slice(start, start + body.limit) } };
+            })
+        );
+
+        const groups = await client.searchAllPropertyGroups();
+
+        expect(groups).toHaveLength(119);
+        expect(groups.at(-1)?.name).toBe("Group 118");
+        expect(bodies.map((b) => b.page)).toEqual([1, 2]);
+    });
+
+    test("stops after one request when the first page is not full", async () => {
+        let requests = 0;
+        const client = new ShopwareClient(
+            createMockAdminClientWithInvoke(async () => {
+                requests++;
+                return { data: { data: [{ id: "g-1", name: "Color" }] } };
+            })
+        );
+
+        expect(await client.searchAllPropertyGroups()).toHaveLength(1);
+        expect(requests).toBe(1);
+    });
+});
