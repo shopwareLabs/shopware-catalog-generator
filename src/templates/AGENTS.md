@@ -17,29 +17,35 @@ Templates are stored in a public GitHub repository:
 
 ```
 shopware-catalog-templates/
-├── sales-channels/
-│   ├── beauty/
-│   │   ├── blueprint.json
-│   │   ├── hydrated-blueprint.json
-│   │   ├── images/
-│   │   └── metadata/
-│   ├── furniture/
-│   └── music/
-└── properties/
-    ├── color.json
-    ├── size.json
-    └── ...
+└── generated/
+    ├── sales-channels/
+    │   ├── beauty/
+    │   │   ├── blueprint.json
+    │   │   ├── hydrated-blueprint.json
+    │   │   ├── images/
+    │   │   └── metadata/
+    │   ├── electronics/
+    │   └── music/
+    └── properties/
+        ├── color.json
+        └── index.json
 ```
 
 Each template contains:
 
 - `blueprint.json` - Original blueprint structure
 - `hydrated-blueprint.json` - AI-hydrated blueprint with all data
-- `images/` - Product and category images (webp + json metadata)
+- `cms-blueprint.json` - AI-hydrated CMS texts
+- `color-shades.json` - Learned colour shades (hex + family)
+- `images/` - Product, category, CMS and theme images (webp + json metadata)
 - `metadata/` - Individual product metadata files
-- `manufacturers.json` - Manufacturer data
+- `properties/` - Store-specific property groups
+- `translations/` - Translated catalog per locale (e.g. `de-DE.json`)
 - `generation.json` - Generator version and models of each hydration/translation step
 - `template.json` - Template metadata (see below)
+
+Manufacturers come from `hydrated-blueprint.json`. `manufacturers.json` is written by the
+`manufacturers` processor at upload time and is not part of a template.
 
 ## Template Metadata (`template.json`)
 
