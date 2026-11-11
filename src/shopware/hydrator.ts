@@ -636,7 +636,27 @@ export class ShopwareHydrator extends ShopwareClient {
             }
         }
 
+        await this.unlinkRemovedProductOptions(products);
         return created;
+    }
+
+    /**
+     * Delete product_property links that a product no longer has (e.g. the colour of a
+     * variant parent from an older run). Links that do not exist are ignored by Shopware.
+     */
+    private async unlinkRemovedProductOptions(products: DirectProductInput[]): Promise<void> {
+        const links = products.flatMap((p) =>
+            (p.removedOptionIds ?? []).map((optionId) => ({ productId: p.id, optionId }))
+        );
+        if (links.length === 0) return;
+        try {
+            await this.sync([{ entity: "product_property", action: "delete", payload: links }]);
+        } catch (error) {
+            logger.warn(`Could not unlink ${links.length} variant group properties`, {
+                cli: true,
+                data: error,
+            });
+        }
     }
 
     /**
@@ -1504,6 +1524,8 @@ interface DirectProductInput {
     stock: number;
     categoryIds?: string[];
     options?: Array<{ id: string; name: string }>;
+    /** Property options to unlink (left out on purpose, may exist from an older run) */
+    removedOptionIds?: string[];
     hasSalesPrice?: boolean;
     salePercentage?: number;
     hasTieredPricing?: boolean;

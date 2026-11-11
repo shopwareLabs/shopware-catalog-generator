@@ -69,6 +69,7 @@ describe("estimateHydrationCost", () => {
             "Products",
             "Property options",
             "CMS pages",
+            "Prices",
         ]);
     });
 
@@ -311,7 +312,26 @@ describe("estimateHydrationCost - text items per scope", () => {
             "Products",
             "Property options",
             "CMS pages",
+            "Prices",
         ]);
+    });
+
+    test("prices scope makes one call per 100 products and no images", () => {
+        const products = Array.from({ length: 101 }, (_, i) => createTestProduct({ id: `p-${i}` }));
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "prices", blueprint: { categories: [], products } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            {
+                label: "Prices",
+                calls: 2,
+                inputTokens: 250 + 101 * 25,
+                outputTokens: 101 * 20,
+            },
+        ]);
+        expect(estimate.images.count).toBe(0);
+        expect(estimate.notes.some((n) => n.startsWith("Variants:"))).toBe(false);
     });
 
     test("variant-images scope has no text calls", () => {

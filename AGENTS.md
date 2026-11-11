@@ -1274,6 +1274,7 @@ bun run blueprint hydrate --name=music --only=categories  # Categories only
 bun run blueprint hydrate --name=music --only=properties  # Properties only
 bun run blueprint hydrate --name=music --only=variants --variant-colors=6  # More colour variants
 bun run blueprint hydrate --name=music --only=variant-images  # Recolour images per colour variant
+bun run blueprint hydrate --name=music --only=prices      # Realistic prices (keeps names)
 bun run blueprint hydrate --name=music --rehydrate        # Full re-hydration
 
 # Phase 2c: Fix placeholder names (if hydration was incomplete)
@@ -1346,7 +1347,7 @@ the largest other group shrinks first (down to 2), then the colours, then other 
 ```bash
 bun run blueprint hydrate \
   --name=NAME              # Required: SalesChannel name
-  --only=MODE              # Selective: "categories", "properties", "cms", "variants" or "variant-images"
+  --only=MODE              # Selective: "categories", "properties", "cms", "variants", "variant-images" or "prices"
   --rehydrate              # Force full re-hydration (changes names, triggers image regen)
 ```
 
@@ -1364,6 +1365,10 @@ Hydration modes:
   Cached images are reused; a changed parent image makes its colour copies stale (source hash).
   `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too.
   The `variant-images` processor uploads them in `generate` / `process`
+- **--only=prices**: Re-price the products. The AI returns a typical retail price range per
+  product (name, category, pack size; one call per 100 products), and the price is rolled inside
+  it, seeded by the product ID (`hydrators/prices.ts`). Products the AI skips keep their price.
+  A full hydration runs this pass too
 - **--rehydrate**: Force full re-hydration even if hydrated blueprint exists
 
 Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prevent accidental name changes.
@@ -1373,7 +1378,7 @@ Safety: If hydrated blueprint exists, requires `--only` or `--rehydrate` to prev
 ```bash
 bun run blueprint estimate \
   --name=NAME              # Required: SalesChannel name (blueprint must exist)
-  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images")
+  --only=MODE              # Optional: forecast a selective run ("categories", "properties", "cms", "variants", "variant-images", "prices")
   --languages=LIST         # Optional: also forecast translation ("de-DE,fr-FR", "all", "none")
 ```
 

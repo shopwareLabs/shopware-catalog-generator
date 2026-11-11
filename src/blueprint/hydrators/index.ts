@@ -16,6 +16,14 @@ export type {
 } from "./image.js";
 export { ProductHydrator } from "./product.js";
 export {
+    hydratePrices,
+    normalizePriceRange,
+    PRICE_BATCH_SIZE,
+    rollPrice,
+    toShopPrice,
+} from "./prices.js";
+export type { PriceHydrationResult, PriceRange } from "./prices.js";
+export {
     buildRecolorPrompt,
     collectVariantImageTasks,
     countVariantImages,

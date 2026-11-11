@@ -113,6 +113,34 @@ describe("ShopwareHydrator.hydrateEnvWithProductsDirect - prices", () => {
     });
 });
 
+describe("ShopwareHydrator.hydrateEnvWithProductsDirect - removed options", () => {
+    test("unlinks removed options after the upsert", async () => {
+        const { hydrator, syncOps } = createMockShop();
+        const product = baseProduct();
+
+        await hydrator.hydrateEnvWithProductsDirect(
+            [{ ...product, removedOptionIds: ["opt-navy"] }],
+            "sc-1",
+            "nav-1"
+        );
+
+        const unlink = syncOps.find((o) => o.entity === "product_property");
+        expect(unlink?.action).toBe("delete");
+        expect(unlink?.payload).toEqual([{ productId: product.id, optionId: "opt-navy" }]);
+        expect(syncOps.indexOf(unlink as SyncOp)).toBeGreaterThan(
+            syncOps.findIndex((o) => o.entity === "product")
+        );
+    });
+
+    test("sends no delete when nothing was removed", async () => {
+        const { hydrator, syncOps } = createMockShop();
+
+        await hydrator.hydrateEnvWithProductsDirect([baseProduct()], "sc-1", "nav-1");
+
+        expect(syncOps.some((o) => o.entity === "product_property")).toBe(false);
+    });
+});
+
 describe("ShopwareHydrator.hydrateEnvWithProductsDirect - packaging", () => {
     const packaging = {
         unitShortCode: "pc",

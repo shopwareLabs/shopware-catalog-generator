@@ -199,6 +199,33 @@ describe("hydrateBlueprint and estimateBlueprintCost", () => {
         expect(lines[0]).toStartWith("Error: --variant-share can only be set at blueprint create");
     });
 
+    test("--only=prices needs a hydrated blueprint", async () => {
+        saveBlueprints(false);
+        const lines = await hydrateBlueprint("test-store", { only: "prices" }, deps());
+
+        expect(lines[0]).toStartWith("Error: --only=prices needs a hydrated blueprint");
+        expect(text.callCount).toBe(0);
+    });
+
+    test("--only=prices re-prices products and keeps names", async () => {
+        const blueprint = createTestBlueprint({
+            products: [createTestProduct({ name: "Foam Earplugs", price: 243 })],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        const before = cache.loadHydratedBlueprint("test-store");
+        text.setResponse("PriceRanges", { prices: [{ index: 1, min: 2, max: 4 }] });
+
+        const lines = await hydrateBlueprint("test-store", { only: "prices" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: prices");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["PriceRanges"]);
+        expect(after?.products[0]?.name).toBe(before?.products[0]?.name);
+        expect(after?.products[0]?.price).toBeLessThanOrEqual(3.99);
+        expect(cache.loadGenerationLog("test-store")?.steps["hydrate:prices"]).toBeDefined();
+    });
+
     test("--only=variant-images does nothing when images are disabled", async () => {
         saveBlueprints(true);
         const lines = await hydrateBlueprint("test-store", { only: "variant-images" }, deps());

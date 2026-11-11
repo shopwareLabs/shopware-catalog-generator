@@ -102,6 +102,9 @@ Supports selective re-hydration modes:
 - `cms` — Only hydrate CMS text blueprint
 - `variants` — `hydrateVariantsOnly(blueprint, settings)`: re-pick variant options with new settings
 - `variant-images` — `hydrateVariantImages()`: recolour the parent images per colour variant
+- `prices` — `hydratePricesOnly()`: realistic prices via `hydratePrices()` (`hydrators/prices.ts`).
+  The AI gives a price range per product (one call per 100 products), `rollPrice()` picks a shop
+  price inside it (log-uniform, seeded by product ID, x.99 endings). Full hydration runs it too
 
 ### Variant colour images
 

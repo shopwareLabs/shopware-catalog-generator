@@ -30,6 +30,7 @@ import {
     flattenCategories,
     hydrateBrandColors,
     hydrateCategories,
+    hydratePrices,
     ProductHydrator,
 } from "./hydrators/index.js";
 import { groupProductsByBranch, productColorPreferences } from "./hydrators/product.js";
@@ -132,14 +133,24 @@ export class BlueprintHydrator {
         );
         logger.info("Products hydrated", { data: { count: hydratedProducts.length } });
 
+        const categories = applyCategoryHydration(
+            blueprint.categories,
+            hydratedCategories.categories
+        );
+        const { products } = await hydratePrices(
+            this.textProvider,
+            { categories, products: hydratedProducts },
+            storeContext
+        );
+
         const hydrated: HydratedBlueprint = {
             ...blueprint,
             salesChannel: {
                 ...blueprint.salesChannel,
                 description: hydratedCategories.salesChannelDescription,
             },
-            categories: applyCategoryHydration(blueprint.categories, hydratedCategories.categories),
-            products: hydratedProducts,
+            categories,
+            products,
             propertyGroups: [],
             hydratedAt: new Date().toISOString(),
             brandColors,
@@ -240,6 +251,19 @@ export class BlueprintHydrator {
 
         logger.info("  Properties hydrated successfully (names preserved)", { cli: true });
         logger.info("Properties-only hydration complete");
+        return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
+    }
+
+    /**
+     * Re-price the products of an existing hydrated blueprint (one AI call per 100
+     * products). Names, properties and images stay untouched.
+     */
+    async hydratePricesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
+        const { products, priced } = await hydratePrices(this.textProvider, existingBlueprint, {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        });
+        logger.info(`  Prices updated for ${priced}/${products.length} products`, { cli: true });
         return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
     }
 
