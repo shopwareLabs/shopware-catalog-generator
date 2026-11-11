@@ -83,7 +83,7 @@ which is the case for `IMAGE_PROVIDER=none`.
 before creating providers, and appends the actual token usage and cost to its output lines. Actual usage is
 only available for providers that implement `TextProvider.getUsage()` (currently OpenAI).
 
-`hydrateBlueprint` supports six selective modes via the `only` option (`HYDRATE_ONLY_MODES`):
+`hydrateBlueprint` supports seven selective modes via the `only` option (`HYDRATE_ONLY_MODES`):
 
 - `"categories"` — re-hydrate category names/descriptions only
 - `"properties"` — re-hydrate product properties only (preserves product names)
@@ -92,6 +92,8 @@ only available for providers that implement `TextProvider.getUsage()` (currently
 - `"variant-images"` — recolour product images per colour variant (needs an image provider with
   `editImage`, otherwise returns a "Skipped" line). Records `hydrate:variant-images` in `generation.json`
 - `"prices"` — re-price products with AI price ranges, keeps names. Records `hydrate:prices`
+- `"names"` — drop variant values from variant parent names and rename duplicate product names.
+  Records `hydrate:names`
 
 Variant overrides (`VariantSettingOverrides`, raw flag strings or MCP numbers) are passed to
 `createBlueprint`, `estimateBlueprintCost`, `hydrateBlueprint` and `generate`. Invalid values,

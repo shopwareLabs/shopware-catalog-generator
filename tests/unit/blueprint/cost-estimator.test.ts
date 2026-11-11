@@ -316,6 +316,22 @@ describe("estimateHydrationCost - text items per scope", () => {
         ]);
     });
 
+    test("names scope makes one call per 25 duplicate names", () => {
+        const products = [
+            createTestProduct({ id: "a", name: "Cleaner - 750 ml" }),
+            createTestProduct({ id: "b", name: "Cleaner - 750ml" }),
+            createTestProduct({ id: "c", name: "Sponge" }),
+        ];
+        const estimate = estimateHydrationCost(
+            createInput({ scope: "names", blueprint: { categories: [], products } })
+        );
+
+        expect(estimate.text.items).toEqual([
+            { label: "Product names", calls: 1, inputTokens: 1800 + 90, outputTokens: 25 },
+        ]);
+        expect(estimate.images.count).toBe(0);
+    });
+
     test("prices scope makes one call per 100 products and no images", () => {
         const products = Array.from({ length: 101 }, (_, i) => createTestProduct({ id: `p-${i}` }));
         const estimate = estimateHydrationCost(

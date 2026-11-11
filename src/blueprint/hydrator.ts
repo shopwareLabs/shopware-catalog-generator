@@ -31,6 +31,7 @@ import {
     hydrateBrandColors,
     hydrateCategories,
     hydratePrices,
+    hydrateProductNames,
     ProductHydrator,
 } from "./hydrators/index.js";
 import { groupProductsByBranch, productColorPreferences } from "./hydrators/product.js";
@@ -137,9 +138,14 @@ export class BlueprintHydrator {
             blueprint.categories,
             hydratedCategories.categories
         );
-        const { products } = await hydratePrices(
+        const { products: priced } = await hydratePrices(
             this.textProvider,
             { categories, products: hydratedProducts },
+            storeContext
+        );
+        const { products } = await hydrateProductNames(
+            this.textProvider,
+            { categories, products: priced },
             storeContext
         );
 
@@ -265,6 +271,29 @@ export class BlueprintHydrator {
         });
         logger.info(`  Prices updated for ${priced}/${products.length} products`, { cli: true });
         return { ...existingBlueprint, products, hydratedAt: new Date().toISOString() };
+    }
+
+    /**
+     * Remove variant values from variant parent names and rename products whose name is
+     * taken (one AI call per 25 duplicates). Descriptions, properties and images stay.
+     */
+    async hydrateNamesOnly(existingBlueprint: HydratedBlueprint): Promise<HydratedBlueprint> {
+        const result = await hydrateProductNames(this.textProvider, existingBlueprint, {
+            name: existingBlueprint.salesChannel.name,
+            description: existingBlueprint.salesChannel.description,
+        });
+        logger.info(
+            `  Names: ${result.cleaned} variant parents cleaned, ${result.renamed} duplicates renamed`,
+            { cli: true }
+        );
+        if (result.stillDuplicate > 0) {
+            logger.warn(`  ${result.stillDuplicate} products still share a name`, { cli: true });
+        }
+        return {
+            ...existingBlueprint,
+            products: result.products,
+            hydratedAt: new Date().toISOString(),
+        };
     }
 
     /**

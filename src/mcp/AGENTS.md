@@ -53,7 +53,7 @@ mcp/
 The `generate` tool uses `generateRequestParams` from `src/services/generate-request.ts`, see
 [Surface parity](../services/AGENTS.md#surface-parity-cli-mcp-server). The ranges come from `VARIANT_SETTING_LIMITS`,
 so they match the CLI flags (`--variant-colors`, `--variant-options`, `--max-variants`,
-`--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"`, `only: "variant-images"` and `only: "prices"`
+`--variant-share`). `blueprint_hydrate` / `blueprint_estimate` also accept `only: "variants"`, `only: "variant-images"`, `only: "prices"` and `only: "names"`
 (both use `HYDRATE_ONLY_MODES` from the blueprint service).
 
 ## Architecture: Shared Services Layer

@@ -226,6 +226,29 @@ describe("hydrateBlueprint and estimateBlueprintCost", () => {
         expect(cache.loadGenerationLog("test-store")?.steps["hydrate:prices"]).toBeDefined();
     });
 
+    test("--only=names renames duplicates and keeps prices", async () => {
+        const blueprint = createTestBlueprint({
+            products: [
+                createTestProduct({ id: "a", name: "Foam Earplugs", price: 5 }),
+                createTestProduct({ id: "b", name: "Foam Earplugs", price: 7 }),
+            ],
+        });
+        cache.saveBlueprint("test-store", blueprint);
+        cache.saveHydratedBlueprint("test-store", blueprint);
+        text.setResponse("ProductNames", { names: [{ index: 1, name: "Foam Earplugs - Travel" }] });
+
+        const lines = await hydrateBlueprint("test-store", { only: "names" }, deps());
+
+        const after = cache.loadHydratedBlueprint("test-store");
+        expect(lines).toContain("  Mode: names");
+        expect(text.getCalls().map((c) => c.schemaName)).toEqual(["ProductNames"]);
+        expect(after?.products.map((p) => p.name)).toEqual([
+            "Foam Earplugs",
+            "Foam Earplugs - Travel",
+        ]);
+        expect(after?.products.map((p) => p.price)).toEqual([5, 7]);
+    });
+
     test("--only=variant-images does nothing when images are disabled", async () => {
         saveBlueprints(true);
         const lines = await hydrateBlueprint("test-store", { only: "variant-images" }, deps());

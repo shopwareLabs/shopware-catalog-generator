@@ -202,7 +202,7 @@ export const BLUEPRINT_ESTIMATE = defineCommand({
             .enum(HYDRATE_ONLY_MODES)
             .optional()
             .describe(
-                "Estimate a selective hydration (categories, properties, cms, variants, variant-images, or prices)"
+                "Estimate a selective hydration (categories, properties, cms, variants, variant-images, prices, or names)"
             ),
         languages: z
             .string()
@@ -275,11 +275,12 @@ export const BLUEPRINT_HYDRATE = defineCommand({
             .enum(HYDRATE_ONLY_MODES)
             .optional()
             .describe(
-                "Selectively hydrate only this part (categories, properties, cms, variants, variant-images, or prices). " +
+                "Selectively hydrate only this part (categories, properties, cms, variants, variant-images, prices, or names). " +
                     "Preserves existing product names (important for image stability). " +
                     "'variants' re-picks the variant options for new variant settings. " +
                     "'variant-images' recolours the product images per colour variant (OpenAI image editing). " +
-                    "'prices' re-prices the products with realistic prices (one AI call per 100 products)."
+                    "'prices' re-prices the products with realistic prices (one AI call per 100 products). " +
+                    "'names' removes variant values from variant parent names and renames products with a duplicate name."
             ),
         rehydrate: z
             .boolean()

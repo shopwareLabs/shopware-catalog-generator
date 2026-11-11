@@ -124,12 +124,13 @@ export const HYDRATE_ONLY_MODES = [
     "variants",
     "variant-images",
     "prices",
+    "names",
 ] as const;
 
 export type HydrateOnly = (typeof HYDRATE_ONLY_MODES)[number];
 
 /** Modes that only work on an existing hydrated blueprint (no fallback to a full run) */
-const NEEDS_HYDRATED: readonly HydrateOnly[] = ["variants", "variant-images", "prices"];
+const NEEDS_HYDRATED: readonly HydrateOnly[] = ["variants", "variant-images", "prices", "names"];
 
 /** Options shared by hydrate and estimate */
 interface HydrateRunOptions {
@@ -407,7 +408,7 @@ export async function hydrateBlueprint(
         return [
             `Error: Hydrated blueprint already exists for "${salesChannelName}". ` +
                 `Re-hydrating will change product names and trigger image regeneration. ` +
-                `Use --only=categories, --only=properties, --only=variants, --only=prices, or --rehydrate.`,
+                `Use --only=categories, --only=properties, --only=variants, --only=prices, --only=names, or --rehydrate.`,
         ];
     }
     const plan = planHydration(salesChannelName, options, cache);
@@ -535,6 +536,8 @@ function hydrateSelectivePass(
             return hydrator.hydrateCategoriesOnly(hydrated);
         case "prices":
             return hydrator.hydratePricesOnly(hydrated);
+        case "names":
+            return hydrator.hydrateNamesOnly(hydrated);
         case "properties":
             return hydrator.hydratePropertiesOnly(hydrated, existingProperties);
         case "variants":

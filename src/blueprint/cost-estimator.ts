@@ -29,6 +29,7 @@ import type {
 
 import { OPENAI_IMAGE_PRICES, OPENAI_TEXT_PRICES, PRICING_AS_OF } from "../fixtures/index.js";
 import { countCategories } from "../utils/index.js";
+import { findDuplicateNameProducts, NAME_BATCH_SIZE } from "./hydrators/names.js";
 import { PRICE_BATCH_SIZE } from "./hydrators/prices.js";
 import { VARIANT_COLOR_BATCH_SIZE } from "./hydrators/product.js";
 import {
@@ -58,6 +59,7 @@ const TOKENS = {
     cmsPage: { input: 350, inputPerSlot: 60, outputPerSlot: 65 },
     variantColors: { input: 400, inputPerProduct: 25, outputPerProduct: 45 },
     prices: { input: 250, inputPerProduct: 25, outputPerProduct: 20 },
+    names: { input: 1800, inputPerProduct: 90, outputPerProduct: 25 },
 } as const;
 
 /** Blueprint shape the estimator needs */
@@ -328,6 +330,7 @@ const TEXT_STEPS: TextStep[] = [
     },
     { scopes: ["full", "cms"], build: (input) => cmsItem(input.cms) },
     { scopes: ["full", "prices"], build: (input) => priceItem(input.blueprint.products.length) },
+    { scopes: ["names"], build: (input) => nameItem(input.blueprint.products) },
     {
         scopes: ["variants"],
         build: (input) =>
@@ -347,6 +350,18 @@ function priceItem(productCount: number): TextCostItem {
         calls: Math.ceil(productCount / PRICE_BATCH_SIZE),
         inputTokens: TOKENS.prices.input + productCount * TOKENS.prices.inputPerProduct,
         outputTokens: productCount * TOKENS.prices.outputPerProduct,
+    };
+}
+
+/** Duplicates in the blueprint; a full run's duplicates are unknown before it, so none */
+function nameItem(products: BlueprintProduct[]): TextCostItem {
+    const duplicates = findDuplicateNameProducts(products).length;
+    const calls = Math.ceil(duplicates / NAME_BATCH_SIZE);
+    return {
+        label: "Product names",
+        calls,
+        inputTokens: calls * TOKENS.names.input + duplicates * TOKENS.names.inputPerProduct,
+        outputTokens: duplicates * TOKENS.names.outputPerProduct,
     };
 }
 
@@ -573,7 +588,14 @@ function buildNotes(input: CostEstimateInput): string[] {
 
 function variantNotes(input: CostEstimateInput): string[] {
     const { variants, scope } = input;
-    if (!variants || scope === "categories" || scope === "cms" || scope === "prices") return [];
+    if (
+        !variants ||
+        scope === "categories" ||
+        scope === "cms" ||
+        scope === "prices" ||
+        scope === "names"
+    )
+        return [];
     const variantProducts =
         scope === "full"
             ? Math.round(input.blueprint.products.length * variants.share)

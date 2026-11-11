@@ -105,6 +105,10 @@ Supports selective re-hydration modes:
 - `prices` — `hydratePricesOnly()`: realistic prices via `hydratePrices()` (`hydrators/prices.ts`).
   The AI gives a price range per product (one call per 100 products), `rollPrice()` picks a shop
   price inside it (log-uniform, seeded by product ID, x.99 endings). Full hydration runs it too
+- `names` — `hydrateNamesOnly()` via `hydrateProductNames()` (`hydrators/names.ts`):
+  `stripVariantValues()` drops variant values from variant parent names (no AI), then every
+  product whose name is taken (`productNameKey()`: case, spaces and punctuation ignored) gets a
+  new name from the AI (one call per 25). A taken proposal keeps the old name. Full hydration runs it too
 
 ### Variant colour images
 

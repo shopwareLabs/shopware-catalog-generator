@@ -14,6 +14,14 @@ export type {
     ProductImageHydrationResult,
     ThemeMediaHydrationResult,
 } from "./image.js";
+export {
+    findDuplicateNameProducts,
+    hydrateProductNames,
+    NAME_BATCH_SIZE,
+    productNameKey,
+    stripVariantValues,
+} from "./names.js";
+export type { NameHydrationResult } from "./names.js";
 export { ProductHydrator } from "./product.js";
 export {
     hydratePrices,
