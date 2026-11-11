@@ -238,22 +238,9 @@ export class ShopwareExporter extends ShopwareClient {
      * Get existing property groups from Shopware with IDs for reuse.
      */
     async getExistingPropertyGroups(): Promise<ExistingProperty[]> {
-        const { data: propGroupData } = await this.getClient().invoke(
-            "searchPropertyGroup post /search/property-group",
-            {
-                body: {
-                    limit: 100,
-                    associations: {
-                        options: {
-                            sort: [{ field: "position", order: "ASC" }],
-                        },
-                    },
-                },
-            }
-        );
-        const propGroupResult = propGroupData as SearchResult<Schemas["PropertyGroup"]>;
+        const groups = await this.searchAllPropertyGroups();
 
-        return (propGroupResult.data ?? [])
+        return groups
             .filter((g) => (g.options ?? []).length > 0)
             .map((g) => {
                 const displayType = normalizeDisplayType(g.displayType ?? "text");
@@ -275,24 +262,11 @@ export class ShopwareExporter extends ShopwareClient {
      * Export all property groups with validation
      */
     async exportPropertyGroups(validation: ExportValidation): Promise<PropertyGroup[]> {
-        const { data: exportPropData } = await this.getClient().invoke(
-            "searchPropertyGroup post /search/property-group",
-            {
-                body: {
-                    limit: 100,
-                    associations: {
-                        options: {
-                            sort: [{ field: "position", order: "ASC" }],
-                        },
-                    },
-                },
-            }
-        );
-        const exportPropResult = exportPropData as SearchResult<Schemas["PropertyGroup"]>;
+        const groups = await this.searchAllPropertyGroups();
 
         const validGroups: PropertyGroup[] = [];
 
-        for (const g of exportPropResult.data ?? []) {
+        for (const g of groups) {
             const options = g.options ?? [];
 
             if (options.length === 0) {

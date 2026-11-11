@@ -311,20 +311,7 @@ export class ShopwareHydrator extends ShopwareClient {
         const result = new Map<string, { id: string; options: Map<string, string> }>();
 
         try {
-            const { data: searchData } = await this.getClient().invoke(
-                "searchPropertyGroup post /search/property-group",
-                {
-                    body: {
-                        limit: 100,
-                        associations: {
-                            options: { sort: [{ field: "position", order: "ASC" }] },
-                        },
-                    },
-                }
-            );
-            const searchResult = searchData as SearchResult<Schemas["PropertyGroup"]>;
-
-            for (const group of searchResult.data ?? []) {
+            for (const group of await this.searchAllPropertyGroups()) {
                 const optionMap = new Map<string, string>();
                 for (const opt of group.options ?? []) {
                     optionMap.set(opt.name.toLowerCase(), opt.id);
