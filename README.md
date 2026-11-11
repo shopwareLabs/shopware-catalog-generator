@@ -140,7 +140,8 @@ bun run generate --name=music
 bun run generate --name=music --no-template
 ```
 
-Templates require git access via SSH keys or credential helper.
+Templates are downloaded anonymously over HTTPS (only `git` is needed, no GitHub account or SSH key).
+Uploading a template makes no AI calls, so no `AI_API_KEY` is needed for it.
 
 ### Maintaining the Templates Repository
 

@@ -1444,8 +1444,14 @@ are the processor names (`cms-home`, `customers`, ...). Unknown names fail with 
 ./test-e2e.sh --cleanup=music             # Only cleanup specific SalesChannel
 ./test-e2e.sh --sw-dev=67 --reuse=music --skip-hydrate  # Run against a local sw-dev lane
 ./test-e2e.sh --reuse=music --languages=none  # Skip the translation step (default: de-DE)
+./test-e2e.sh --sw-dev=67 --template=fashion  # Upload a published template, no AI key needed
 bun run test:verify --name=music          # Verify Shopware data
 ```
+
+`--template=<name>` tests what an external user does: it clones the published template over
+anonymous HTTPS into empty temp cache dirs, runs `generate` with a dummy AI key and no image
+provider, and fails if `generate` did not print "Using pre-generated template" (a silent fallback
+to AI generation would otherwise go unnoticed).
 
 `--sw-dev=<lane>` targets a local sw-dev lane instead of the `.env` shop. The script reads the
 lane's `APP_URL`, creates a temporary admin integration with `bin/console integration:create`,
