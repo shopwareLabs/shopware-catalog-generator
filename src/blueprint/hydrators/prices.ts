@@ -34,7 +34,8 @@ const PriceRangeSchema = z.object({
     index: z.number().int(),
     min: z.number(),
     max: z.number(),
-    pack: z.string().optional(),
+    /** Required by structured outputs; null for products without a pack */
+    pack: z.string().nullable(),
 });
 
 /** Answer for a pack that does not fit the product */
@@ -42,6 +43,11 @@ const NO_PACK = "none";
 
 const PriceResponseSchema = z.object({
     prices: z.array(PriceRangeSchema),
+});
+
+/** Providers without structured outputs may leave pack out */
+const PriceAnswerSchema = z.object({
+    prices: z.array(PriceRangeSchema.extend({ pack: z.string().nullish() })),
 });
 
 /** Typical retail price range of one product */
@@ -135,11 +141,12 @@ function buildMessages(
                 "- for a product with a pack: return pack, the pack it is really sold in.",
                 `  One of: ${PACK_CHOICES.join(", ")}, or "${NO_PACK}" when it is sold`,
                 "  one by one. Price the pack you return",
+                "- pack is null for a product without a pack",
                 "",
                 "Products:",
                 ...lines,
                 "",
-                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9},{"index":2,"min":12,"max":20,"pack":"Pair"}]}',
+                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9,"pack":null},{"index":2,"min":12,"max":20,"pack":"Pair"}]}',
             ].join("\n"),
         },
     ];
@@ -159,13 +166,13 @@ function parseAnswers(response: string, count: number): Map<number, PriceAnswer>
         .replace(/```json?\n?/g, "")
         .replace(/```\n?/g, "")
         .trim();
-    const parsed = PriceResponseSchema.parse(JSON.parse(json));
+    const parsed = PriceAnswerSchema.parse(JSON.parse(json));
     return new Map(
         parsed.prices
             .filter((p) => p.index >= 1 && p.index <= count)
             .flatMap((p) => {
                 const range = normalizePriceRange(p.min, p.max);
-                return range ? [[p.index, { range, pack: p.pack }] as const] : [];
+                return range ? [[p.index, { range, pack: p.pack ?? undefined }] as const] : [];
             })
     );
 }
