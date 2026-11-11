@@ -37,7 +37,8 @@ Each template contains:
 - `hydrated-blueprint.json` - AI-hydrated blueprint with all data
 - `cms-blueprint.json` - AI-hydrated CMS texts
 - `color-shades.json` - Learned colour shades (hex + family)
-- `images/` - Product, category, CMS and theme images (webp + json metadata)
+- `images/` - Product, category, CMS and theme images (webp + json metadata). Images are WebP
+  quality 80 (`compressImage` on save); recompress older ones with `bun run images:compress`
 - `metadata/` - Individual product metadata files
 - `properties/` - Store-specific property groups
 - `translations/` - Translated catalog per locale (e.g. `de-DE.json`)

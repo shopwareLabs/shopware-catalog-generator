@@ -42,6 +42,7 @@ export {
     NO_EDIT_SUPPORT_WARNING,
     planVariantImages,
     resolveVariantImageViews,
+    SHADE_VIEW_SEPARATOR,
     shadeSlug,
     VARIANT_IMAGE_VIEWS_ENV,
     variantImageView,

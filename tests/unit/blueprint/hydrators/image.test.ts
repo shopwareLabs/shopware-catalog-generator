@@ -14,6 +14,7 @@ import {
 import { DataCache } from "../../../../src/cache.js";
 import { NoOpImageProvider } from "../../../../src/providers/noop-provider.js";
 import { FICTIONAL_BRANDING_INSTRUCTION } from "../../../../src/utils/index.js";
+import { createUncompressedImage } from "../../../helpers/image-factory.js";
 import { FailingImageProvider, MockImageProvider } from "../../../mocks/image-provider.mock.js";
 
 function createTestCache(): DataCache {
@@ -927,5 +928,41 @@ describe("fictional branding in image prompts", () => {
         const [prompt] = imageProvider.getPrompts();
         expect(prompt).toStartWith("Vitamin D3 Capsules - 1000 IU - 90 Pieces, front view");
         expect(prompt).toEndWith(FICTIONAL_BRANDING_INSTRUCTION);
+    });
+});
+
+describe("image compression before caching", () => {
+    test("product images are cached as compressed WebP", async () => {
+        const source = await createUncompressedImage();
+        const imageProvider = new MockImageProvider();
+        imageProvider.setCustomImage(source.toString("base64"));
+        const cache = createTestCache();
+        const blueprint = createMinimalBlueprint([
+            { id: "p1", name: "Guitar", imageDescriptions: [{ view: "front", prompt: "Front" }] },
+        ]);
+
+        await hydrateProductImages(imageProvider, cache, "test-store", blueprint);
+
+        const cached = cache.images.loadImageWithView("test-store", "p1", "front", "product_media");
+        expect(cached).not.toBeNull();
+        expect(Buffer.from(cached ?? "", "base64").length).toBeLessThan(source.length);
+    });
+
+    test("CMS images are cached as compressed WebP", async () => {
+        const source = await createUncompressedImage();
+        const imageProvider = new MockImageProvider();
+        imageProvider.setCustomImage(source.toString("base64"));
+        const cache = createTestCache();
+        const [spec] = buildCmsImageSpecs("test-store", "Test products");
+
+        await hydrateCmsImages(imageProvider, cache, "test-store", "Test products");
+
+        const cached = cache.images.loadImageForSalesChannel(
+            "test-store",
+            spec?.key ?? "",
+            "cms_media"
+        );
+        expect(cached).not.toBeNull();
+        expect(Buffer.from(cached ?? "", "base64").length).toBeLessThan(source.length);
     });
 });

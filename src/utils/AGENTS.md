@@ -126,6 +126,18 @@ Resolution order in `resolveShade`: curated shade → learned shade (`color-shad
 image colour (Multicolor, Rainbow, ...) → combination of two curated colours (family
 `multicolor`). Unknown names return `null` and go to the AI classifier during hydration.
 
+### image-compress.ts
+
+`compressImage(base64)` re-encodes a generated image as WebP quality 80 (`IMAGE_WEBP_QUALITY`)
+with `sharp`, at its native size. Providers return near-lossless images (OpenAI WebP at quality
+100, median ~1.2 MB); quality 80 looks the same and is 3-9% of the size. Every save of a
+generated image calls it before writing the cache: product, category and CMS images, colour
+variant images and `image fix`. Theme media skip it, `trimAndResize` already re-encodes them.
+
+The input is returned unchanged when the result is not at least 25% smaller or the data is not
+an image. An image that is already WebP 80 only shrinks by ~10% on a second pass, so it is never
+compressed twice and a re-run does not lose quality.
+
 ### image-format.ts
 
 `detectImageFormat(buffer)` returns `{ extension, mimeType }` from the magic bytes (jpg, png, gif,

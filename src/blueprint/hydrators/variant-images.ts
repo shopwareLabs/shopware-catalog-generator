@@ -22,6 +22,7 @@ import type {
 } from "../../types/index.js";
 
 import {
+    compressImage,
     ConcurrencyLimiter,
     createShortHash,
     executeWithRetry,
@@ -36,7 +37,7 @@ export const VARIANT_IMAGE_VIEWS_ENV = "VARIANT_IMAGE_VIEWS";
 export type VariantImageViews = "all" | "cover";
 
 /** Separator between the parent view and the shade slug in the cached view name */
-const SHADE_VIEW_SEPARATOR = "--";
+export const SHADE_VIEW_SEPARATOR = "--";
 
 export const NO_EDIT_SUPPORT_WARNING =
     "Colour images need image editing (OpenAI). This image provider cannot recolour an " +
@@ -303,7 +304,7 @@ async function recolorOne(
 
     const prompt = buildRecolorPrompt(task.color);
     try {
-        const base64 = await executeWithRetry(
+        const edited = await executeWithRetry(
             async () => {
                 const data = await editImage(prompt, source);
                 if (!data) throw new Error("Image edit returned null");
@@ -311,6 +312,7 @@ async function recolorOne(
             },
             { maxRetries: 3, baseDelay: 5000 }
         );
+        const base64 = await compressImage(edited);
         cache.images.saveVariantColorImage(salesChannelName, task.productId, task.view, base64, {
             prompt,
             imageModel: providerName,

@@ -65,6 +65,8 @@ export {
 } from "./color-normalize.js";
 // Concurrency utilities
 export { ConcurrencyLimiter } from "./concurrency.js";
+// Image compression
+export { compressImage, IMAGE_WEBP_QUALITY } from "./image-compress.js";
 // Image prompt utilities
 export type { ImageFormat } from "./image-format.js";
 export { detectImageFormat } from "./image-format.js";

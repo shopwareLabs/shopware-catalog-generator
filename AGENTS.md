@@ -174,6 +174,7 @@ src/
 │   ├── concurrency.ts        # ConcurrencyLimiter for parallel processing
 │   ├── color-palette.ts      # HEX color values, fuzzy matching
 │   ├── color-normalize.ts    # normalizeColorName, resolveShade, estimateShade, familyFromHex
+│   ├── image-compress.ts     # compressImage (WebP q80 before caching, single lossy pass)
 │   ├── image-format.ts       # detectImageFormat (magic bytes → extension + mime type)
 │   ├── image-prompt.ts       # withFictionalBranding (no real trademarks in images)
 │   ├── generator-version.ts  # getGeneratorInfo (package.json version + git commit)
@@ -244,6 +245,8 @@ scripts/
 ├── lint-no-cast.ts           # Custom lint rule: no type casting
 ├── validate-crawlers.ts      # bun run test:crawlers: crawl known stores, check expectations
 ├── crawler-validation.ts     # Pure parts of validate-crawlers (checks, table output)
+├── compress-images.ts        # bun run images:compress: recompress an existing cache (WebP q80)
+├── image-recompress.ts       # Pure parts of compress-images (recompress + colour image hashes)
 └── reset-templates-history.sh # Squash the history of the templates repo
 
 tests/
@@ -272,6 +275,7 @@ tests/
 ├── helpers/                  # Shared test factories
 │   ├── blueprint-factory.ts  # createTestProduct, createTestCategory, createTestBlueprint
 │   ├── fetch-mock.ts         # mockFetch (stubs globalThis.fetch)
+│   ├── image-factory.ts      # createUncompressedImage (large lossless test image)
 │   ├── post-processor-context.ts # createTestContext — builds PostProcessorContext with mocks
 │   ├── recording-services.ts # recordingServices (parity tests)
 │   └── translation-factory.ts # Test languages + createTranslationFile
@@ -775,6 +779,8 @@ The image hydrator in `src/blueprint/hydrators/image.ts` centralizes ALL image g
 sizes like 1024x1024 or 1536x1024. When specific dimensions are needed (e.g. 474x70 for a logo),
 the `trimAndResize()` function trims whitespace borders and resizes to the exact target dimensions.
 This is applied to all theme media (logo, favicon, share icon) during hydration.
+All other generated images (product, category, CMS, colour variants) are re-encoded as WebP
+quality 80 by `compressImage()` before they are cached (~5% of the provider's size, same look).
 
 | Theme Image     | Target Size | Purpose                      |
 | --------------- | ----------- | ---------------------------- |
@@ -1517,6 +1523,9 @@ bun run cache:trash                   # List trash contents
 bun run cache:restore -- <item>       # Restore item from trash
 bun run cache:restore -- --all        # Restore all items from trash
 bun run cache:empty-trash -- --confirm  # Permanently delete trash
+
+# Recompress images of caches created before compression on save (idempotent)
+bun run images:compress -- ../shopware-catalog-templates/generated --dry-run
 
 # Log management
 bun run logs:clear
