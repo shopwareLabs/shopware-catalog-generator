@@ -104,8 +104,8 @@ Supports selective re-hydration modes:
 - `variant-images` — `hydrateVariantImages()`: recolour the parent images per colour variant
 - `prices` — `hydratePricesOnly()`: realistic prices via `hydratePrices()` (`hydrators/prices.ts`).
   The AI gives a price range per product (one call per 100 products), `rollPrice()` picks a shop
-  price inside it (log-uniform, seeded by product ID, x.99 endings). The same call keeps, swaps
-  or drops the random pack unit of packed products (`resolvePackaging()`). Full hydration runs it too
+  price inside it (log-uniform, seeded by product ID, x.99 endings). The same call swaps or drops
+  the random pack unit of packed products (`resolvePackaging()`, null = sold one by one). Full hydration runs it too
 - `names` — `hydrateNamesOnly()` via `hydrateProductNames()` (`hydrators/names.ts`):
   `stripVariantValues()` drops variant values from variant parent names (no AI), then every
   product whose name is taken (`productNameKey()`: case, spaces and punctuation ignored) gets a

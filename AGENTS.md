@@ -1371,11 +1371,14 @@ Hydration modes:
   `VARIANT_IMAGE_VIEWS=cover` limits it to the first view. A full hydration runs this pass too.
   The `variant-images` processor uploads them in `generate` / `process`
 - **--only=prices**: Re-price the products. The AI returns a typical retail price range per
-  product (name, category, pack size; one call per 100 products), and the price is rolled inside
+  product (name, category; one call per 100 products), and the price is rolled inside
   it, seeded by the product ID (`hydrators/prices.ts`). Products the AI skips keep their price.
-  The same call checks the randomly assigned pack units: the AI keeps the pack, picks a fitting
-  one from `PACKAGING_OPTIONS`, or drops it ("none"). The upload clears the unit fields of
-  products without a pack. A full hydration runs this pass too
+  The same call checks the randomly assigned pack units: products with one are marked "pack?"
+  (the random pack is not shown, it anchors the answer), and the AI returns a fitting pack from
+  `PACKAGING_OPTIONS` or null (sold one by one, pack dropped). Products without a pack never get
+  one. The upload clears the unit fields of products without a pack. A full hydration runs this
+  pass too. The `pack` field is nullable, not optional: OpenAI structured outputs reject optional
+  fields (`MockTextProvider` runs every schema through `zodResponseFormat` to catch this)
 - **--only=names**: Drop variant values from variant parent names ("Boots - Black - Block Heel"
   with Black, Burgundy, ... becomes "Boots - Block Heel"; no AI), then rename every product whose
   name another product already has ("750 ml" and "750ml" count as the same). One AI call per 25

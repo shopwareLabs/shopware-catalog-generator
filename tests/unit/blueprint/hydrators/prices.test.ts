@@ -76,7 +76,7 @@ describe("hydratePrices", () => {
     const leaf = createTestCategory({ id: "leaf", name: "Ear Protection", level: 2 });
     const top = createTestCategory({ id: "top", name: "Health", children: [leaf] });
 
-    test("prices products inside the AI range and sends name, category and pack", async () => {
+    test("prices products inside the AI range and marks products with a pack", async () => {
         const provider = new MockTextProvider();
         provider.setResponse("PriceRanges", {
             prices: [
@@ -114,10 +114,11 @@ describe("hydratePrices", () => {
         expect(result.products[1]?.price).toBeGreaterThanOrEqual(399.99);
         const prompt = promptOf(provider);
         expect(prompt).toContain('Store: "test-store"');
-        expect(prompt).toContain(
-            "1. Foam Earplugs | category: Ear Protection | pack: Pack (20 Piece)"
-        );
+        expect(prompt).toContain("1. Foam Earplugs | category: Ear Protection | pack?");
         expect(prompt).toContain("2. Hearing Monitor");
+        expect(prompt).not.toContain("Hearing Monitor | pack?");
+        // The random current pack is not shown, it would anchor the answer
+        expect(prompt).not.toContain("pack: Pack");
     });
 
     test("keeps, switches or drops the pack the AI returns", async () => {
@@ -125,25 +126,34 @@ describe("hydratePrices", () => {
         provider.setResponse("PriceRanges", {
             prices: [
                 { index: 1, min: 10, max: 20, pack: "Pair (2 Piece)" },
-                { index: 2, min: 10, max: 20, pack: "none" },
+                { index: 2, min: 10, max: 20, pack: null },
                 { index: 3, min: 10, max: 20, pack: "Crate" },
                 { index: 4, min: 10, max: 20, pack: "Box" },
+                { index: 5, min: 10, max: 20, pack: "none" },
+                { index: 6, min: 10, max: 20 },
             ],
         });
         const packed = (id: string): BlueprintProduct =>
             createTestProduct({ id, metadata: { packaging: { ...ROLL } } });
-        const products = [packed("a"), packed("b"), packed("c"), createTestProduct({ id: "d" })];
+        const products = [
+            packed("a"),
+            packed("b"),
+            packed("c"),
+            createTestProduct({ id: "d" }),
+            packed("e"),
+            packed("f"),
+        ];
 
         const result = await hydratePrices(provider, { categories: [top], products }, STORE);
 
         const packs = result.products.map((p) => p.metadata.packaging?.packUnit);
-        expect(packs).toEqual(["Pair", undefined, "Roll", undefined]);
+        expect(packs).toEqual(["Pair", undefined, "Roll", undefined, undefined, "Roll"]);
         expect(result.products[0]?.metadata.packaging).toMatchObject({
             unitShortCode: "pc",
             unitName: "Piece",
             purchaseUnit: 2,
         });
-        expect(result.repacked).toBe(2);
+        expect(result.repacked).toBe(3);
         expect(promptOf(provider)).toContain("Pair (2 Piece), Set (3 Piece)");
     });
 

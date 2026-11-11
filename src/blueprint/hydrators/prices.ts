@@ -34,7 +34,7 @@ const PriceRangeSchema = z.object({
     index: z.number().int(),
     min: z.number(),
     max: z.number(),
-    /** Required by structured outputs; null for products without a pack */
+    /** Required by structured outputs; null when the product is sold one by one */
     pack: z.string().nullable(),
 });
 
@@ -59,8 +59,8 @@ export interface PriceRange {
 /** AI answer for one product: its price range and, for products with a pack, the pack */
 interface PriceAnswer {
     range: PriceRange;
-    /** Pack label from PACKAGING_OPTIONS, NO_PACK, or undefined (keep the pack) */
-    pack?: string;
+    /** Pack label from PACKAGING_OPTIONS; null or NO_PACK drops the pack, undefined keeps it */
+    pack?: string | null;
 }
 
 /** "Roll (5 Meter)" */
@@ -72,14 +72,17 @@ const PACK_CHOICES = PACKAGING_OPTIONS.map((o) =>
     describePack({ ...o, unitName: findPackagingUnit(o.unitShortCode)?.name ?? o.unitShortCode })
 );
 
-/** Packaging for a pack answer: unchanged, another option, or none */
+/**
+ * Packaging for a pack answer: unchanged, another option, or none.
+ * Products without a pack never get one; a missing answer keeps the pack.
+ */
 export function resolvePackaging(
     current: ProductPackaging | undefined,
-    answer: string | undefined
+    answer: string | null | undefined
 ): ProductPackaging | undefined {
     if (!current || answer === undefined) return current;
-    const label = answer.trim().toLowerCase();
-    if (label === NO_PACK) return undefined;
+    const label = answer?.trim().toLowerCase() ?? NO_PACK;
+    if (label === NO_PACK || label === "") return undefined;
     const option = PACKAGING_OPTIONS.find((o) => label.startsWith(o.packUnit.toLowerCase()));
     if (!option) return current;
     const unit = findPackagingUnit(option.unitShortCode);
@@ -107,11 +110,10 @@ function describeProduct(
     categories: Map<string, BlueprintCategory>
 ): string {
     const category = productCategoryName(product, categories);
-    const pack = product.metadata.packaging;
     const parts = [
         `${index}. ${product.name}`,
         category ? `category: ${category}` : "",
-        pack ? `pack: ${describePack(pack)}` : "",
+        product.metadata.packaging ? "pack?" : "",
     ];
     return parts.filter(Boolean).join(" | ");
 }
@@ -134,19 +136,19 @@ function buildMessages(
                 `Description: ${store.description}`,
                 "",
                 "Rules:",
-                "- min and max in USD for one sales unit (the whole pack if a pack is given)",
+                "- min and max in USD for one sales unit (the whole pack if you return one)",
                 "- a realistic range for this product, not for the whole category",
                 "- max at most 3 times min",
                 "- keep the index of each product",
-                "- for a product with a pack: return pack, the pack it is really sold in.",
-                `  One of: ${PACK_CHOICES.join(", ")}, or "${NO_PACK}" when it is sold`,
-                "  one by one. Price the pack you return",
-                "- pack is null for a product without a pack",
+                '- for a product marked "pack?": return a pack only when shops usually sell',
+                `  this product in it. One of: ${PACK_CHOICES.join(", ")}.`,
+                "  Most products are sold one by one: then pack is null",
+                '- pack is always null for products not marked "pack?"',
                 "",
                 "Products:",
                 ...lines,
                 "",
-                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9,"pack":null},{"index":2,"min":12,"max":20,"pack":"Pair"}]}',
+                'Return JSON: {"prices":[{"index":1,"min":4.5,"max":9,"pack":null},{"index":2,"min":12,"max":20,"pack":"Pair (2 Piece)"}]}',
             ].join("\n"),
         },
     ];
@@ -172,7 +174,7 @@ function parseAnswers(response: string, count: number): Map<number, PriceAnswer>
             .filter((p) => p.index >= 1 && p.index <= count)
             .flatMap((p) => {
                 const range = normalizePriceRange(p.min, p.max);
-                return range ? [[p.index, { range, pack: p.pack ?? undefined }] as const] : [];
+                return range ? [[p.index, { range, pack: p.pack }] as const] : [];
             })
     );
 }
